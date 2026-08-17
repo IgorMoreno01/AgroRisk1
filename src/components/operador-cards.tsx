@@ -4,9 +4,11 @@ import { cn } from "@/lib/utils";
 import type { ScoreBreakdown } from "@/lib/risk-score";
 import type { Machine, Area, Operation } from "@/lib/mock-data";
 import type { NextBestAction } from "@/lib/recommendations";
+import type { WaterGeoData } from "@/lib/external-data.types";
 import {
   Activity, Tractor, MapPin, Gauge, AlertTriangle, ArrowRight,
   Droplets, Navigation, ShieldAlert, CheckCircle2, Bell, Eye, PlayCircle,
+  Wifi, WifiOff, Loader2,
 } from "lucide-react";
 
 // ============================================================
@@ -99,12 +101,20 @@ const zoneBadge: Record<Zone, string> = {
 };
 
 export function GeoContextCard({
-  area, breakdown,
+  area, breakdown, waterGeo, loadingWater,
 }: {
   area: Area;
   breakdown: ScoreBreakdown;
+  waterGeo?: WaterGeoData | null;
+  loadingWater?: boolean;
 }) {
-  const { meters, zone } = waterMetersFrom(breakdown);
+  // Usa distância real quando disponível; fallback para derivação do mock
+  const { meters: mockMeters, zone: mockZone } = waterMetersFrom(breakdown);
+  const realDistM = waterGeo?.nearestDistanceM ?? null;
+  const meters = realDistM ?? mockMeters;
+  const zone: Zone = realDistM !== null
+    ? realDistM <= 50 ? "Crítico" : realDistM <= 150 ? "Atenção" : "Seguro"
+    : mockZone;
   // Machine X position based on water proximity: closer water => more to the right (near water)
   const machineX = zone === "Crítico" ? 58 : zone === "Atenção" ? 48 : 38;
 
@@ -177,8 +187,28 @@ export function GeoContextCard({
         </div>
       </div>
 
+      {/* Badge de fonte dos dados de hidrografia */}
+      <div className="mt-3 flex items-center gap-2">
+        {loadingWater ? (
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" /> Buscando corpos d'água…
+          </span>
+        ) : waterGeo?.source === "overpass" ? (
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-info">
+            <Wifi className="h-3 w-3" />
+            {waterGeo.features.length > 0
+              ? `${waterGeo.features.length} feição(ões) OSM · mais próxima: ${waterGeo.nearestName ?? "—"} (${meters} m)`
+              : "Sem corpos d'água num raio de 3 km (OSM)"}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <WifiOff className="h-3 w-3" /> Dados hidrográficos simulados
+          </span>
+        )}
+      </div>
+
       {/* Dados textuais */}
-      <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
         <Info icon={MapPin}    label="Área atual"  value={area.name} />
         <Info icon={Navigation} label="Tipo de área" value={area.type} />
         <Info icon={Droplets}  label="Distância até água" value={`${meters} m`} />

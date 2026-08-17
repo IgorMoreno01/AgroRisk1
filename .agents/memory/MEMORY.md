@@ -1,0 +1,1 @@
+- [External API adapters](external-api-adapters.md) — 4 adapters implementados com cache, fallback para mock e chaves só no server-side.

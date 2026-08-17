@@ -234,3 +234,48 @@ export type { RiskLevel };
 // Mapeia nome de fator → descrição do RiskFactor mock (se existir)
 export const factorDescription = (category: string): string | undefined =>
   riskFactors.find((f) => f.category === category)?.description;
+
+// ============================================================
+// Conversores: dados reais → enums internos do score engine
+// ============================================================
+
+import type { WeatherData, WaterGeoData } from "./external-data.types";
+
+/**
+ * Converte dados climáticos reais (Open-Meteo) para o enum `Weather`
+ * usado pelo score engine. Prioriza precipitação; usa código WMO como fallback.
+ */
+export function deriveWeatherFromReal(data: WeatherData): Weather {
+  const precip = data.current.precipitation; // mm/h
+  if (precip >= 8) return "forte";
+  if (precip >= 2) return "moderada";
+  if (precip > 0) return "leve";
+  // Sem chuva agora — verifica previsão horária (próximas 3h)
+  const next3h = data.hourlyForecast.slice(0, 3);
+  const maxProb = Math.max(0, ...next3h.map((h) => h.precipitationProbability));
+  if (maxProb >= 70) return "moderada";
+  if (maxProb >= 40) return "leve";
+  return "normal";
+}
+
+/**
+ * Converte distância real até corpo d'água (metros) para o enum `WaterDistance`.
+ */
+export function deriveWaterDistanceFromReal(data: WaterGeoData): WaterDistance {
+  const d = data.nearestDistanceM;
+  if (d === null || d > 150) return "acima_150";
+  if (d > 100) return "100_150";
+  if (d > 50) return "50_100";
+  return "abaixo_50";
+}
+
+/**
+ * Deriva inputs para uma operação com possibilidade de override de dados reais.
+ * Os campos fornecidos em `overrides` substituem a derivação do mock.
+ */
+export function inputsForOperationWithOverrides(
+  op: Operation,
+  overrides?: Partial<RiskInputs>,
+): RiskInputs {
+  return { ...inputsForOperation(op), ...overrides };
+}

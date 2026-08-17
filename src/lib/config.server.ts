@@ -19,8 +19,11 @@ import process from "node:process";
 export function getServerConfig() {
   return {
     nodeEnv: process.env.NODE_ENV,
-    // Add server-only values here, e.g.:
-    //   databaseUrl: process.env.DATABASE_URL,
-    //   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+    // Chave openrouteservice (https://openrouteservice.org/)
+    // Obtenha em: https://openrouteservice.org/dev/#/signup
+    orsApiKey: process.env["ORS_API_KEY"],
+    // Chave OpenTopography (https://opentopography.org/)
+    // Obtenha em: https://portal.opentopography.org/requestApiKey
+    openTopoApiKey: process.env["OPENTOPO_API_KEY"],
   };
 }

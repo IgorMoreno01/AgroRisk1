@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState, useEffect } from "react";
 import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge } from "@/components/risk-badge";
 import { RiskComposition } from "@/components/risk-composition";
@@ -10,14 +11,22 @@ import {
 import {
   getMachine, getArea, operationsByOperator,
 } from "@/lib/mock-data";
-import { scoreOperation } from "@/lib/risk-score";
+import {
+  scoreOperation, inputsForOperationWithOverrides, calculateScore,
+  deriveWeatherFromReal, deriveWaterDistanceFromReal,
+} from "@/lib/risk-score";
 import {
   recommendationsForOperation, nextBestActionForOperation,
 } from "@/lib/recommendations";
-import { AlertTriangle, Cloud, Droplets, Wind, MapPin } from "lucide-react";
+import { AlertTriangle, Cloud, Droplets, Wind, MapPin, Loader2, Wifi, WifiOff } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
+import { getWeather } from "@/lib/api/weather.functions";
+import { getWaterFeatures } from "@/lib/api/water-geo.functions";
+import { getAreaCoords } from "@/lib/area-coordinates";
+import type { WeatherData } from "@/lib/external-data.types";
+import type { WaterGeoData } from "@/lib/external-data.types";
 
 export const Route = createFileRoute("/operador")({
   head: () => ({ meta: [{ title: "AgroRisk · Operador" }] }),
@@ -34,8 +43,39 @@ function OperadorPage() {
   const operation = operationsByOperator(OPERATOR_ID)[0]!;
   const machine = getMachine(operation.machineId)!;
   const area = getArea(operation.areaId)!;
+  const coords = getAreaCoords(operation.areaId);
 
-  const breakdown = scoreOperation(operation);
+  // ---- Dados externos (carregados assincronamente) ----
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [waterGeo, setWaterGeo] = useState<WaterGeoData | null>(null);
+  const [loadingWeather, setLoadingWeather] = useState(true);
+  const [loadingWater, setLoadingWater] = useState(true);
+
+  useEffect(() => {
+    getWeather({ data: { lat: coords.lat, lon: coords.lon } })
+      .then(setWeather)
+      .catch((e) => console.warn("[Operador] weather fetch failed:", e))
+      .finally(() => setLoadingWeather(false));
+
+    getWaterFeatures({ data: { lat: coords.lat, lon: coords.lon, radiusM: 3000 } })
+      .then(setWaterGeo)
+      .catch((e) => console.warn("[Operador] water-geo fetch failed:", e))
+      .finally(() => setLoadingWater(false));
+  }, [coords.lat, coords.lon]);
+
+  // ---- Score: recalcula com dados reais quando disponíveis ----
+  const baseBreakdown = scoreOperation(operation);
+  const breakdown = (() => {
+    const weatherOverride = weather ? deriveWeatherFromReal(weather) : undefined;
+    const waterOverride = waterGeo ? deriveWaterDistanceFromReal(waterGeo) : undefined;
+    if (!weatherOverride && !waterOverride) return baseBreakdown;
+    const inputs = inputsForOperationWithOverrides(operation, {
+      ...(weatherOverride ? { weather: weatherOverride } : {}),
+      ...(waterOverride ? { waterDistance: waterOverride } : {}),
+    });
+    return calculateScore(inputs);
+  })();
+
   const score = breakdown.total;
   const level = breakdown.level;
   const isHigh = level === "alto";
@@ -48,10 +88,23 @@ function OperadorPage() {
     .sort((a, b) => b.points - a.points)
     .slice(0, 3);
 
+  // ---- Cards de condição: real quando disponível, mock como fallback ----
+  const climaValue = loadingWeather
+    ? "Carregando…"
+    : weather
+    ? weather.current.conditionLabel
+    : breakdown.parts[0].detail;
+
+  const ventoValue = loadingWeather
+    ? "Carregando…"
+    : weather
+    ? `${Math.round(weather.current.windSpeed)} km/h ${weather.current.windDirectionLabel}`
+    : "14 km/h NE";
+
   const conditions = [
-    { icon: Cloud,    label: "Clima",   value: breakdown.parts[0].detail },
+    { icon: Cloud,    label: "Clima",   value: climaValue },
     { icon: Droplets, label: "Solo",    value: area.condition },
-    { icon: Wind,     label: "Vento",   value: "14 km/h NE" },
+    { icon: Wind,     label: "Vento",   value: ventoValue },
     { icon: MapPin,   label: "Posição", value: `${area.name} · ${area.type}` },
   ];
 
@@ -97,7 +150,24 @@ function OperadorPage() {
             </div>
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {/* Badge de fonte dos dados climáticos */}
+          <div className="mt-4 flex items-center gap-2">
+            {loadingWeather ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-[11px] text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" /> Buscando dados climáticos…
+              </span>
+            ) : weather?.source === "open-meteo" ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-info/10 px-2.5 py-0.5 text-[11px] font-medium text-info">
+                <Wifi className="h-3 w-3" /> Clima via Open-Meteo · {weather.current.temperature}°C · umidade {weather.current.humidity}%
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-[11px] text-muted-foreground">
+                <WifiOff className="h-3 w-3" /> Dados climáticos simulados (API indisponível)
+              </span>
+            )}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {conditions.map((c) => (
               <div key={c.label} className="rounded-lg border border-border p-3">
                 <c.icon className="h-4 w-4 text-muted-foreground" />
@@ -144,7 +214,7 @@ function OperadorPage() {
           nextAction={nextAction}
         />
         <section id="geo" className="scroll-mt-20">
-          <GeoContextCard area={area} breakdown={breakdown} />
+          <GeoContextCard area={area} breakdown={breakdown} waterGeo={waterGeo} loadingWater={loadingWater} />
         </section>
       </div>
 
