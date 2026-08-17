@@ -1,0 +1,102 @@
+Quero integrar APIs externas ao projeto AgroGuard Vision / Sompo AgroRisk.
+
+Antes de alterar o código, analise toda a estrutura atual do projeto e identifique:
+
+* frontend;
+* backend, caso exista;
+* onde estão as telas/dashboard;
+* como os dados simulados estão sendo gerados atualmente;
+* onde está o cálculo/representação do risco;
+* quais componentes precisam ser alterados para consumir dados reais.
+
+Não remova nem quebre as funcionalidades atuais.
+
+Para o MVP, quero implementar as APIs nesta ordem:
+
+1. Open-Meteo — clima
+2. Overpass API / OpenStreetMap — rios, córregos, lagos, represas e outros dados geográficos próximos
+3. openrouteservice — rotas e alternativas
+4. OpenTopography — elevação e dados para cálculo de declividade
+
+NÃO implemente SoilGrids REST neste momento, pois a API REST está temporariamente pausada e não deve ser uma dependência operacional do MVP.
+
+### Arquitetura desejada
+
+Crie uma camada de adaptadores, mantendo cada API isolada:
+
+* ClimateAdapter
+* WaterGeoAdapter
+* RoutingAdapter
+* TerrainAdapter
+
+Os componentes da aplicação não devem chamar diretamente as APIs externas. O fluxo deve ser:
+
+Frontend → API/backend → Adapter → API externa → normalização → Risk Engine → Frontend
+
+Se o projeto atualmente não possuir backend, avalie a melhor forma de criar uma camada backend/API sem destruir a arquitetura atual.
+
+### Open-Meteo
+
+Comece implementando esta API primeiro.
+
+Ela deve receber latitude e longitude e retornar dados normalizados para o sistema, incluindo quando disponíveis:
+
+* temperatura;
+* precipitação;
+* umidade relativa;
+* velocidade/direção do vento;
+* previsão horária.
+
+Crie um endpoint interno para o frontend consumir esses dados.
+
+Não coloque chaves de API ou segredos no frontend.
+
+### Overpass / OpenStreetMap
+
+Depois implemente a consulta de objetos hidrográficos próximos à coordenada:
+
+* rios;
+* córregos;
+* lagos;
+* reservatórios;
+* represas;
+* canais.
+
+Retorne os dados em um formato interno simples e permita calcular a distância até o equipamento.
+
+### openrouteservice
+
+Depois implemente:
+
+* rota origem → destino;
+* distância;
+* duração;
+* rota alternativa quando disponível.
+
+A API key deve ficar exclusivamente em variável de ambiente/secret do Replit.
+
+Não exponha a chave no frontend.
+
+### OpenTopography
+
+Depois implemente consulta de elevação por coordenada.
+
+A API key também deve ficar exclusivamente em variável de ambiente/secret.
+
+### Requisitos importantes
+
+* usar variáveis de ambiente para todas as chaves;
+* timeout nas chamadas externas;
+* tratamento de erros;
+* retry controlado quando fizer sentido;
+* fallback para os dados simulados atuais caso uma API esteja indisponível;
+* cache para evitar chamadas desnecessárias;
+* logs úteis para debugging;
+* não fazer chamadas externas a cada renderização do React;
+* manter os dados normalizados em um formato interno único;
+* manter o dashboard atual funcionando;
+* não substituir os dados simulados até que cada integração seja testada.
+
+Primeiro faça somente a análise da arquitetura atual e me diga quais arquivos serão modificados/criados e por quê.
+
+NÃO implemente ainda. Aguarde minha confirmação.
