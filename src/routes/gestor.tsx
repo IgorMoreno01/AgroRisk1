@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -12,17 +12,28 @@ import {
   clientOptions, areaOptions, opTypeOptions, levelOptions,
   type RankingFilters,
 } from "@/lib/ranking";
-import { fleetAverageScore, fleetMachinesAtRisk } from "@/lib/risk-score";
+import {
+  fleetMachinesAtRisk,
+  deriveWeatherFromReal,
+  inputsForOperationWithOverrides,
+  calculateScore,
+  currentOperationFor,
+  inputsForOperation,
+} from "@/lib/risk-score";
 import { recommendationsForMachine } from "@/lib/recommendations";
 import { RecommendationCard } from "@/components/recommendation-card";
 import {
   Tractor, AlertTriangle, Activity, Gauge,
   TrendingUp, TrendingDown, Flame, Filter as FilterIcon, ArrowUpDown, MapPin,
+  Cloud, CloudRain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
+import { getWeather } from "@/lib/api/weather.functions";
+import { CLIENT_COORDS } from "@/lib/area-coordinates";
+import type { WeatherData } from "@/lib/external-data.types";
 
 export const Route = createFileRoute("/gestor")({
   head: () => ({ meta: [{ title: "AgroRisk · Dashboard do Gestor" }] }),
@@ -165,6 +176,22 @@ function FilterSelect<T extends string>({
   );
 }
 
+// Computes fleet average score overriding weather with real data where available.
+function fleetAvgWithWeather(clientWeather: Record<string, WeatherData>): number {
+  const scores = machines.map((m) => {
+    const op = currentOperationFor(m.id);
+    if (!op) return 0;
+    const wd = clientWeather[m.clientId];
+    if (!wd) return calculateScore(inputsForOperation(op)).total;
+    return calculateScore(
+      inputsForOperationWithOverrides(op, { weather: deriveWeatherFromReal(wd) }),
+    ).total;
+  });
+  return scores.length
+    ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length)
+    : 0;
+}
+
 function GestorPage() {
   const [clientId,     setClientId]     = useState<string>("all");
   const [level,        setLevel]        = useState<RiskLevel | "all">("all");
@@ -174,10 +201,47 @@ function GestorPage() {
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [selectedArea, setSelectedArea] = useState<Area | null>(null);
 
+  // Real weather per client, fetched in parallel on mount
+  const [clientWeather, setClientWeather] = useState<Record<string, WeatherData>>({});
+  const [weatherLoading, setWeatherLoading] = useState(true);
+
+  useEffect(() => {
+    const CLIENT_IDS = ["CL-01", "CL-02", "CL-03"] as const;
+    setWeatherLoading(true);
+    Promise.all(
+      CLIENT_IDS.map(async (cid) => {
+        const coords = CLIENT_COORDS[cid];
+        try {
+          const data = await getWeather({ data: { lat: coords.lat, lon: coords.lon } });
+          return [cid, data] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((results) => {
+      const map: Record<string, WeatherData> = {};
+      for (const r of results) {
+        if (r) map[r[0]] = r[1];
+      }
+      setClientWeather(map);
+      setWeatherLoading(false);
+    });
+  }, []);
+
   const filters: RankingFilters = { clientId, level, operationType, areaId };
 
   const monitored = machines.length;
-  const avg = fleetAverageScore();
+  // Fleet average: uses real weather when available, falls back to mock
+  const avg = fleetAvgWithWeather(clientWeather);
+  const dataSource = Object.values(clientWeather)[0]?.source ?? "mock";
+  const isRealData = !weatherLoading && dataSource === "open-meteo";
+  // Trend: historical mock days + today's score with real data
+  const trendData = useMemo(() => {
+    const history = riskTrend.slice(0, 6);
+    const today = weatherLoading ? riskTrend[riskTrend.length - 1] : avg;
+    return [...history, today];
+  }, [avg, weatherLoading]);
+
   const atRisk = fleetMachinesAtRisk();
   const critical = alerts.filter((a) => a.level === "alto" && a.status !== "resolvido").length;
 
@@ -192,14 +256,41 @@ function GestorPage() {
       <div id="topo" className="grid scroll-mt-20 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Kpi label="Máquinas monitoradas" value={String(monitored)} hint="Frota ativa hoje" icon={Tractor} tone="default" />
         <Kpi label="Operações em risco" value={String(atRisk)} hint="Score ≥ 70" icon={Activity} tone="warning" trend={{ dir: "up", value: "+12%" }} />
-        <Kpi label="Score médio da frota" value={String(avg)} hint="Escala 0–100 (calculado)" icon={Gauge} tone="success" trend={{ dir: "down", value: "-3%" }} />
+        <div className="relative">
+          <Kpi
+            label="Score médio da frota"
+            value={weatherLoading ? "…" : String(avg)}
+            hint="Escala 0–100 (calculado)"
+            icon={Gauge}
+            tone="success"
+            trend={{ dir: "down", value: "-3%" }}
+          />
+          <div className="absolute bottom-3 left-4">
+            {weatherLoading ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                <Cloud className="h-2.5 w-2.5 animate-pulse" /> Buscando clima…
+              </span>
+            ) : isRealData ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-info/40 bg-info/10 px-2 py-0.5 text-[10px] font-medium text-info">
+                <CloudRain className="h-2.5 w-2.5" /> Open-Meteo · tempo real
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                <Cloud className="h-2.5 w-2.5" /> Dados simulados
+              </span>
+            )}
+          </div>
+        </div>
         <Kpi label="Alertas críticos" value={String(critical)} hint="Em aberto" icon={AlertTriangle} tone="danger" />
       </div>
 
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
-          <SectionTitle title="Evolução do risco — últimos 7 dias" description="Score médio diário da frota monitorada" />
-          <TrendChart data={riskTrend} />
+          <SectionTitle
+            title="Evolução do risco — últimos 7 dias"
+            description={isRealData ? "Score médio diário · hoje com dados Open-Meteo em tempo real" : "Score médio diário da frota monitorada"}
+          />
+          <TrendChart data={trendData} />
         </Card>
 
         <Card className="border-secondary/40 bg-secondary/5">
