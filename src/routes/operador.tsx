@@ -24,9 +24,19 @@ import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
 import { getWeather } from "@/lib/api/weather.functions";
 import { getWaterFeatures } from "@/lib/api/water-geo.functions";
+import { getRouting } from "@/lib/api/routing.functions";
+import { getElevation } from "@/lib/api/terrain.functions";
 import { getAreaCoords } from "@/lib/area-coordinates";
-import type { WeatherData } from "@/lib/external-data.types";
-import type { WaterGeoData } from "@/lib/external-data.types";
+import type { WeatherData, WaterGeoData, RouteData, ElevationData } from "@/lib/external-data.types";
+import {
+  ClimateSection,
+  WaterFeaturesSection,
+  RoutingSection,
+  TerrainSection,
+  SoilDemoSection,
+  DataSourcesPanel,
+  RiskFactorsWithSources,
+} from "@/components/external-data-sections";
 
 export const Route = createFileRoute("/operador")({
   head: () => ({ meta: [{ title: "AgroRisk · Operador" }] }),
@@ -48,10 +58,18 @@ function OperadorPage() {
   // ---- Dados externos (carregados assincronamente) ----
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [waterGeo, setWaterGeo] = useState<WaterGeoData | null>(null);
+  const [routeData, setRouteData] = useState<RouteData | null>(null);
+  const [elevation, setElevation] = useState<ElevationData | null>(null);
   const [loadingWeather, setLoadingWeather] = useState(true);
   const [loadingWater, setLoadingWater] = useState(true);
+  const [loadingRoute, setLoadingRoute] = useState(true);
+  const [loadingTerrain, setLoadingTerrain] = useState(true);
 
   useEffect(() => {
+    // Origem simulada: ~5 km ao norte da área (pátio da fazenda)
+    const originLat = coords.lat + 0.045;
+    const originLon = coords.lon;
+
     getWeather({ data: { lat: coords.lat, lon: coords.lon } })
       .then(setWeather)
       .catch((e) => console.warn("[Operador] weather fetch failed:", e))
@@ -61,6 +79,16 @@ function OperadorPage() {
       .then(setWaterGeo)
       .catch((e) => console.warn("[Operador] water-geo fetch failed:", e))
       .finally(() => setLoadingWater(false));
+
+    getRouting({ data: { originLat, originLon, destLat: coords.lat, destLon: coords.lon } })
+      .then(setRouteData)
+      .catch((e) => console.warn("[Operador] routing fetch failed:", e))
+      .finally(() => setLoadingRoute(false));
+
+    getElevation({ data: { lat: coords.lat, lon: coords.lon } })
+      .then(setElevation)
+      .catch((e) => console.warn("[Operador] terrain fetch failed:", e))
+      .finally(() => setLoadingTerrain(false));
   }, [coords.lat, coords.lon]);
 
   // ---- Score: recalcula com dados reais quando disponíveis ----
@@ -239,6 +267,50 @@ function OperadorPage() {
             ))}
           </div>
         </Card>
+      </div>
+
+      {/* ──────────── Dados externos das APIs ──────────── */}
+
+      {/* Fontes de dados — status geral */}
+      <div id="fontes" className="mt-6 scroll-mt-20">
+        <DataSourcesPanel
+          weather={weather}
+          waterGeo={waterGeo}
+          routeData={routeData}
+          elevation={elevation}
+          loadingWeather={loadingWeather}
+          loadingWater={loadingWater}
+          loadingRoute={loadingRoute}
+          loadingTerrain={loadingTerrain}
+        />
+      </div>
+
+      {/* Condições climáticas (Open-Meteo) + Recursos hídricos (Overpass/OSM) */}
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <ClimateSection weather={weather} loading={loadingWeather} />
+        <WaterFeaturesSection waterGeo={waterGeo} loading={loadingWater} />
+      </div>
+
+      {/* Rota operacional (openrouteservice) + Terreno (OpenTopography) */}
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <RoutingSection routeData={routeData} loading={loadingRoute} />
+        <TerrainSection elevation={elevation} loading={loadingTerrain} />
+      </div>
+
+      {/* Análise do Solo (SoilGrids — demonstração) */}
+      <div className="mt-6">
+        <SoilDemoSection />
+      </div>
+
+      {/* Fatores de risco com origem dos dados */}
+      <div className="mt-6">
+        <RiskFactorsWithSources
+          breakdown={breakdown}
+          weather={weather}
+          waterGeo={waterGeo}
+          elevation={elevation}
+          routeData={routeData}
+        />
       </div>
 
       {/* Histórico recente */}

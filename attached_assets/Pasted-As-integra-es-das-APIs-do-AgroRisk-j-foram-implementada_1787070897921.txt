@@ -1,0 +1,349 @@
+As integrações das APIs do AgroRisk já foram implementadas no backend.
+
+Agora quero que você faça a integração completa dessas informações com o FRONTEND/DASHBOARD.
+
+O objetivo é que o dashboard mostre claramente que o sistema está realmente consumindo e utilizando as APIs externas.
+
+NÃO quero apenas criar cards estáticos. Para as APIs que já estão funcionando, os dados exibidos no frontend devem vir das chamadas reais ao backend.
+
+As integrações reais são:
+
+1. Open-Meteo
+2. Overpass API / OpenStreetMap
+3. openrouteservice
+4. OpenTopography
+
+O SoilGrids é a exceção:
+
+* NÃO fazer chamada real ao SoilGrids REST;
+* usar dados ilustrativos/mockados;
+* identificar claramente como "Demonstração" ou "Integração planejada".
+
+==================================================
+
+1. OPEN-METEO — CLIMA
+   ==================================================
+
+Criar/atualizar uma seção no dashboard:
+
+"Condições Climáticas"
+
+Mostrar dados REAIS vindos da API:
+
+* temperatura atual;
+* umidade relativa;
+* precipitação;
+* velocidade do vento;
+* direção do vento;
+* previsão de chuva;
+* previsão de temperatura, se disponível.
+
+Mostrar também:
+
+Fonte: Open-Meteo
+Última atualização: [timestamp real da consulta]
+
+Os valores não devem ser hardcoded.
+
+Se o backend já possui um endpoint para clima, utilizar esse endpoint.
+
+==================================================
+2. OVERPASS / OPENSTREETMAP — ÁGUA E GEODADOS
+=============================================
+
+Criar/atualizar uma seção:
+
+"Recursos Hídricos Próximos"
+
+Mostrar dados REAIS retornados pelo backend:
+
+* rios;
+* córregos;
+* lagos;
+* represas;
+* reservatórios;
+* canais;
+* distância até o equipamento/local monitorado.
+
+Exemplo visual:
+
+Recursos hídricos próximos
+
+Rio X
+Distância: 420 m
+
+Córrego Y
+Distância: 1,2 km
+
+Mostrar:
+
+Fonte: OpenStreetMap / Overpass API
+Última atualização: [timestamp]
+
+Se possível, mostrar esses elementos também no mapa.
+
+NÃO inventar nomes ou distâncias quando a API estiver disponível.
+
+==================================================
+3. OPENROUTESERVICE — ROTAS
+===========================
+
+Criar/atualizar uma seção:
+
+"Rota Operacional"
+
+Mostrar os dados REAIS retornados pelo openrouteservice:
+
+* origem;
+* destino;
+* distância;
+* duração;
+* rota;
+* rota alternativa, quando disponível.
+
+No mapa, desenhar a rota retornada pela API.
+
+Mostrar:
+
+Fonte: openrouteservice
+Última atualização: [timestamp]
+
+Se já existir um mapa no projeto, reutilizar a biblioteca existente.
+
+NÃO criar um segundo sistema de mapas sem necessidade.
+
+==================================================
+4. OPENTOPOGRAPHY — RELEVO
+==========================
+
+Criar/atualizar uma seção:
+
+"Condições do Terreno"
+
+Mostrar dados REAIS:
+
+* elevação;
+* coordenada consultada;
+* modelo/fonte utilizado, quando disponível;
+* variação de altitude ou declividade somente se isso já estiver sendo calculado corretamente.
+
+Mostrar:
+
+Fonte: OpenTopography
+Última atualização: [timestamp]
+
+Não inventar valores.
+
+==================================================
+5. SOILGRIDS — DEMONSTRAÇÃO
+===========================
+
+Criar uma seção:
+
+"Análise do Solo"
+
+Como o SoilGrids ainda não está sendo consultado em tempo real, utilizar dados ilustrativos.
+
+Exemplo:
+
+Argila: 32%
+Areia: 45%
+Silte: 23%
+Carbono orgânico: 2,1%
+pH: 5,8
+Densidade aparente: 1,35 g/cm³
+Profundidade: 0–30 cm
+
+Identificar claramente:
+
+"DEMONSTRAÇÃO — DADOS ILUSTRATIVOS"
+
+Fonte prevista:
+SoilGrids / ISRIC
+
+Status:
+Integração planejada — SoilGrids WCS
+
+NÃO mostrar esses valores como dados reais.
+
+==================================================
+6. INDICAR QUE AS APIS ESTÃO SENDO UTILIZADAS
+=============================================
+
+Quero uma área no dashboard chamada:
+
+"Fontes de Dados"
+
+Ela deve mostrar o status das integrações:
+
+✓ Open-Meteo
+Clima
+Status: Conectado
+
+✓ OpenStreetMap / Overpass
+Água e geodados
+Status: Conectado
+
+✓ openrouteservice
+Rotas
+Status: Conectado
+
+✓ OpenTopography
+Relevo
+Status: Conectado
+
+◐ SoilGrids / ISRIC
+Solo
+Status: Demonstração / integração planejada
+
+IMPORTANTE:
+O status "Conectado" deve representar que o backend conseguiu consultar a API recentemente.
+
+Se uma API estiver indisponível:
+
+⚠ API indisponível
+Usando último dado armazenado / fallback
+
+Não mostrar "Conectado" se a chamada realmente estiver falhando.
+
+==================================================
+7. TIMESTAMP E ORIGEM
+=====================
+
+Em cada seção de dados reais, mostrar discretamente:
+
+Fonte: [nome da API]
+Atualizado em: [data/hora]
+
+Isso é importante para demonstrar durante a apresentação que os dados não são simplesmente mockados.
+
+==================================================
+8. MAPA
+=======
+
+Integrar os dados disponíveis ao mapa atual.
+
+Quero, quando possível:
+
+📍 localização do equipamento
+
+💧 corpos d'água próximos
+
+🛣️ rota do openrouteservice
+
+⚠️ áreas de risco existentes no sistema
+
+⛰️ informações de relevo quando aplicável
+
+Não criar uma nova biblioteca de mapas se o projeto já possui uma.
+
+==================================================
+9. RISK ENGINE
+==============
+
+Não alterar as regras atuais do Risk Engine sem necessidade.
+
+O frontend deve mostrar de onde vêm os fatores utilizados pelo risco.
+
+Por exemplo:
+
+RISCO ATUAL
+78 — ALTO
+
+Principais fatores:
+
+🌧️ Precipitação
+Fonte: Open-Meteo
+Valor: [valor real]
+
+💧 Proximidade de água
+Fonte: Overpass / OSM
+Valor: [valor real]
+
+⛰️ Elevação
+Fonte: OpenTopography
+Valor: [valor real]
+
+🛣️ Condição da rota
+Fonte: openrouteservice
+Valor: [valor real]
+
+🌱 Solo
+Fonte: SoilGrids
+Status: Demonstração
+
+Os valores devem ser os mesmos dados reais utilizados pelo backend/Risk Engine quando isso já estiver implementado.
+
+NÃO inventar uma relação de causa entre um dado e o score se o Risk Engine atual não possuir essa regra.
+
+==================================================
+10. NÃO DUPLICAR DADOS
+======================
+
+Não criar dados mockados paralelos para Open-Meteo, Overpass, openrouteservice ou OpenTopography.
+
+O frontend deve consumir os dados do backend.
+
+Fluxo:
+
+API externa
+↓
+Backend Adapter
+↓
+Backend endpoint
+↓
+Frontend
+↓
+Dashboard
+
+Não:
+
+Frontend
+↓
+API externa
+
+==================================================
+11. RESPONSIVIDADE E DESIGN
+===========================
+
+Manter o design visual atual do projeto.
+
+Não reconstruir o dashboard inteiro.
+
+Adicionar as informações de maneira organizada e consistente com os cards/componentes existentes.
+
+Priorizar:
+
+* clareza;
+* leitura rápida;
+* indicação da fonte;
+* indicação de atualização;
+* diferenciação entre dado real e demonstração.
+
+==================================================
+12. VERIFICAÇÃO FINAL
+=====================
+
+Depois da implementação, testar cada integração individualmente.
+
+Preciso conseguir abrir o dashboard e verificar:
+
+1. Open-Meteo → dados reais de clima
+2. Overpass → dados reais de água/geodados
+3. openrouteservice → rota real
+4. OpenTopography → elevação real
+5. SoilGrids → demonstração claramente identificada
+
+No final, me informe:
+
+* quais arquivos foram alterados;
+* quais endpoints do backend o frontend está consumindo;
+* quais dados são reais;
+* quais dados são demonstrativos;
+* quais APIs estão funcionando;
+* quais APIs precisam de configuração adicional;
+* como testar cada integração.
+
+NÃO remova funcionalidades existentes.
+NÃO substitua dados reais por mocks.
+NÃO apresente dados mockados como reais.
