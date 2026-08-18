@@ -1,0 +1,99 @@
+Revise a implementação atual das APIs antes de fazer novas alterações.
+
+Encontrei dois pontos que precisam ser corrigidos:
+
+### 1. OpenTopography
+
+O projeto Sompo AgroRisk definiu OpenTopography como a fonte oficial de relevo/elevação do MVP.
+
+Atualmente você está usando:
+
+"OpenTopography → Open-Elevation"
+
+e utilizando Open-Elevation quando `OPENTOPO_API_KEY` não está configurada.
+
+Não quero que Open-Elevation seja apresentada como parte da integração OpenTopography.
+
+Quero que:
+
+* OpenTopography seja a fonte principal e oficial de elevação;
+* `OPENTOPO_API_KEY` seja utilizada para as consultas;
+* o dashboard mostre claramente "OpenTopography" como fonte;
+* o TerrainAdapter utilize OpenTopography;
+* se a chave não estiver configurada, mostre "OpenTopography — configuração pendente" ou utilize cache/último dado disponível;
+* NÃO apresentar dados do Open-Elevation como se fossem dados do OpenTopography.
+
+Não é necessário remover todo o código de Open-Elevation imediatamente se ele estiver sendo utilizado como fallback, mas ele deve ser claramente identificado como uma fonte alternativa e NÃO como OpenTopography.
+
+Se houver um fallback, o dashboard deve indicar:
+
+"Fallback — OpenTopography não configurado"
+
+e não:
+
+"OpenTopography conectado".
+
+### 2. openrouteservice
+
+O openrouteservice deve ser a fonte oficial de rotas.
+
+Quando `ORS_API_KEY` estiver configurada:
+
+* consultar o openrouteservice;
+* mostrar distância real;
+* mostrar duração real;
+* mostrar rota real;
+* mostrar rota alternativa quando disponível;
+* desenhar a rota real no mapa.
+
+Quando `ORS_API_KEY` NÃO estiver configurada:
+
+* não apresentar distância euclidiana como se fosse uma rota real;
+* identificar claramente como "Fallback — rota real indisponível";
+* informar no dashboard que é necessário configurar `ORS_API_KEY`.
+
+### 3. Painel "Fontes de Dados"
+
+Mantenha o painel de status, mas faça os status refletirem a fonte realmente utilizada.
+
+Exemplo:
+
+Open-Meteo
+🟢 Conectado — dado real
+
+Overpass / OpenStreetMap
+🟢 Conectado — dado real
+
+openrouteservice
+🟢 Conectado — dado real
+
+OpenTopography
+🟢 Conectado — dado real
+
+SoilGrids
+⚪ Demonstração — dados ilustrativos
+
+Se OpenTopography estiver sem chave:
+
+OpenTopography
+🟡 Configuração pendente — API Key necessária
+
+Se openrouteservice estiver sem chave:
+
+openrouteservice
+🟡 Configuração pendente — API Key necessária
+
+Não marque uma API como "Conectada" quando estiver usando outra fonte como substituta.
+
+### 4. Não alterar as outras integrações
+
+Open-Meteo e Overpass/OSM já estão funcionando com dados reais. Não altere essas integrações sem necessidade.
+
+SoilGrids deve continuar como DEMONSTRAÇÃO — DADOS ILUSTRATIVOS.
+
+Depois da correção, informe exatamente:
+
+* qual fonte está sendo utilizada para elevação;
+* qual fonte está sendo utilizada para rotas;
+* quais APIs estão realmente conectadas;
+* quais Secrets ainda precisam ser configurados.

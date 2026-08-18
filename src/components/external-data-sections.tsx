@@ -307,11 +307,11 @@ export function RoutingSection({
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : routeData?.source === "openrouteservice" ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success">
-              <Wifi className="h-3 w-3" /> Conectado
+              <Wifi className="h-3 w-3" /> Conectado — dado real
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
-              <WifiOff className="h-3 w-3" /> {routeData ? "Fallback (sem chave ORS)" : "Indisponível"}
+              <WifiOff className="h-3 w-3" /> Configuração pendente — ORS_API_KEY
             </span>
           )
         }
@@ -319,8 +319,30 @@ export function RoutingSection({
 
       {loading ? (
         <LoadingState label="Calculando rota via openrouteservice…" />
-      ) : !routeData ? (
-        <p className="text-sm text-muted-foreground py-4">Dados de rota não disponíveis.</p>
+      ) : !routeData || routeData.source === "mock" ? (
+        /* Sem chave ORS — não exibir distância euclidiana como se fosse rota real */
+        <div className="py-2 space-y-3">
+          <div className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+            <div>
+              <div className="text-sm font-semibold text-foreground">Rota real indisponível</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                O openrouteservice requer a chave <code className="font-mono bg-muted px-1 rounded">ORS_API_KEY</code>.
+                Sem ela, nenhuma rota é calculada — distâncias estimadas não são exibidas para evitar dados enganosos.
+              </p>
+              <div className="mt-2 text-xs text-muted-foreground">
+                Para ativar: adicione <code className="font-mono bg-muted px-1 rounded">ORS_API_KEY</code> nos Secrets do Replit
+                com sua chave de <strong>openrouteservice.org</strong>.
+              </div>
+            </div>
+          </div>
+          <SourceRow
+            icon={Route}
+            label="openrouteservice"
+            source="openrouteservice.org — ORS_API_KEY necessária"
+            real={false}
+          />
+        </div>
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -377,20 +399,13 @@ export function RoutingSection({
             </div>
           )}
 
-          {routeData.source === "mock" && (
-            <div className="mt-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
-              <Info className="mr-1 inline h-3 w-3" />
-              Distância calculada por distância euclidiana (fallback). Configure <code className="font-mono">ORS_API_KEY</code> para rota real.
-            </div>
-          )}
-
           <div className="mt-3">
             <SourceRow
               icon={Route}
               label="openrouteservice"
-              source="openrouteservice.org — requer ORS_API_KEY"
+              source="openrouteservice.org — ORS_API_KEY configurada"
               timestamp={routeData.fetchedAt}
-              real={routeData.source === "openrouteservice"}
+              real={true}
             />
           </div>
         </>
@@ -463,21 +478,21 @@ export function TerrainSection({
     <Card>
       <SectionTitle
         title="Condições do Terreno"
-        description="Elevação e declividade — OpenTopography / Open-Elevation"
+        description="Elevação e declividade — OpenTopography (fonte oficial)"
         action={
           loading ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : elevation?.source === "opentopography" ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success">
-              <Wifi className="h-3 w-3" /> OpenTopography
+              <Wifi className="h-3 w-3" /> OpenTopography — dado real
             </span>
           ) : elevation?.source === "open-elevation" ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-[11px] font-medium text-info">
-              <Wifi className="h-3 w-3" /> Open-Elevation
+            <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
+              <WifiOff className="h-3 w-3" /> Fallback — OpenTopography não configurada
             </span>
           ) : elevation?.source === "mock" ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 text-[11px] font-medium text-warning">
-              <WifiOff className="h-3 w-3" /> Fallback
+              <WifiOff className="h-3 w-3" /> Sem dados de relevo
             </span>
           ) : null
         }
@@ -534,6 +549,19 @@ export function TerrainSection({
             </div>
           )}
 
+          {elevation.source === "open-elevation" && (
+            <div className="mt-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+              <Info className="mr-1 inline h-3 w-3" />
+              Estes dados são do <strong>Open-Elevation</strong> (API pública gratuita), <em>não</em> do OpenTopography.
+              Configure <code className="font-mono">OPENTOPO_API_KEY</code> para obter dados reais do OpenTopography.
+            </div>
+          )}
+          {elevation.source === "mock" && (
+            <div className="mt-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+              <Info className="mr-1 inline h-3 w-3" />
+              Nenhuma API de elevação disponível. Configure <code className="font-mono">OPENTOPO_API_KEY</code> para dados reais.
+            </div>
+          )}
           <div className="mt-3">
             <SourceRow
               icon={Mountain}
@@ -541,18 +569,18 @@ export function TerrainSection({
                 elevation.source === "opentopography"
                   ? "OpenTopography"
                   : elevation.source === "open-elevation"
-                  ? "Open-Elevation (fallback público)"
-                  : "Mock (ambas APIs indisponíveis)"
+                  ? "Open-Elevation (fallback — NÃO é OpenTopography)"
+                  : "Dados simulados (nenhuma API configurada)"
               }
               source={
                 elevation.source === "opentopography"
-                  ? "opentopography.org — requer OPENTOPO_API_KEY"
+                  ? "opentopography.org — OPENTOPO_API_KEY configurada"
                   : elevation.source === "open-elevation"
                   ? "api.open-elevation.com — gratuito, sem chave"
-                  : "dados simulados"
+                  : "mock interno"
               }
               timestamp={elevation.fetchedAt}
-              real={elevation.source !== "mock"}
+              real={elevation.source === "opentopography"}
             />
           </div>
         </>
@@ -628,7 +656,8 @@ function SoilMetric({ label, value }: { label: string; value: string }) {
 type IntegrationStatus =
   | { state: "loading" }
   | { state: "connected"; source: string; timestamp: string }
-  | { state: "fallback"; reason: string }
+  | { state: "pending"; reason: string }   // chave não configurada
+  | { state: "fallback"; reason: string }  // API disponível mas retornou outra fonte
   | { state: "demo" };
 
 function statusFromSource(
@@ -680,12 +709,19 @@ function IntegrationRow({
               </div>
             )}
           </div>
+        ) : status.state === "pending" ? (
+          <div className="text-right">
+            <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+              <AlertTriangle className="h-3 w-3" /> Configuração pendente
+            </span>
+            <div className="mt-0.5 text-[10px] text-muted-foreground max-w-[180px]">{status.reason}</div>
+          </div>
         ) : status.state === "fallback" ? (
           <div className="text-right">
             <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
               <AlertTriangle className="h-3 w-3" /> Fallback
             </span>
-            <div className="mt-0.5 text-[10px] text-muted-foreground max-w-[160px]">{status.reason}</div>
+            <div className="mt-0.5 text-[10px] text-muted-foreground max-w-[180px]">{status.reason}</div>
           </div>
         ) : (
           <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
@@ -728,19 +764,15 @@ export function DataSourcesPanel({
     ? { state: "loading" }
     : routeData?.source === "openrouteservice"
     ? { state: "connected", source: "openrouteservice", timestamp: routeData.fetchedAt }
-    : routeData?.source === "mock"
-    ? { state: "fallback", reason: "ORS_API_KEY não configurada — usando cálculo euclidiano" }
-    : { state: "fallback", reason: "Dados não carregados" };
+    : { state: "pending", reason: "ORS_API_KEY necessária — adicione nos Secrets do Replit" };
 
   const terrainStatus: IntegrationStatus = loadingTerrain
     ? { state: "loading" }
     : elevation?.source === "opentopography"
     ? { state: "connected", source: "opentopography", timestamp: elevation.fetchedAt }
     : elevation?.source === "open-elevation"
-    ? { state: "connected", source: "open-elevation", timestamp: elevation.fetchedAt }
-    : elevation?.source === "mock"
-    ? { state: "fallback", reason: "Ambas APIs indisponíveis — dados simulados" }
-    : { state: "fallback", reason: "Dados não carregados" };
+    ? { state: "pending", reason: "OPENTOPO_API_KEY não configurada — usando Open-Elevation como alternativa" }
+    : { state: "pending", reason: "OPENTOPO_API_KEY necessária — adicione nos Secrets do Replit" };
 
   return (
     <Card>
@@ -804,9 +836,10 @@ const CATEGORY_META: Record<string, {
   },
   terrain: {
     icon: "⛰️",
+    // fonte real = apenas opentopography; open-elevation é fallback, mock é simulado
     apiSource: "OpenTopography",
     apiLabel: "opentopography.org",
-    isReal: (_, _2, el) => el !== null && el.source !== "mock",
+    isReal: (_, _2, el) => el?.source === "opentopography",
   },
   speed: {
     icon: "🚜",
