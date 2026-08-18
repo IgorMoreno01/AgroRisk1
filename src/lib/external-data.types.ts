@@ -66,6 +66,10 @@ export interface WaterFeature {
 
 export interface WaterGeoData {
   source: "overpass" | "mock";
+  /** URL do servidor Overpass que respondeu (ex: "overpass-api.de"). Null se mock. */
+  serverUsed?: string | null;
+  /** True se o servidor principal falhou e um dos fallbacks foi usado. */
+  usedFallbackServer?: boolean;
   lat: number;
   lon: number;
   radiusM: number;
