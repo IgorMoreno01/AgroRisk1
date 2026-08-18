@@ -22,9 +22,11 @@ const OVERPASS_SERVERS = [
 // Códigos HTTP que justificam tentar o próximo servidor (não é erro permanente de query)
 const RETRYABLE_STATUS = new Set([406, 429, 500, 502, 503, 504]);
 
-// Timeout por servidor. Os servidores de fallback (kumi, private.coffee) aceitam TCP
-// mas não respondem da rede Replit — timeout curto evita bloquear o dashboard 15s por servidor.
-const TIMEOUT_MS = 12_000;
+// A query Overpass usa [timeout:20] internamente — o cliente precisa de pelo menos esse
+// valor mais margem de rede. 12s abortava antes do servidor terminar. 25s dá folga segura.
+// Fallbacks (kumi, private.coffee) não respondem da rede Replit, então 6s é suficiente
+// para detectar o timeout sem bloquear o dashboard.
+const TIMEOUT_MS = 25_000;
 const FALLBACK_TIMEOUT_MS = 6_000;
 const CACHE_TTL_S = 30 * 60; // 30 minutos (dados geográficos mudam pouco)
 const DEFAULT_RADIUS_M = 5_000;
