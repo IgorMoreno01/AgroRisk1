@@ -6,7 +6,9 @@
 import { cacheOrFetch } from "../cache.server";
 import type { RouteData, Route, RouteStep } from "../external-data.types";
 
-const ORS_BASE = "https://api.openrouteservice.org/v2/directions/driving-hgv/json";
+// driving-car cobre estradas rurais e agrícolas (driving-hgv exige vias certificadas
+// para veículos pesados — as coordenadas de fazenda raramente estão nessa rede)
+const ORS_BASE = "https://api.openrouteservice.org/v2/directions/driving-car/json";
 const TIMEOUT_MS = 10_000;
 const CACHE_TTL_S = 15 * 60; // 15 minutos
 

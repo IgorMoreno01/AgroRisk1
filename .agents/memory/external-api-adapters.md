@@ -1,6 +1,6 @@
 ---
 name: External API adapters
-description: Arquitetura e decisões dos 4 adapters de API externa do AgroRisk.
+description: Arquitetura e decisões dos 4 adapters de API externa do AgroRisk, incluindo armadilhas conhecidas.
 ---
 
 ## Regra geral
@@ -11,7 +11,7 @@ Nunca chamar APIs externas diretamente do frontend.
 - `src/lib/adapters/climate.server.ts` — ClimateAdapter (Open-Meteo, sem chave)
 - `src/lib/adapters/water-geo.server.ts` — WaterGeoAdapter (Overpass/OSM, sem chave)
 - `src/lib/adapters/routing.server.ts` — RoutingAdapter (openrouteservice, chave `ORS_API_KEY`)
-- `src/lib/adapters/terrain.server.ts` — TerrainAdapter (OpenTopography com `OPENTOPO_API_KEY`; fallback público Open-Elevation sem chave)
+- `src/lib/adapters/terrain.server.ts` — TerrainAdapter (OpenTopography, chave `OPENTOPO_API_KEY`; fallback Open-Elevation)
 
 ## Server functions (endpoints internos)
 - `src/lib/api/weather.functions.ts` → `getWeather({ data: { lat, lon } })`
@@ -28,11 +28,29 @@ Nunca chamar APIs externas diretamente do frontend.
 ## Coordenadas aproximadas (mock GPS)
 `src/lib/area-coordinates.ts` — lookup por areaId/clientId. Sorriso/MT, Cascavel/PR, Rio Verde/GO.
 
-## Integração no dashboard
-`src/routes/operador.tsx` — usa `useEffect` + `useState` para buscar clima e hidrografia.
+## Armadilhas conhecidas
+
+### OpenTopography
+- `outputFormat=JSON` com SRTMGL3 retorna `application/octet-stream` (GeoTIFF binário) → `res.json()` falha com HTTP 400 em algumas combinações.
+- **Fix aplicado**: usar `outputFormat=AAIGrid` (ASCII puro, parseável) + bounding box mínima de `0.011°` em cada lado (total 0.022°). Box menor causa HTTP 400.
+- Parser AAIGrid implementado em `parseAAIGrid()` no mesmo arquivo.
+
+### openrouteservice
+- Perfil `driving-hgv` não encontra pontos roteáveis em áreas rurais/agrícolas (raio máximo 350m sem estrada HGV certificada).
+- **Fix aplicado**: usar perfil `driving-car` que cobre estradas rurais.
+- A origem simulada (+0.045° de offset) pode cair em área sem cobertura — testar sempre com curl antes de aumentar offset.
+
+### Overpass / OSM
+- HTTP 406 aparece intermitentemente (rate limit ou query format). Adapter já tem fallback para mock.
+
+## Integração no dashboard Operador
+`src/routes/operador.tsx` — usa `useEffect` + `useState` para buscar clima, hidrografia, rota e elevação.
 Score recalculado com dados reais via `inputsForOperationWithOverrides` + `deriveWeatherFromReal` + `deriveWaterDistanceFromReal`.
-Badges indicam fonte real (Open-Meteo/OSM) ou fallback simulado.
 
-**Why:** Adapters isolados permitem trocar cada API sem tocar no frontend. Fallback para mock garante que o dashboard nunca quebra por indisponibilidade de API. Chaves ficam exclusivamente no server-side (`.server.ts`).
+## Componente de dados externos
+`src/components/external-data-sections.tsx` — 7 seções: ClimateSection, WaterFeaturesSection, RoutingSection, TerrainSection, SoilDemoSection, DataSourcesPanel, RiskFactorsWithSources.
+Status "Conectado" só aparece quando `source` é a API real (não fallback).
 
-**How to apply:** Ao adicionar nova API, criar adapter em `adapters/*.server.ts`, server fn em `api/*.functions.ts`, e só então integrar no componente via useEffect.
+**Why:** Adapters isolados permitem trocar cada API sem tocar no frontend. Fallback para mock garante que o dashboard nunca quebra por indisponibilidade de API.
+
+**How to apply:** Ao adicionar nova API, criar adapter em `adapters/*.server.ts`, server fn em `api/*.functions.ts`, e só então integrar no componente via useEffect. Testar sempre com curl direto antes de codificar.
