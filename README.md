@@ -1,244 +1,76 @@
-# AgroGuard Vision
+# AgroGuard Vision (AgroRisk)
 
-Crie a primeira versão visual do MVP de uma plataforma web chamada AgroRisk.
+Plataforma web de monitoramento de risco agrícola com dashboards por perfil,
+score determinístico e integrações server-side com dados climáticos,
+hidrográficos, de rota e de terreno.
 
-OBJETIVO DESTA ETAPA
+## Documentação principal
 
-Criar apenas a estrutura essencial visual do sistema, com dados simulados e telas navegáveis.
+Consulte [`docs/arquitetura-da-solucao.md`](docs/arquitetura-da-solucao.md) para
+a documentação de ponta a ponta:
 
-Não implementar integrações externas, IA real, telemetria real, GPS real, APIs externas, Kafka, RabbitMQ, InfluxDB ou sensores.
+- arquitetura e fluxo de inicialização;
+- rotas, dashboards e perfis;
+- domínio, score e recomendações;
+- autenticação e autorização;
+- APIs externas, contratos, cache e fallbacks;
+- segurança, configuração do Replit e observabilidade;
+- limitações, roadmap e checklist de manutenção.
 
-A plataforma deve ter aparência profissional inspirada em sistemas modernos de monitoramento agrícola, telemetria e gestão de risco, mas com escopo inicial simples.
+## Estado atual do MVP
 
-CRIAR LAYOUT GERAL DA APLICAÇÃO
+O projeto começou como um protótipo visual com dados simulados. Atualmente,
+continua sem banco, telemetria, GPS live, IA, filas ou sensores, mas já possui
+adapters server-side para:
 
-Sidebar lateral fixa.
+- Open-Meteo (clima);
+- Overpass/OpenStreetMap (hidrografia);
+- openrouteservice (rotas);
+- OpenTopography e fallback Open-Elevation (terreno).
 
-Header superior com nome da plataforma e usuário logado.
+As APIs externas são chamadas somente no servidor. Cada resposta é normalizada,
+armazenada em cache em memória por TTL e possui fallback explicitamente
+identificado na interface. SoilGrids permanece apenas demonstrativo.
 
-Área principal com cards, tabelas e painéis.
+Ainda não estão implementados o mini-mapa com geometria real da rota e o tempo
+restante da operação baseado na rota real. Esses itens são roadmap.
 
-Visual corporativo, limpo, moderno e responsivo.
+## Perfis
 
-Alto contraste e boa legibilidade.
+- **Gestor:** visão de frota, clientes, áreas, clima, rankings e recomendações.
+- **Operador:** operação atual, score, alertas e contexto geográfico.
+- **Consultor/Corretor:** análise consolidada e explicação para o cliente.
+- **Admin/Sompo:** visão consolidada das entidades e indicadores.
 
-CRIAR IDENTIDADE VISUAL
+## Execução local/Replit
 
-Criar identidade visual com estilo corporativo, agrícola e tecnológico.
-
-Usar a seguinte paleta:
-
-Verde principal: #2E7D32
-
-Azul secundário: #1976D2
-
-Amarelo de alerta: #F9A825
-
-Vermelho de risco crítico: #D32F2F
-
-Fundo geral: #F5F7FA
-
-Cards e superfícies: #FFFFFF
-
-Bordas e divisórias: #D9E1E7
-
-Texto principal: #1F2937
-
-Texto secundário: #6B7280
-
-Aplicação das cores:
-
-Verde = risco baixo / status normal
-
-Amarelo = risco médio / atenção
-
-Vermelho = risco alto / crítico
-
-Azul = elementos institucionais, navegação e destaques secundários
-
-A interface deve ter:
-
-alto contraste;
-
-ótima legibilidade;
-
-visual moderno e profissional;
-
-aparência próxima de plataformas corporativas de monitoramento agrícola.
-
-Também utilizar:
-
-cards com bordas arredondadas;
-
-ícones;
-
-badges de status;
-
-gráficos simples;
-
-tabelas modernas com boa hierarquia visual.
-
-CRIAR NAVEGAÇÃO POR PERFIS
-
-Criar uma tela inicial simples de seleção de perfil, simulando login, com os seguintes perfis:
-
-Gestor
-
-Operador
-
-Consultor/Corretor
-
-Admin/Sompo
-
-Cada perfil deve acessar uma visão diferente da plataforma.
-
-CRIAR DASHBOARD DO GESTOR
-
-O dashboard do gestor deve ter:
-
-Cards de KPI no topo:
-
-Máquinas monitoradas
-
-Operações em risco
-
-Score médio da frota
-
-Alertas críticos
-
-Tabela de ranking de risco por equipamento.
-
-Tabela ou lista de ranking de risco por área.
-
-Badges de risco: baixo, médio e alto.
-
-Gráfico simples de evolução do risco nos últimos dias.
-
-Dados totalmente simulados.
-
-CRIAR TELA DO OPERADOR
-
-A tela do operador deve ser simples e direta:
-
-Status da operação atual.
-
-Equipamento em uso.
-
-Score de risco atual.
-
-Alerta visual caso o risco seja alto.
-
-Recomendação prática simulada, como:
-
-reduzir velocidade;
-
-evitar rota próxima de água;
-
-aguardar melhora climática.
-
-Não criar GPS real. Apenas simular localização e risco.
-
-CRIAR TELA DO CONSULTOR/CORRETOR
-
-A tela do consultor deve ter:
-
-Resumo do cliente.
-
-Equipamentos com maior risco.
-
-Principais fatores de risco.
-
-Recomendações preventivas em linguagem objetiva.
-
-Um bloco visual chamado “Explicação para o cliente”, com texto simulado.
-
-CRIAR TELA ADMIN/SOMPO
-
-A tela admin deve exibir:
-
-Lista de máquinas cadastradas.
-
-Lista de clientes.
-
-Lista de áreas/regiões.
-
-Lista de operações simuladas.
-
-Sem necessidade de CRUD completo nesta etapa. Apenas visualização organizada.
-
-CRIAR DADOS SIMULADOS
-
-Criar dados fictícios para:
-
-5 máquinas agrícolas.
-
-3 clientes/fazendas.
-
-4 áreas/regiões.
-
-8 operações.
-
-Scores de risco entre 0 e 100.
-
-Alertas de risco.
-
-Recomendações simuladas.
-
-RESTRIÇÕES IMPORTANTES
-
-Não criar funcionalidades avançadas ainda.
-
-Não criar integrações externas.
-
-Não criar IA real nesta etapa.
-
-Não criar telemetria em tempo real.
-
-Não criar app mobile nativo.
-
-Não criar fluxo de pagamento.
-
-Não criar funcionalidades fora do escopo.
-
-Priorizar estabilidade, visual profissional e navegação clara.
-
-RESULTADO ESPERADO
-
-Ao final desta etapa, quero uma plataforma visualmente convincente, com:
-
-telas navegáveis por perfil;
-
-dados simulados;
-
-dashboards;
-
-cards de KPI;
-
-rankings visuais;
-
-alertas simples.
-
-O objetivo é validar a aparência e a estrutura inicial antes de adicionar lógica real de score, ranking e recomendações com IA.
-
-This project was built with [Lovable](https://lovable.dev).
-
-**Live app**: https://agro-visionv1.lovable.app
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/0b234084-aa5d-40e8-9d24-43c60b3e1443).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+O workflow configurado é `Start application`, com `bun run dev` na porta 5000.
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+bun install
+bun run dev
+bun run build
+bun run lint
+bun run format
 ```
+
+O servidor escuta em `0.0.0.0:5000`. Configure os Secrets do Replit
+`ORS_API_KEY`, `OPENTOPO_API_KEY` e `AUTH_SESSION_SECRET` quando quiser
+habilitar as fontes que dependem deles. Nunca coloque os valores no código ou
+na documentação.
+
+## Estrutura rápida
+
+```text
+src/routes/                 telas e rotas protegidas
+src/components/             layout e componentes reutilizáveis
+src/lib/mock-data.ts        entidades de demonstração
+src/lib/risk-score.ts       motor de score e conversores reais
+src/lib/api/                server functions validadas por Zod
+src/lib/adapters/           integrações externas e fallbacks
+src/lib/cache.server.ts     cache server-side em memória
+docs/                       documentação técnica completa
+```
+
+Antes de alterar integrações, autenticação, score, cache ou configuração do
+workflow, leia a documentação principal.
