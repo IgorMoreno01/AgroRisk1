@@ -242,7 +242,7 @@ function OperadorPage() {
           nextAction={nextAction}
         />
         <section id="geo" className="scroll-mt-20">
-          <GeoContextCard area={area} breakdown={breakdown} waterGeo={waterGeo} loadingWater={loadingWater} />
+          <GeoContextCard area={area} breakdown={breakdown} waterGeo={waterGeo} loadingWater={loadingWater} routeData={routeData} loadingRoute={loadingRoute} />
         </section>
       </div>
 

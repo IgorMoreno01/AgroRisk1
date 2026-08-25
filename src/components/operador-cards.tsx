@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import type { ScoreBreakdown } from "@/lib/risk-score";
 import type { Machine, Area, Operation } from "@/lib/mock-data";
 import type { NextBestAction } from "@/lib/recommendations";
-import type { WaterGeoData } from "@/lib/external-data.types";
+import type { WaterGeoData, RouteData } from "@/lib/external-data.types";
 import {
   Activity, Tractor, MapPin, Gauge, AlertTriangle, ArrowRight,
   Droplets, Navigation, ShieldAlert, CheckCircle2, Bell, Eye, PlayCircle,
@@ -101,12 +101,14 @@ const zoneBadge: Record<Zone, string> = {
 };
 
 export function GeoContextCard({
-  area, breakdown, waterGeo, loadingWater,
+  area, breakdown, waterGeo, loadingWater, routeData, loadingRoute,
 }: {
   area: Area;
   breakdown: ScoreBreakdown;
   waterGeo?: WaterGeoData | null;
   loadingWater?: boolean;
+  routeData?: RouteData | null;
+  loadingRoute?: boolean;
 }) {
   // Usa distância real quando disponível; fallback para derivação do mock
   const { meters: mockMeters, zone: mockZone } = waterMetersFrom(breakdown);
@@ -213,8 +215,51 @@ export function GeoContextCard({
         <Info icon={Navigation} label="Tipo de área" value={area.type} />
         <Info icon={Droplets}  label="Distância até água" value={`${meters} m`} />
         <Info icon={ShieldAlert} label="Zona crítica" value={zone} />
-        <Info icon={Navigation} label="Rota atual" value="Rota A" valueClass="text-danger" />
-        <Info icon={ArrowRight} label="Rota alternativa" value="Rota B (sugerida)" valueClass="text-success" />
+        <Info
+          icon={Navigation}
+          label="Rota principal"
+          value={
+            loadingRoute
+              ? "Calculando…"
+              : routeData && routeData.source !== "mock"
+              ? `${routeData.primary.distanceLabel} · ${routeData.primary.durationLabel}`
+              : "—"
+          }
+          valueClass={routeData && routeData.source !== "mock" ? "text-primary" : "text-muted-foreground"}
+        />
+        <Info
+          icon={ArrowRight}
+          label="Rota alternativa"
+          value={
+            loadingRoute
+              ? "Calculando…"
+              : routeData && routeData.source !== "mock" && routeData.alternative
+              ? `${routeData.alternative.distanceLabel} · ${routeData.alternative.durationLabel}`
+              : routeData && routeData.source !== "mock"
+              ? "Sem alternativa"
+              : "—"
+          }
+          valueClass={routeData?.alternative ? "text-success" : "text-muted-foreground"}
+        />
+      </div>
+
+      {/* Badge de fonte dos dados de rota */}
+      <div className="mt-2 flex items-center gap-2">
+        {loadingRoute ? (
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" /> Calculando rota…
+          </span>
+        ) : routeData?.source === "openrouteservice" ? (
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-info">
+            <Wifi className="h-3 w-3" />
+            Rota real · openrouteservice
+            {routeData.alternative ? " · rota alternativa disponível" : ""}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <WifiOff className="h-3 w-3" /> Configure ORS_API_KEY para rota real
+          </span>
+        )}
       </div>
     </Card>
   );
