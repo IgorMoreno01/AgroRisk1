@@ -2,109 +2,138 @@
 @source "../src";
 @import "tw-animate-css";
 
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfMZg.ttf")
+    format("truetype");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuI6fMZg.ttf")
+    format("truetype");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("https://fonts.gstatic.com/s/inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuFuYMZg.ttf")
+    format("truetype");
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-success: var(--success);
-  --color-success-foreground: var(--success-foreground);
-  --color-warning: var(--warning);
-  --color-warning-foreground: var(--warning-foreground);
-  --color-danger: var(--danger);
-  --color-danger-foreground: var(--danger-foreground);
-  --color-info: var(--info);
-  --color-info-foreground: var(--info-foreground);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+  /* Sompo functional color tokens — the single source of truth. */
+  --color-action: #DF082A;
+  --color-action-hover: #CA0726;
+  --color-action-pressed: #B60722;
+  --color-action-deep: #94051C;
+  --color-action-subtle: #FEEBEE;
+  --color-text-primary: #111111;
+  --color-text-secondary: #5A5A5A;
+  --color-border: #E3E3E3;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #F6F6F6;
+  --color-inverse: #0D0D0D;
+  --color-error: #8F0016;
+  --color-success: #146C43;
+  --color-warning: #B45309;
+  --color-info: #1F5F8B;
+
+  /* Derived status surfaces keep meaning distinct from brand actions. */
+  --color-error-subtle: color-mix(in srgb, var(--color-error) 7%, var(--color-surface));
+  --color-success-subtle: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
+  --color-warning-subtle: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface));
+  --color-info-subtle: color-mix(in srgb, var(--color-info) 12%, var(--color-surface));
+
+  /* shadcn/Tailwind compatibility aliases. */
+  --color-background: var(--color-surface-alt);
+  --color-foreground: var(--color-text-primary);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-text-primary);
+  --color-popover: var(--color-surface);
+  --color-popover-foreground: var(--color-text-primary);
+  --color-primary: var(--color-action);
+  --color-primary-foreground: var(--color-surface);
+  --color-secondary: var(--color-surface-alt);
+  --color-secondary-foreground: var(--color-action-deep);
+  --color-muted: var(--color-surface-alt);
+  --color-muted-foreground: var(--color-text-secondary);
+  --color-accent: var(--color-action-subtle);
+  --color-accent-foreground: var(--color-action-deep);
+  --color-destructive: var(--color-error);
+  --color-destructive-foreground: var(--color-surface);
+  --color-input: var(--color-border);
+  --color-ring: var(--color-action);
+  --color-success-foreground: var(--color-surface);
+  --color-warning-foreground: var(--color-warning);
+  --color-danger: var(--color-error);
+  --color-danger-foreground: var(--color-surface);
+  --color-info-foreground: var(--color-surface);
+  --color-chart-1: var(--color-action);
+  --color-chart-2: var(--color-info);
+  --color-chart-3: var(--color-warning);
+  --color-chart-4: var(--color-error);
+  --color-chart-5: var(--color-success);
+  --color-sidebar: var(--color-inverse);
+  --color-sidebar-foreground: var(--color-surface);
+  --color-sidebar-primary: var(--color-action);
+  --color-sidebar-primary-foreground: var(--color-surface);
+  --color-sidebar-accent: var(--color-action-subtle);
+  --color-sidebar-accent-foreground: var(--color-action-deep);
+  --color-sidebar-border: color-mix(in srgb, var(--color-surface) 16%, transparent);
+  --color-sidebar-ring: var(--color-action);
+
+  /* One neo-grotesque family, three permitted weights. */
+  --font-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 700;
+  --font-weight-bold: 700;
+
+  /* 1.250 type scale, expressed only in rem. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.55;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.55;
+  --text-base: 1rem;
+  --text-base--line-height: 1.55;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.35;
+  --text-xl: 1.5625rem;
+  --text-xl--line-height: 1.2;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl: 1.9375rem;
+  --text-2xl--line-height: 1.2;
+  --text-2xl--letter-spacing: -0.01em;
+  --text-3xl: 2.4375rem;
+  --text-3xl--line-height: 1.2;
+  --text-3xl--letter-spacing: -0.01em;
+
+  /* Solid controls, compact cards and only two depth levels. */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.5rem;
+  --radius-2xl: 0.5rem;
+  --shadow-sm: 0 1px 2px rgb(13 13 13 / 0.06);
+  --shadow-md: 0 4px 12px rgb(13 13 13 / 0.08);
+  --shadow-lg: var(--shadow-md);
+  --shadow-xl: var(--shadow-md);
 }
 
 :root {
-  --radius: 0.625rem;
-
-  /* AgroRisk palette */
-  --background: oklch(0.975 0.005 250);          /* #F5F7FA */
-  --foreground: oklch(0.28 0.03 260);            /* #1F2937 */
-  --card: oklch(1 0 0);                          /* #FFFFFF */
-  --card-foreground: oklch(0.28 0.03 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.28 0.03 260);
-
-  --primary: oklch(0.52 0.14 145);               /* #2E7D32 verde */
-  --primary-foreground: oklch(1 0 0);
-
-  --secondary: oklch(0.56 0.16 250);             /* #1976D2 azul */
-  --secondary-foreground: oklch(1 0 0);
-
-  --muted: oklch(0.96 0.005 250);
-  --muted-foreground: oklch(0.55 0.02 260);      /* #6B7280 */
-  --accent: oklch(0.95 0.02 250);
-  --accent-foreground: oklch(0.28 0.03 260);
-
-  --destructive: oklch(0.55 0.22 27);            /* #D32F2F */
-  --destructive-foreground: oklch(1 0 0);
-
-  --success: oklch(0.52 0.14 145);
-  --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.78 0.16 80);                /* #F9A825 */
-  --warning-foreground: oklch(0.25 0.04 80);
-  --danger: oklch(0.55 0.22 27);
-  --danger-foreground: oklch(1 0 0);
-  --info: oklch(0.56 0.16 250);
-  --info-foreground: oklch(1 0 0);
-
-  --border: oklch(0.9 0.01 240);                 /* #D9E1E7 */
-  --input: oklch(0.9 0.01 240);
-  --ring: oklch(0.56 0.16 250);
-
-  --chart-1: oklch(0.52 0.14 145);
-  --chart-2: oklch(0.56 0.16 250);
-  --chart-3: oklch(0.78 0.16 80);
-  --chart-4: oklch(0.55 0.22 27);
-  --chart-5: oklch(0.6 0.05 200);
-
-  /* Sidebar — dark green corporate */
-  --sidebar: oklch(0.28 0.06 150);
-  --sidebar-foreground: oklch(0.96 0.01 145);
-  --sidebar-primary: oklch(0.78 0.16 80);
-  --sidebar-primary-foreground: oklch(0.25 0.04 80);
-  --sidebar-accent: oklch(0.34 0.07 150);
-  --sidebar-accent-foreground: oklch(1 0 0);
-  --sidebar-border: oklch(0.34 0.05 150);
-  --sidebar-ring: oklch(0.78 0.16 80);
+  --radius: 0.5rem;
+  --image-saturation: 0.9;
 }
 
 @layer base {
@@ -115,6 +144,68 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-normal);
+    line-height: 1.55;
+    letter-spacing: 0;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-weight: var(--font-weight-bold);
+    line-height: 1.2;
+  }
+
+  p a {
+    color: var(--color-action-deep);
+    text-decoration-line: underline;
+    text-decoration-thickness: 0.0625rem;
+    text-underline-offset: 0.1875rem;
+  }
+
+  :where(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+    outline: 0.125rem solid var(--color-action);
+    outline-offset: 0.125rem;
+  }
+
+  .lucide {
+    stroke-width: 1.5;
+  }
+
+  :where(a, button) .lucide-arrow-right {
+    transition: transform 160ms ease-out;
+  }
+
+  :where(a, button):hover .lucide-arrow-right {
+    transform: translateX(0.25rem);
+  }
+
+  img:not([data-brand-logo]) {
+    filter: saturate(var(--image-saturation));
+  }
+}
+
+@layer utilities {
+  /* Brand red used as text must use the deeper accessible tone. */
+  .text-primary {
+    color: var(--color-action-deep);
+  }
+
+  /* Normalize legacy semantic utilities to exact interaction tokens. */
+  .bg-primary\/10 {
+    background-color: var(--color-action-subtle);
+  }
+
+  .hover\:bg-primary\/90:hover {
+    background-color: var(--color-action-hover);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(a, button) .lucide-arrow-right {
+    transition: none;
   }
 }

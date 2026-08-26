@@ -137,54 +137,53 @@ export function GeoContextCard({
       <div className="relative overflow-hidden rounded-lg border border-border bg-muted/40">
         <svg viewBox="0 0 200 110" className="block h-44 w-full">
           {/* terreno */}
-          <rect x="0" y="0" width="200" height="110" fill="#f1f5e9" />
+          <rect x="0" y="0" width="200" height="110" fill="var(--color-surface-alt)" />
           {/* talhão verde */}
-          <rect x="6" y="8" width="120" height="94" rx="6" fill="#d9ead0" stroke="#a7c79a" strokeWidth="0.8" />
+          <rect x="6" y="8" width="120" height="94" rx="6" fill="var(--color-success-subtle)" stroke="var(--color-success)" strokeOpacity="0.45" strokeWidth="0.8" />
           {/* corpo d'água azul à direita */}
-          <path d="M200,0 Q150,20 145,55 Q150,95 200,110 Z" fill="#bcd8f1" stroke="#7fb0d8" strokeWidth="0.8" />
+          <path d="M200,0 Q150,20 145,55 Q150,95 200,110 Z" fill="var(--color-info-subtle)" stroke="var(--color-info)" strokeOpacity="0.55" strokeWidth="0.8" />
           {/* área de atenção (faixa próxima da água) */}
           <path
             d="M200,12 Q165,30 162,55 Q165,85 200,100 L200,12 Z"
-            fill="#fde68a"
-            opacity="0.55"
+            fill="var(--color-warning-subtle)"
           />
           {/* área segura (longe) */}
-          <circle cx="30" cy="80" r="12" fill="#c6e7c1" opacity="0.9" />
+          <circle cx="30" cy="80" r="12" fill="var(--color-success-subtle)" />
           {/* rota A (atual) - tracejada vermelha */}
           <path
             d={`M20,90 C 60,80 ${machineX + 5},70 ${machineX + 18},${zone === "Crítico" ? 50 : 55}`}
-            stroke="#dc2626" strokeWidth="1.4" fill="none" strokeDasharray="3 2"
+            stroke="var(--color-error)" strokeWidth="1.4" fill="none" strokeDasharray="3 2"
           />
           {/* rota B (alternativa) - tracejada verde */}
           <path
             d="M20,90 C 50,60 70,40 110,28"
-            stroke="#16a34a" strokeWidth="1.4" fill="none" strokeDasharray="3 2"
+            stroke="var(--color-success)" strokeWidth="1.4" fill="none" strokeDasharray="3 2"
           />
           {/* marcador máquina */}
           <g transform={`translate(${machineX},${zone === "Crítico" ? 52 : 58})`}>
-            <circle r="5" fill="#0f172a" />
-            <circle r="2" fill="#fff" />
+            <circle r="5" fill="var(--color-inverse)" />
+            <circle r="2" fill="var(--color-surface)" />
           </g>
           {/* marcador água */}
           <g transform="translate(178,55)">
-            <circle r="4" fill="#1d4ed8" />
+            <circle r="4" fill="var(--color-info)" />
           </g>
           {/* marcador área segura */}
           <g transform="translate(30,80)">
-            <circle r="3.2" fill="#16a34a" />
+            <circle r="3.2" fill="var(--color-success)" />
           </g>
         </svg>
 
         {/* Legenda flutuante */}
         <div className="absolute bottom-2 left-2 flex flex-wrap gap-1.5 text-[10px]">
           <span className="flex items-center gap-1 rounded-full bg-card/90 px-2 py-0.5 text-foreground shadow-sm">
-            <span className="h-2 w-2 rounded-full bg-[#0f172a]" /> Máquina
+            <span className="h-2 w-2 rounded-full bg-inverse" /> Máquina
           </span>
           <span className="flex items-center gap-1 rounded-full bg-card/90 px-2 py-0.5 text-foreground shadow-sm">
-            <span className="h-2 w-2 rounded-full bg-[#1d4ed8]" /> Água
+            <span className="h-2 w-2 rounded-full bg-info" /> Água
           </span>
           <span className="flex items-center gap-1 rounded-full bg-card/90 px-2 py-0.5 text-foreground shadow-sm">
-            <span className="h-2 w-2 rounded-full bg-[#16a34a]" /> Área segura
+            <span className="h-2 w-2 rounded-full bg-success" /> Área segura
           </span>
         </div>
       </div>
