@@ -137,6 +137,7 @@ export function calculateScore(inputs: RiskInputs): ScoreBreakdown {
 export function calculateWeightedRisk(
   breakdown: ScoreBreakdown,
   inputWeights?: Partial<RiskWeights>,
+  calibration?: { operationalScore?: number },
 ): RiskResult {
   const weights = normalizeRiskWeights(inputWeights);
   const climatePart = breakdown.parts.find((part) => part.category === "Clima");
@@ -146,7 +147,18 @@ export function calculateWeightedRisk(
   const climateScore = climatePart
     ? Math.round(clamp((climatePart.points / Math.max(1, climatePart.max)) * 100))
     : 0;
-  const operationalScore = Math.round(clamp((operationalPoints / Math.max(1, operationalMax)) * 100));
+  const factorOperationalScore = Math.round(
+    clamp((operationalPoints / Math.max(1, operationalMax)) * 100),
+  );
+  // `Operation.score` is the deterministic scenario index already present in
+  // the MVP data. Keep it as a calibration floor so the new component score
+  // does not discard the risk level used by the existing dashboards.
+  const operationalReference = calibration?.operationalScore;
+  const operationalScore = Math.round(clamp(
+    operationalReference === undefined
+      ? factorOperationalScore
+      : Math.max(factorOperationalScore, operationalReference),
+  ));
   const climateContribution = roundOneDecimal(climateScore * (weights.climate / 100));
   const operationalContribution = roundOneDecimal(operationalScore * (weights.operational / 100));
   const finalScore = Math.round(clamp(climateContribution + operationalContribution));
@@ -234,7 +246,9 @@ export function riskResultForOperation(
   overrides?: Partial<RiskInputs>,
 ): RiskResult {
   const inputs = inputsForOperationWithOverrides(op, overrides);
-  return calculateWeightedRisk(calculateScore(inputs), weights);
+  return calculateWeightedRisk(calculateScore(inputs), weights, {
+    operationalScore: op.score,
+  });
 }
 
 export function currentOperationFor(machineId: string): Operation | undefined {
