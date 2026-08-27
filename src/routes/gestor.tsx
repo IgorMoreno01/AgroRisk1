@@ -15,10 +15,9 @@ import {
 import {
   fleetMachinesAtRisk,
   deriveWeatherFromReal,
-  inputsForOperationWithOverrides,
-  calculateScore,
   currentOperationFor,
-  inputsForOperation,
+  riskResultForOperation,
+  type RiskWeights,
 } from "@/lib/risk-score";
 import { recommendationsForMachine } from "@/lib/recommendations";
 import { RecommendationCard } from "@/components/recommendation-card";
@@ -34,6 +33,7 @@ import { getProfileAlerts } from "@/lib/profile-alerts";
 import { getWeather } from "@/lib/api/weather.functions";
 import { CLIENT_COORDS } from "@/lib/area-coordinates";
 import type { WeatherData } from "@/lib/external-data.types";
+import { useRiskConfig } from "@/lib/risk-config";
 
 export const Route = createFileRoute("/gestor")({
   head: () => ({ meta: [{ title: "AgroRisk · Dashboard do Gestor" }] }),
@@ -177,15 +177,18 @@ function FilterSelect<T extends string>({
 }
 
 // Computes fleet average score overriding weather with real data where available.
-function fleetAvgWithWeather(clientWeather: Record<string, WeatherData>): number {
+function fleetAvgWithWeather(
+  clientWeather: Record<string, WeatherData>,
+  weights: RiskWeights,
+): number {
   const scores = machines.map((m) => {
     const op = currentOperationFor(m.id);
     if (!op) return 0;
     const wd = clientWeather[m.clientId];
-    if (!wd) return calculateScore(inputsForOperation(op)).total;
-    return calculateScore(
-      inputsForOperationWithOverrides(op, { weather: deriveWeatherFromReal(wd) }),
-    ).total;
+    return riskResultForOperation(op, weights, wd
+      ? { weather: deriveWeatherFromReal(wd) }
+      : undefined,
+    ).finalScore;
   });
   return scores.length
     ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length)
@@ -193,6 +196,7 @@ function fleetAvgWithWeather(clientWeather: Record<string, WeatherData>): number
 }
 
 function GestorPage() {
+  const { weights } = useRiskConfig();
   const [clientId,     setClientId]     = useState<string>("all");
   const [level,        setLevel]        = useState<RiskLevel | "all">("all");
   const [operationType, setOperationType] = useState<OperationType | "all">("all");
@@ -232,7 +236,7 @@ function GestorPage() {
 
   const monitored = machines.length;
   // Fleet average: uses real weather when available, falls back to mock
-  const avg = fleetAvgWithWeather(clientWeather);
+  const avg = fleetAvgWithWeather(clientWeather, weights);
   const dataSource = Object.values(clientWeather)[0]?.source ?? "mock";
   const isRealData = !weatherLoading && dataSource === "open-meteo";
   // Trend: historical mock days + today's score with real data
@@ -242,14 +246,14 @@ function GestorPage() {
     return [...history, today];
   }, [avg, weatherLoading]);
 
-  const atRisk = fleetMachinesAtRisk();
+  const atRisk = fleetMachinesAtRisk(weights);
   const critical = alerts.filter((a) => a.level === "alto" && a.status !== "resolvido").length;
 
-  const machineRows = useMemo(() => rankMachines(filters), [clientId, level, operationType, areaId]);
-  const areaRows = useMemo(() => rankAreas(filters), [clientId, level, operationType, areaId]);
-  const opTypeRows = useMemo(() => rankOperationTypes(filters), [clientId, level, operationType, areaId]);
-  const distrib = useMemo(() => machineDistribution(filters), [clientId, level, operationType, areaId]);
-  const headline = useMemo(() => priorityHeadline(filters), [clientId, level, operationType, areaId]);
+  const machineRows = useMemo(() => rankMachines(filters, weights), [clientId, level, operationType, areaId, weights]);
+  const areaRows = useMemo(() => rankAreas(filters, weights), [clientId, level, operationType, areaId, weights]);
+  const opTypeRows = useMemo(() => rankOperationTypes(filters, weights), [clientId, level, operationType, areaId, weights]);
+  const distrib = useMemo(() => machineDistribution(filters, weights), [clientId, level, operationType, areaId, weights]);
+  const headline = useMemo(() => priorityHeadline(filters, weights), [clientId, level, operationType, areaId, weights]);
 
   return (
     <AppLayout title="Dashboard do Gestor" subtitle="Visão consolidada da frota e risco operacional">
@@ -324,7 +328,7 @@ function GestorPage() {
           return (
             <div className="grid gap-3 lg:grid-cols-3">
               {top.map((r) => {
-                const rec = recommendationsForMachine(r.machine.id, "gestor")[0];
+                 const rec = recommendationsForMachine(r.machine.id, "gestor", { weights })[0];
                 return (
                   <div key={r.machine.id} className="space-y-2">
                     <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">

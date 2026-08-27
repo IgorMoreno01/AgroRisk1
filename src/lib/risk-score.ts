@@ -71,7 +71,49 @@ export interface ScoreBreakdown {
   mainFactor: string;
 }
 
+export interface RiskWeights {
+  climate: number;
+  operational: number;
+}
+
+export interface RiskResult {
+  climateScore: number;
+  operationalScore: number;
+  climateContribution: number;
+  operationalContribution: number;
+  finalScore: number;
+  level: RiskLevel;
+  dominantFactor: "climate" | "operational" | "balanced";
+  breakdown: ScoreBreakdown;
+}
+
+export const DEFAULT_RISK_WEIGHTS: RiskWeights = {
+  climate: 50,
+  operational: 50,
+};
+
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
+const roundOneDecimal = (n: number) => Math.round(n * 10) / 10;
+
+export function isValidRiskWeights(value: RiskWeights): boolean {
+  return Number.isFinite(value.climate) &&
+    Number.isFinite(value.operational) &&
+    Number.isInteger(value.climate) &&
+    Number.isInteger(value.operational) &&
+    value.climate >= 0 &&
+    value.climate <= 100 &&
+    value.operational >= 0 &&
+    value.operational <= 100 &&
+    value.climate + value.operational === 100;
+}
+
+export function normalizeRiskWeights(value?: Partial<RiskWeights>): RiskWeights {
+  const candidate: RiskWeights = {
+    climate: value?.climate ?? DEFAULT_RISK_WEIGHTS.climate,
+    operational: value?.operational ?? DEFAULT_RISK_WEIGHTS.operational,
+  };
+  return isValidRiskWeights(candidate) ? candidate : { ...DEFAULT_RISK_WEIGHTS };
+}
 
 export function calculateScore(inputs: RiskInputs): ScoreBreakdown {
   const parts: ScorePart[] = [
@@ -86,6 +128,52 @@ export function calculateScore(inputs: RiskInputs): ScoreBreakdown {
   const main  = [...parts].sort((a, b) => b.points - a.points)[0];
   return { total, level: riskFromScore(total), parts, mainFactor: main.category };
 }
+
+/**
+ * Combina os componentes já calculados, sem alterar os dados ou retreinar
+ * qualquer modelo. O clima usa seu máximo próprio; os demais fatores formam
+ * o componente operacional e também são normalizados para a escala 0–100.
+ */
+export function calculateWeightedRisk(
+  breakdown: ScoreBreakdown,
+  inputWeights?: Partial<RiskWeights>,
+): RiskResult {
+  const weights = normalizeRiskWeights(inputWeights);
+  const climatePart = breakdown.parts.find((part) => part.category === "Clima");
+  const operationalParts = breakdown.parts.filter((part) => part.category !== "Clima");
+  const operationalMax = operationalParts.reduce((sum, part) => sum + part.max, 0);
+  const operationalPoints = operationalParts.reduce((sum, part) => sum + part.points, 0);
+  const climateScore = climatePart
+    ? Math.round(clamp((climatePart.points / Math.max(1, climatePart.max)) * 100))
+    : 0;
+  const operationalScore = Math.round(clamp((operationalPoints / Math.max(1, operationalMax)) * 100));
+  const climateContribution = roundOneDecimal(climateScore * (weights.climate / 100));
+  const operationalContribution = roundOneDecimal(operationalScore * (weights.operational / 100));
+  const finalScore = Math.round(clamp(climateContribution + operationalContribution));
+  const dominantFactor = weights.climate === weights.operational
+    ? "balanced"
+    : weights.climate > weights.operational
+    ? "climate"
+    : "operational";
+
+  return {
+    climateScore,
+    operationalScore,
+    climateContribution,
+    operationalContribution,
+    finalScore,
+    level: riskFromScore(finalScore),
+    dominantFactor,
+    breakdown,
+  };
+}
+
+export const dominantFactorLabel = (factor: RiskResult["dominantFactor"]) =>
+  factor === "climate"
+    ? "Risco climático"
+    : factor === "operational"
+    ? "Risco operacional"
+    : "Risco balanceado";
 
 // ---------- Derivação determinística dos inputs a partir do mock ----------
 const has = (op: Operation, factorId: string) => op.factors.includes(factorId);
@@ -140,6 +228,15 @@ export function inputsForOperation(op: Operation): RiskInputs {
 export const scoreOperation = (op: Operation): ScoreBreakdown =>
   calculateScore(inputsForOperation(op));
 
+export function riskResultForOperation(
+  op: Operation,
+  weights?: Partial<RiskWeights>,
+  overrides?: Partial<RiskInputs>,
+): RiskResult {
+  const inputs = inputsForOperationWithOverrides(op, overrides);
+  return calculateWeightedRisk(calculateScore(inputs), weights);
+}
+
 export function currentOperationFor(machineId: string): Operation | undefined {
   const owned = operations.filter((o) => o.machineId === machineId);
   return owned.find((o) => o.status === "Em andamento") ?? owned[owned.length - 1];
@@ -151,6 +248,19 @@ export function scoreMachine(machineId: string): ScoreBreakdown {
     return { total: 0, level: "baixo", parts: [], mainFactor: "—" };
   }
   return scoreOperation(op);
+}
+
+export function riskResultForMachine(
+  machineId: string,
+  weights?: Partial<RiskWeights>,
+): RiskResult {
+  const op = currentOperationFor(machineId);
+  const breakdown = op
+    ? scoreOperation(op)
+    : { total: 0, level: "baixo" as const, parts: [], mainFactor: "—" };
+  return op
+    ? riskResultForOperation(op, weights)
+    : calculateWeightedRisk(breakdown, weights);
 }
 
 const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((s, n) => s + n, 0) / xs.length) : 0);
@@ -181,6 +291,37 @@ export function scoreClient(clientId: string): ClientScore {
   return { clientId, name: client.name, score: total, level: riskFromScore(total), machinesHigh, topAreaName, topFactor };
 }
 
+export function scoreClientWithWeights(
+  clientId: string,
+  weights?: Partial<RiskWeights>,
+): ClientScore {
+  const client = clients.find((c) => c.id === clientId)!;
+  const ms = machines.filter((m) => m.clientId === clientId);
+  const results = ms.map((m) => riskResultForMachine(m.id, weights));
+  const total = avg(results.map((result) => result.finalScore));
+  const machinesHigh = results.filter((result) => result.level === "alto").length;
+  const dominantTally: Record<string, number> = {};
+  results.forEach((result) => {
+    const label = dominantFactorLabel(result.dominantFactor);
+    dominantTally[label] = (dominantTally[label] ?? 0) + 1;
+  });
+  const topFactor = Object.entries(dominantTally).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+  const clientAreas = areas.filter((area) => area.clientId === clientId);
+  const areaScored = clientAreas
+    .map((area) => ({ area, score: scoreAreaWithWeights(area.id, weights).score }))
+    .sort((a, b) => b.score - a.score);
+
+  return {
+    clientId,
+    name: client.name,
+    score: total,
+    level: riskFromScore(total),
+    machinesHigh,
+    topAreaName: areaScored[0]?.area.name ?? "—",
+    topFactor,
+  };
+}
+
 export interface AreaScore {
   areaId: string; name: string; clientName: string; score: number; level: RiskLevel;
   condition: string; topFactor: string;
@@ -197,6 +338,32 @@ export function scoreArea(areaId: string): AreaScore {
   return {
     areaId, name: area.name, clientName: area.client, score: total,
     level: riskFromScore(total), condition: area.condition, topFactor,
+  };
+}
+
+export function scoreAreaWithWeights(
+  areaId: string,
+  weights?: Partial<RiskWeights>,
+): AreaScore {
+  const area = areas.find((item) => item.id === areaId)!;
+  const results = operations
+    .filter((operation) => operation.areaId === areaId)
+    .map((operation) => riskResultForOperation(operation, weights));
+  const score = avg(results.map((result) => result.finalScore));
+  const dominantTally: Record<string, number> = {};
+  results.forEach((result) => {
+    const label = dominantFactorLabel(result.dominantFactor);
+    dominantTally[label] = (dominantTally[label] ?? 0) + 1;
+  });
+  const topFactor = Object.entries(dominantTally).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+  return {
+    areaId,
+    name: area.name,
+    clientName: area.client,
+    score,
+    level: riskFromScore(score),
+    condition: area.condition,
+    topFactor,
   };
 }
 
@@ -217,16 +384,39 @@ export function scoreByOperationType(): OperationTypeStats[] {
   });
 }
 
+export function scoreByOperationTypeWithWeights(
+  weights?: Partial<RiskWeights>,
+): OperationTypeStats[] {
+  const types: OperationType[] = [
+    "Trabalho no campo", "Transporte", "Operação próxima de água",
+    "Deslocamento interno", "Pulverização", "Colheita",
+  ];
+  return types.map((type) => {
+    const results = operations
+      .filter((operation) => operation.type === type)
+      .map((operation) => riskResultForOperation(operation, weights));
+    const score = avg(results.map((result) => result.finalScore));
+    return { type, score, level: riskFromScore(score), count: results.length };
+  });
+}
+
 // ---------- Helpers de apresentação ----------
 export function machinePrincipalFactorLabel(machineId: string): string {
   return scoreMachine(machineId).mainFactor;
 }
 
-export const fleetAverageScore = () =>
-  avg(machines.map((m) => scoreMachine(m.id).total));
+export const fleetAverageScore = (weights?: Partial<RiskWeights>) =>
+  weights
+    ? avg(machines.map((machine) => riskResultForMachine(machine.id, weights).finalScore))
+    : avg(machines.map((machine) => scoreMachine(machine.id).total));
 
-export const fleetMachinesAtRisk = () =>
-  machines.filter((m) => scoreMachine(m.id).level !== "baixo" && scoreMachine(m.id).total >= 70).length;
+export const fleetMachinesAtRisk = (weights?: Partial<RiskWeights>) =>
+  weights
+    ? machines.filter((machine) => {
+      const result = riskResultForMachine(machine.id, weights);
+      return result.level !== "baixo" && result.finalScore >= 70;
+    }).length
+    : machines.filter((machine) => scoreMachine(machine.id).level !== "baixo" && scoreMachine(machine.id).total >= 70).length;
 
 // Re-export para conveniência
 export { riskFromScore };

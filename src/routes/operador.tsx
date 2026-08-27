@@ -12,7 +12,7 @@ import {
   getMachine, getArea, operationsByOperator,
 } from "@/lib/mock-data";
 import {
-  scoreOperation, inputsForOperationWithOverrides, calculateScore,
+  riskResultForOperation,
   deriveWeatherFromReal, deriveWaterDistanceFromReal,
 } from "@/lib/risk-score";
 import {
@@ -37,6 +37,7 @@ import {
   DataSourcesPanel,
   RiskFactorsWithSources,
 } from "@/components/external-data-sections";
+import { useRiskConfig } from "@/lib/risk-config";
 
 export const Route = createFileRoute("/operador")({
   head: () => ({ meta: [{ title: "AgroRisk · Operador" }] }),
@@ -50,6 +51,7 @@ export const Route = createFileRoute("/operador")({
 const OPERATOR_ID = "USR-OP-1";
 
 function OperadorPage() {
+  const { weights } = useRiskConfig();
   const operation = operationsByOperator(OPERATOR_ID)[0]!;
   const machine = getMachine(operation.machineId)!;
   const area = getArea(operation.areaId)!;
@@ -92,24 +94,29 @@ function OperadorPage() {
   }, [coords.lat, coords.lon]);
 
   // ---- Score: recalcula com dados reais quando disponíveis ----
-  const baseBreakdown = scoreOperation(operation);
-  const breakdown = (() => {
+  const scoreContext = (() => {
     const weatherOverride = weather ? deriveWeatherFromReal(weather) : undefined;
     const waterOverride = waterGeo ? deriveWaterDistanceFromReal(waterGeo) : undefined;
-    if (!weatherOverride && !waterOverride) return baseBreakdown;
-    const inputs = inputsForOperationWithOverrides(operation, {
+    return riskResultForOperation(operation, weights, {
       ...(weatherOverride ? { weather: weatherOverride } : {}),
       ...(waterOverride ? { waterDistance: waterOverride } : {}),
     });
-    return calculateScore(inputs);
   })();
-
-  const score = breakdown.total;
-  const level = breakdown.level;
+  const breakdown = scoreContext.breakdown;
+  const score = scoreContext.finalScore;
+  const level = scoreContext.level;
   const isHigh = level === "alto";
 
-  const recs = recommendationsForOperation(operation, "operador");
-  const nextAction = nextBestActionForOperation(operation);
+  const riskOptions = {
+    weights,
+    result: scoreContext,
+    overrides: {
+      ...(weather ? { weather: deriveWeatherFromReal(weather) } : {}),
+      ...(waterGeo ? { waterDistance: deriveWaterDistanceFromReal(waterGeo) } : {}),
+    },
+  };
+  const recs = recommendationsForOperation(operation, "operador", riskOptions);
+  const nextAction = nextBestActionForOperation(operation, riskOptions);
 
   const topFactors = [...breakdown.parts]
     .filter((p) => p.points > 0)
@@ -220,6 +227,9 @@ function OperadorPage() {
             <p className="mt-3 text-center text-xs text-muted-foreground">
               Atualizado há instantes · escala 0–100
             </p>
+             <p className="mt-1 text-center text-xs text-muted-foreground">
+               Motor Sompo: clima {weights.climate}% · operacional {weights.operational}%
+             </p>
             <div className="mt-3 w-full rounded-lg bg-muted/60 p-3 text-xs">
               <div className="font-medium text-foreground">Risco {level} devido a:</div>
               <ul className="mt-1 space-y-0.5 text-muted-foreground">

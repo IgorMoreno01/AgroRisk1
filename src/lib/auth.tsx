@@ -17,7 +17,15 @@ export function clientFor(user?: User): Client | undefined {
   return user?.clientId ? clients.find((c) => c.id === user.clientId) : undefined;
 }
 
-const STORAGE_KEY = "agrorisk.session";
+export const SESSION_STORAGE_KEY = "agrorisk.session";
+
+export function getStoredSessionToken(): string | null {
+  try {
+    return localStorage.getItem(SESSION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 // Landing routes are only used for post-login navigation UX. The authoritative
 // permission list always comes from the server-verified session below.
@@ -49,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (async () => {
       let token: string | null = null;
       try {
-        token = localStorage.getItem(STORAGE_KEY);
+        token = getStoredSessionToken();
       } catch {}
 
       if (!token) {
@@ -65,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setAllowedRoutes(result.allowedRoutes);
         } else {
           try {
-            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(SESSION_STORAGE_KEY);
           } catch {}
         }
       } catch {}
@@ -83,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(result.profile as ProfileId);
       setAllowedRoutes(result.allowedRoutes);
       try {
-        localStorage.setItem(STORAGE_KEY, result.token);
+        localStorage.setItem(SESSION_STORAGE_KEY, result.token);
       } catch {}
       return true;
     } catch {
@@ -95,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setAllowedRoutes([]);
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(SESSION_STORAGE_KEY);
       localStorage.removeItem("agrorisk.auth");
     } catch {}
   };

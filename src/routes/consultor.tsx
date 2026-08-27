@@ -6,7 +6,10 @@ import { RiskComposition } from "@/components/risk-composition";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { NextBestActionCard } from "@/components/next-best-action";
 import { clients, machinesByClient } from "@/lib/mock-data";
-import { scoreClient, scoreMachine, scoreArea } from "@/lib/risk-score";
+import {
+  scoreClientWithWeights, riskResultForMachine, scoreAreaWithWeights,
+  dominantFactorLabel,
+} from "@/lib/risk-score";
 import { areas as allAreas } from "@/lib/mock-data";
 import {
   recommendationsForClient, clientExplanation, nextBestActionForMachine,
@@ -15,6 +18,7 @@ import { Building2, FileText, AlertTriangle } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
+import { useRiskConfig } from "@/lib/risk-config";
 
 export const Route = createFileRoute("/consultor")({
   head: () => ({ meta: [{ title: "AgroRisk · Consultor" }] }),
@@ -26,23 +30,24 @@ export const Route = createFileRoute("/consultor")({
 });
 
 function ConsultorPage() {
+  const { weights } = useRiskConfig();
   const [clientId, setClientId] = useState(clients[0].id);
   const client = clients.find((c) => c.id === clientId)!;
-  const cs = scoreClient(client.id);
+  const cs = scoreClientWithWeights(client.id, weights);
 
   const clientMachines = machinesByClient(client.id)
-    .map((m) => ({ m, b: scoreMachine(m.id) }))
-    .sort((a, b) => b.b.total - a.b.total);
+    .map((m) => ({ m, b: riskResultForMachine(m.id, weights) }))
+    .sort((a, b) => b.b.finalScore - a.b.finalScore);
 
   const clientAreas = allAreas
     .filter((a) => a.clientId === client.id)
-    .map((a) => scoreArea(a.id))
+    .map((a) => scoreAreaWithWeights(a.id, weights))
     .sort((a, b) => b.score - a.score);
 
   // Fatores mais recorrentes nas máquinas do cliente
   const tally: Record<string, number> = {};
   clientMachines.forEach(({ b }) => {
-    b.parts.forEach((p) => {
+    b.breakdown.parts.forEach((p) => {
       if (p.points > 0) tally[p.label] = (tally[p.label] ?? 0) + p.points;
     });
   });
@@ -53,20 +58,20 @@ function ConsultorPage() {
     .slice(0, 6);
 
   // Composição do cliente: média ponto-a-ponto das máquinas
-  const avgParts = clientMachines[0].b.parts.map((p, idx) => {
+  const avgParts = clientMachines[0].b.breakdown.parts.map((p, idx) => {
     const points = Math.round(
-      clientMachines.reduce((s, { b }) => s + b.parts[idx].points, 0) / clientMachines.length,
+      clientMachines.reduce((s, { b }) => s + b.breakdown.parts[idx].points, 0) / clientMachines.length,
     );
     return { ...p, points, detail: `Média da frota do cliente` };
   });
   const clientBreakdown = { total: cs.score, level: cs.level, parts: avgParts, mainFactor: cs.topFactor };
 
-  const recommendations = recommendationsForClient(client.id, "consultor");
+  const recommendations = recommendationsForClient(client.id, "consultor", { weights });
   const topMachineId = clientMachines[0]?.m.id;
   const nextAction = topMachineId
-    ? nextBestActionForMachine(topMachineId)
+    ? nextBestActionForMachine(topMachineId, { weights })
     : undefined;
-  const narrative = clientExplanation(client.id);
+  const narrative = clientExplanation(client.id, { weights });
 
   const topMachine = clientMachines[0];
 
@@ -138,10 +143,10 @@ function ConsultorPage() {
                 }`}>{i + 1}</span>
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-foreground">{m.name}</div>
-                  <div className="text-xs text-muted-foreground">{m.id} · {m.area} · {b.mainFactor}</div>
+                  <div className="text-xs text-muted-foreground">{m.id} · {m.area} · {dominantFactorLabel(b.dominantFactor)}</div>
                 </div>
-                <ScoreBar score={b.total} />
-                <RiskBadge score={b.total} />
+                <ScoreBar score={b.finalScore} />
+                <RiskBadge score={b.finalScore} />
               </div>
             ))}
           </div>
@@ -245,7 +250,7 @@ function ConsultorPage() {
             <p>{narrative}</p>
             {topMachine && (
               <p className="text-muted-foreground">
-                Destaque para o equipamento <strong>{topMachine.m.name}</strong> (score {topMachine.b.total}) —
+                 Destaque para o equipamento <strong>{topMachine.m.name}</strong> (score {topMachine.b.finalScore}) —
                 ação principal sugerida abaixo.
               </p>
             )}

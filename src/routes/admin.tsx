@@ -7,19 +7,24 @@ import {
   type MachineStatus, type AlertCriticality, type AlertStatus,
 } from "@/lib/mock-data";
 import {
-  scoreMachine, scoreClient, scoreArea, scoreByOperationType, scoreOperation,
+  riskResultForMachine, scoreClientWithWeights, scoreAreaWithWeights,
+  scoreByOperationTypeWithWeights, riskResultForOperation, dominantFactorLabel,
 } from "@/lib/risk-score";
 import { rankMachines, rankAreas, machineDistribution, areaDistribution } from "@/lib/ranking";
 import {
   allRecommendationsConsolidated, countByCategory, countByPriority,
-  type RecCategory, type RecPriority,
+  recommendationsForOperation, type RecCategory, type RecPriority,
 } from "@/lib/recommendations";
-import { Tractor, Building2, Map, ListChecks, Bell, Users as UsersIcon, Gauge, Trophy, Flame, Lightbulb, ShieldCheck } from "lucide-react";
+import { Tractor, Building2, Map, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal, Save, CheckCircle2, Loader2, CloudSun, Wrench } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
+import { useRiskConfig } from "@/lib/risk-config";
+import { Slider } from "@/components/ui/slider";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { RecommendationCard } from "@/components/recommendation-card";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "AgroRisk · Admin / Sompo" }] }),
@@ -42,6 +47,7 @@ const tabs = [
   { id: "areas",       label: "Áreas e regiões",        icon: Map,         count: areas.length },
   { id: "operations",  label: "Operações monitoradas", icon: ListChecks,   count: operations.length },
   { id: "alerts",      label: "Central de alertas",     icon: Bell,        count: alerts.length },
+  { id: "motor-risco", label: "Configuração do motor de risco", icon: SlidersHorizontal, count: null as number | null },
 ] as const;
 
 type TabId = (typeof tabs)[number]["id"];
@@ -102,20 +108,212 @@ function AdminPage() {
             <ProfileAlertsSection bundle={getProfileAlerts("admin")} />
           </div>
         )}
+        {tab === "motor-risco" && <RiskEngineConfigurationPanel />}
       </div>
     </AppLayout>
   );
 }
 
+function RiskEngineConfigurationPanel() {
+  const { configuration, status, error, isSaving, saveWeights } = useRiskConfig();
+  const [climateWeight, setClimateWeight] = useState(configuration.climate);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setClimateWeight(configuration.climate);
+  }, [configuration.climate]);
+
+  const operationalWeight = 100 - climateWeight;
+  const scenario = operations.find((operation) => operation.status === "Em andamento") ?? operations[0];
+  const result = riskResultForOperation(scenario, {
+    climate: climateWeight,
+    operational: operationalWeight,
+  });
+  const scenarioRecommendations = recommendationsForOperation(scenario, "gestor", {
+    weights: { climate: climateWeight, operational: operationalWeight },
+    result,
+  });
+  const updatedLabel = configuration.updatedAt
+    ? new Intl.DateTimeFormat("pt-BR", {
+      dateStyle: "short",
+      timeStyle: "short",
+      timeZone: "America/Sao_Paulo",
+    }).format(new Date(configuration.updatedAt))
+    : "Padrão inicial 50/50";
+
+  const handleSave = async () => {
+    const save = await saveWeights(climateWeight);
+    if (save.ok) {
+      setSavedMessage("Pesos atualizados para toda a demonstração.");
+    } else {
+      setSavedMessage(null);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card className="border-primary/30 bg-primary/5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+              <SlidersHorizontal className="h-4 w-4 text-primary" />
+              Configuração do Motor de Risco
+            </div>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+              Ajuste apenas a combinação dos componentes existentes. Esta configuração é
+              exclusiva de Admin/Sompo e não aciona treinamento ou modelo de ML.
+            </p>
+          </div>
+          <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+            Atualizado: {updatedLabel}
+          </span>
+        </div>
+      </Card>
+
+      {status === "loading" && (
+        <Alert className="border-info/30 bg-info/5">
+          <Loader2 className="h-4 w-4 animate-spin text-info" />
+          <AlertTitle>Carregando configuração</AlertTitle>
+          <AlertDescription>O padrão 50/50 continua visível até a leitura ser concluída.</AlertDescription>
+        </Alert>
+      )}
+      {error && (
+        <Alert variant="destructive">
+          <AlertTitle>Não foi possível concluir a última ação</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {savedMessage && (
+        <Alert className="border-success/40 bg-success/5">
+          <CheckCircle2 className="h-4 w-4 text-success" />
+          <AlertTitle>Configuração salva</AlertTitle>
+          <AlertDescription>{savedMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="grid gap-4 xl:grid-cols-5">
+        <Card className="xl:col-span-2">
+          <div className="flex items-center gap-2">
+            <CloudSun className="h-4 w-4 text-info" />
+            <h2 className="text-sm font-semibold text-foreground">Pesos do cenário</h2>
+          </div>
+          <div className="mt-6">
+            <div className="mb-3 flex items-end justify-between">
+              <div>
+                <div className="text-sm font-medium text-foreground">Peso climático</div>
+                <div className="text-xs text-muted-foreground">Chuva e condição climática disponível</div>
+              </div>
+              <span className="text-3xl font-semibold tabular-nums text-primary">{climateWeight}%</span>
+            </div>
+            <Slider
+              min={0}
+              max={100}
+              step={1}
+              value={[climateWeight]}
+              onValueChange={([value]) => {
+                setClimateWeight(value);
+                setSavedMessage(null);
+              }}
+              aria-label="Peso climático"
+            />
+            <div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>0%</span><span>100%</span></div>
+          </div>
+
+          <div className="mt-6 rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Wrench className="h-4 w-4 text-warning" /> Peso operacional
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Água, tipo de operação, histórico, velocidade e terreno.
+                </div>
+              </div>
+              <span className="text-2xl font-semibold tabular-nums text-foreground">{operationalWeight}%</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving || climateWeight === configuration.climate}
+            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {isSaving ? "Salvando…" : "Salvar pesos"}
+          </button>
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+            Os pesos ficam em memória no servidor durante esta demonstração e voltam ao padrão após reinício do workflow.
+          </p>
+        </Card>
+
+        <Card className="xl:col-span-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Simulação explicável</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Cenário demonstrativo baseado na operação {scenario.id}; os dados do MVP podem conter fallback simulado.
+              </p>
+            </div>
+            <RiskBadge score={result.finalScore} />
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <EngineMetric label="Score climático" value={`${result.climateScore} / 100`} detail={`${climateWeight}% do peso`} />
+            <EngineMetric label="Score operacional" value={`${result.operationalScore} / 100`} detail={`${operationalWeight}% do peso`} />
+            <EngineMetric label="Contribuição climática" value={result.climateContribution.toFixed(1)} detail={`${result.climateScore} × ${climateWeight}%`} />
+            <EngineMetric label="Contribuição operacional" value={result.operationalContribution.toFixed(1)} detail={`${result.operationalScore} × ${operationalWeight}%`} />
+          </div>
+          <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Score final ponderado</div>
+                <div className="mt-1 text-3xl font-semibold tabular-nums text-foreground">
+                  {result.finalScore}<span className="text-base text-muted-foreground"> / 100</span>
+                </div>
+              </div>
+              <span className="rounded-full bg-card px-3 py-1 text-sm font-medium text-foreground">
+                {dominantFactorLabel(result.dominantFactor)}
+              </span>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Fórmula: {result.climateScore} × {climateWeight}% + {result.operationalScore} × {operationalWeight}% ={" "}
+              {result.climateContribution.toFixed(1)} + {result.operationalContribution.toFixed(1)}, arredondado para {result.finalScore}.
+            </p>
+          </div>
+          <div className="mt-5">
+            <div className="mb-2 text-sm font-semibold text-foreground">Recomendações do cenário</div>
+            <div className="space-y-2">
+              {scenarioRecommendations.map((recommendation) => (
+                <RecommendationCard key={recommendation.id} rec={recommendation} />
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function EngineMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-lg border border-border p-3">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="mt-1 text-xl font-semibold tabular-nums text-foreground">{value}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
 function OverviewPanel() {
-  const mDist = machineDistribution();
-  const aDist = areaDistribution();
+  const { weights } = useRiskConfig();
+  const mDist = machineDistribution({}, weights);
+  const aDist = areaDistribution({}, weights);
   const avgScore = Math.round(
-    machines.reduce((acc, m) => acc + scoreMachine(m.id).total, 0) / machines.length,
+    machines.reduce((acc, m) => acc + riskResultForMachine(m.id, weights).finalScore, 0) / machines.length,
   );
   const criticalAlerts = alerts.filter((a) => a.criticality === "alta").length;
-  const opsAtRisk = operations.filter((o) => scoreOperation(o).total >= 71).length;
-  const topRecs = allRecommendationsConsolidated()
+  const opsAtRisk = operations.filter((o) => riskResultForOperation(o, weights).finalScore >= 71).length;
+  const topRecs = allRecommendationsConsolidated(weights)
     .filter((r) => r.rec.priority === "alta")
     .slice(0, 4);
 
@@ -178,10 +376,11 @@ function DistRow({ label, mq, ar, tone }: { label: string; mq: number; ar: numbe
 }
 
 function RankingsPanel() {
-  const mRows = rankMachines();
-  const aRows = rankAreas();
-  const mDist = machineDistribution();
-  const aDist = areaDistribution();
+  const { weights } = useRiskConfig();
+  const mRows = rankMachines({}, weights);
+  const aRows = rankAreas({}, weights);
+  const mDist = machineDistribution({}, weights);
+  const aDist = areaDistribution({}, weights);
 
   return (
     <div className="space-y-6">
@@ -277,7 +476,8 @@ const priorityTone: Record<RecPriority, string> = {
 };
 
 function RecsPanel() {
-  const rows = allRecommendationsConsolidated();
+  const { weights } = useRiskConfig();
+  const rows = allRecommendationsConsolidated(weights);
   const byCat = countByCategory(rows);
   const byPrio = countByPriority(rows);
 
@@ -396,10 +596,11 @@ const machineStatusTone: Record<MachineStatus, "green" | "blue" | "gray" | "red"
 
 // ---------- Painel de Scores ----------
 function ScoresPanel() {
-  const machineRows = machines.map((m) => ({ m, b: scoreMachine(m.id) }));
-  const clientRows  = clients.map((c) => scoreClient(c.id));
-  const areaRows    = areas.map((a) => scoreArea(a.id));
-  const opTypeRows  = scoreByOperationType();
+  const { weights } = useRiskConfig();
+  const machineRows = machines.map((m) => ({ m, b: riskResultForMachine(m.id, weights) }));
+  const clientRows  = clients.map((c) => scoreClientWithWeights(c.id, weights));
+  const areaRows    = areas.map((a) => scoreAreaWithWeights(a.id, weights));
+  const opTypeRows  = scoreByOperationTypeWithWeights(weights);
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
@@ -412,9 +613,9 @@ function ScoresPanel() {
             <tr key={m.id} className="hover:bg-muted/40">
               <TD><div className="font-medium text-foreground">{m.name}</div><div className="text-xs text-muted-foreground">{m.id}</div></TD>
               <TD className="text-xs text-muted-foreground">{m.client}</TD>
-              <TD><ScoreBar score={b.total} /></TD>
-              <TD className="text-xs text-muted-foreground">{b.mainFactor}</TD>
-              <TD><RiskBadge score={b.total} /></TD>
+               <TD><ScoreBar score={b.finalScore} /></TD>
+               <TD className="text-xs text-muted-foreground">{dominantFactorLabel(b.dominantFactor)}</TD>
+               <TD><RiskBadge score={b.finalScore} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -475,10 +676,11 @@ function ScoresPanel() {
 }
 
 function MachinesTable() {
+  const { weights } = useRiskConfig();
   return (
     <TableShell headers={["ID", "Equipamento", "Tipo", "Cliente", "Área", "Operador", "Status", "Score", "Risco"]}>
       {machines.map((m) => {
-        const b = scoreMachine(m.id);
+        const b = riskResultForMachine(m.id, weights);
         return (
           <tr key={m.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{m.id}</TD>
@@ -488,8 +690,8 @@ function MachinesTable() {
             <TD>{m.area}</TD>
             <TD>{m.operator}</TD>
             <TD><StatusPill label={m.status} tone={machineStatusTone[m.status]} /></TD>
-            <TD><ScoreBar score={b.total} /></TD>
-            <TD><RiskBadge score={b.total} /></TD>
+            <TD><ScoreBar score={b.finalScore} /></TD>
+            <TD><RiskBadge score={b.finalScore} /></TD>
           </tr>
         );
       })}
@@ -498,10 +700,11 @@ function MachinesTable() {
 }
 
 function ClientsTable() {
+  const { weights } = useRiskConfig();
   return (
     <TableShell headers={["ID", "Cliente", "Localização", "Operação", "Máquinas", "Score médio", "Risco"]}>
       {clients.map((c) => {
-        const s = scoreClient(c.id);
+        const s = scoreClientWithWeights(c.id, weights);
         return (
           <tr key={c.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{c.id}</TD>
@@ -519,10 +722,11 @@ function ClientsTable() {
 }
 
 function AreasTable() {
+  const { weights } = useRiskConfig();
   return (
     <TableShell headers={["ID", "Área", "Cliente", "Tipo", "Condição", "Água", "Score", "Risco"]}>
       {areas.map((a) => {
-        const s = scoreArea(a.id);
+        const s = scoreAreaWithWeights(a.id, weights);
         return (
           <tr key={a.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
@@ -541,10 +745,11 @@ function AreasTable() {
 }
 
 function OperationsTable() {
+  const { weights } = useRiskConfig();
   return (
     <TableShell headers={["ID", "Máquina", "Tipo", "Área", "Início", "Duração", "Status", "Score", "Risco"]}>
       {operations.map((o) => {
-        const b = scoreOperation(o);
+        const b = riskResultForOperation(o, weights);
         return (
           <tr key={o.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{o.id}</TD>
@@ -559,8 +764,8 @@ function OperationsTable() {
                 tone={o.status === "Em andamento" ? "green" : o.status === "Concluída" ? "blue" : o.status === "Agendada" ? "yellow" : "red"}
               />
             </TD>
-            <TD><ScoreBar score={b.total} /></TD>
-            <TD><RiskBadge score={b.total} /></TD>
+            <TD><ScoreBar score={b.finalScore} /></TD>
+            <TD><RiskBadge score={b.finalScore} /></TD>
           </tr>
         );
       })}

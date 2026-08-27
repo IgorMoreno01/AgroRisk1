@@ -5,9 +5,10 @@ import {
   type Area,
   alerts, operations, machines,
 } from "@/lib/mock-data";
-import { scoreArea, scoreMachine, scoreOperation } from "@/lib/risk-score";
+import { scoreAreaWithWeights, riskResultForMachine, riskResultForOperation } from "@/lib/risk-score";
 import { recommendationsForArea } from "@/lib/recommendations";
 import { AlertTriangle, MapPin, Tractor, Activity, History, Flame } from "lucide-react";
+import { useRiskConfig } from "@/lib/risk-config";
 
 export function AreaDetailDialog({
   area,
@@ -18,8 +19,9 @@ export function AreaDetailDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const { weights } = useRiskConfig();
   if (!area) return null;
-  const s = scoreArea(area.id);
+  const s = scoreAreaWithWeights(area.id, weights);
   const areaMachines = machines.filter((m) => m.areaId === area.id);
   const areaOps = operations.filter((o) => o.areaId === area.id);
   const activeOps = areaOps.filter((o) => o.status === "Em andamento");
@@ -29,15 +31,15 @@ export function AreaDetailDialog({
   // Top fatores agregando operações
   const tally: Record<string, number> = {};
   areaOps.forEach((o) => {
-    const b = scoreOperation(o);
-    b.parts.forEach((p) => { if (p.points > 0) tally[p.label] = (tally[p.label] ?? 0) + p.points; });
+     const b = riskResultForOperation(o, weights).breakdown;
+     b.parts.forEach((p) => { if (p.points > 0) tally[p.label] = (tally[p.label] ?? 0) + p.points; });
   });
   const topFactors = Object.entries(tally)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4)
     .map(([label]) => label);
 
-  const recs = recommendationsForArea(area.id, "gestor");
+   const recs = recommendationsForArea(area.id, "gestor", { weights });
   const isPriority = s.score >= 80;
 
   return (
@@ -107,15 +109,15 @@ export function AreaDetailDialog({
             <ul className="space-y-2">
               {areaMachines.length === 0 && <li className="text-xs text-muted-foreground">Nenhuma máquina nesta área.</li>}
               {areaMachines.map((m) => {
-                const mb = scoreMachine(m.id);
+                 const mb = riskResultForMachine(m.id, weights);
                 return (
                   <li key={m.id} className="flex items-center gap-3 rounded-lg border border-border p-2.5 text-xs">
                     <div className="flex-1">
                       <div className="font-medium text-foreground">{m.name}</div>
                       <div className="text-muted-foreground">{m.id} · {m.status}</div>
                     </div>
-                    <ScoreBar score={mb.total} />
-                    <RiskBadge score={mb.total} />
+                     <ScoreBar score={mb.finalScore} />
+                     <RiskBadge score={mb.finalScore} />
                   </li>
                 );
               })}
@@ -129,14 +131,14 @@ export function AreaDetailDialog({
             <ul className="space-y-2">
               {activeOps.length === 0 && <li className="text-xs text-muted-foreground">Sem operações em andamento.</li>}
               {activeOps.map((o) => {
-                const b = scoreOperation(o);
+                 const b = riskResultForOperation(o, weights);
                 return (
                   <li key={o.id} className="flex items-center gap-3 rounded-lg border border-border p-2.5 text-xs">
                     <div className="flex-1">
                       <div className="font-medium text-foreground">{o.type}</div>
                       <div className="text-muted-foreground">{o.machineId} · {o.start}</div>
                     </div>
-                    <ScoreBar score={b.total} />
+                     <ScoreBar score={b.finalScore} />
                   </li>
                 );
               })}
@@ -170,14 +172,14 @@ export function AreaDetailDialog({
             <ul className="space-y-2">
               {concluded.length === 0 && <li className="text-xs text-muted-foreground">Sem registros recentes.</li>}
               {concluded.map((o) => {
-                const b = scoreOperation(o);
+                 const b = riskResultForOperation(o, weights);
                 return (
                   <li key={o.id} className="flex items-center gap-3 rounded-lg border border-border p-2.5 text-xs">
                     <div className="flex-1">
                       <div className="font-medium text-foreground">{o.type}</div>
                       <div className="text-muted-foreground">{o.machineId} · {o.status}</div>
                     </div>
-                    <ScoreBar score={b.total} />
+                     <ScoreBar score={b.finalScore} />
                   </li>
                 );
               })}

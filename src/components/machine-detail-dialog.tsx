@@ -7,9 +7,10 @@ import {
   type Machine,
   alerts, operationHistory, getOperator, getArea,
 } from "@/lib/mock-data";
-import { scoreMachine, currentOperationFor } from "@/lib/risk-score";
+import { riskResultForMachine, currentOperationFor, dominantFactorLabel } from "@/lib/risk-score";
 import { recommendationsForMachine, nextBestActionForMachine } from "@/lib/recommendations";
 import { AlertTriangle, MapPin, Tractor, User, Activity, History, Flame } from "lucide-react";
+import { useRiskConfig } from "@/lib/risk-config";
 
 export function MachineDetailDialog({
   machine,
@@ -20,17 +21,18 @@ export function MachineDetailDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const { weights } = useRiskConfig();
   if (!machine) return null;
   const op = currentOperationFor(machine.id);
-  const b = scoreMachine(machine.id);
+  const b = riskResultForMachine(machine.id, weights);
   const area = getArea(machine.areaId);
   const operator = getOperator(machine.operatorId);
   const machineAlerts = alerts.filter((a) => a.machineId === machine.id);
   const history = operationHistory.filter((h) => h.machineId === machine.id).slice(0, 5);
-  const recs = recommendationsForMachine(machine.id, "gestor");
-  const nextAction = nextBestActionForMachine(machine.id);
+  const recs = recommendationsForMachine(machine.id, "gestor", { weights, result: b });
+  const nextAction = nextBestActionForMachine(machine.id, { weights, result: b });
   const isHigh = b.level === "alto";
-  const isPriority = b.total >= 80;
+  const isPriority = b.finalScore >= 80;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -47,7 +49,7 @@ export function MachineDetailDialog({
               </DialogDescription>
             </div>
             <div className="flex flex-col items-end gap-2">
-              <RiskBadge score={b.total} />
+              <RiskBadge score={b.finalScore} />
               {isPriority && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-danger px-2.5 py-0.5 text-[11px] font-semibold text-danger-foreground">
                   <Flame className="h-3 w-3" /> Prioridade Alta
@@ -71,19 +73,19 @@ export function MachineDetailDialog({
             <div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">Score de risco</div>
               <div className="mt-0.5 text-3xl font-semibold tabular-nums text-foreground">
-                {b.total}<span className="text-base text-muted-foreground"> / 100</span>
+                 {b.finalScore}<span className="text-base text-muted-foreground"> / 100</span>
               </div>
             </div>
             <div className="text-right">
               <div className="text-xs uppercase tracking-wide text-muted-foreground">Principal fator</div>
-              <div className="mt-0.5 text-sm font-medium text-foreground">{b.mainFactor}</div>
+               <div className="mt-0.5 text-sm font-medium text-foreground">{dominantFactorLabel(b.dominantFactor)}</div>
             </div>
           </div>
         </div>
 
         <div>
           <h3 className="mb-3 text-sm font-semibold text-foreground">Composição do score</h3>
-          <RiskComposition breakdown={b} compact />
+           <RiskComposition breakdown={b.breakdown} compact />
         </div>
 
         <NextBestActionCard action={nextAction} />

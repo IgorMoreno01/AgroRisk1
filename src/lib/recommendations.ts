@@ -11,9 +11,11 @@ import {
   getMachine, getArea, getClient,
 } from "./mock-data";
 import {
-  scoreOperation, scoreMachine, scoreArea, scoreClient,
-  currentOperationFor, inputsForOperation,
-  type ScoreBreakdown, type ScorePart, type RiskLevel,
+  scoreMachine, scoreArea, scoreClientWithWeights,
+  currentOperationFor, inputsForOperationWithOverrides, riskResultForOperation,
+  riskResultForMachine, scoreAreaWithWeights,
+  type ScoreBreakdown, type ScorePart, type RiskLevel, type RiskResult,
+  type RiskWeights, type RiskInputs,
 } from "./risk-score";
 
 // ---------- Tipos ----------
@@ -41,6 +43,12 @@ export interface GeneratedRecommendation {
   factor: string; // categoria do fator (ex: "Proximidade de água")
 }
 
+export interface RiskEvaluationOptions {
+  weights?: Partial<RiskWeights>;
+  result?: RiskResult;
+  overrides?: Partial<RiskInputs>;
+}
+
 // ---------- Helpers ----------
 const partByCategory = (b: ScoreBreakdown, category: string): ScorePart | undefined =>
   b.parts.find((p) => p.category === category);
@@ -58,10 +66,15 @@ const historyAlertCount = (machineId: string) =>
   alerts.filter((a) => a.machineId === machineId).length;
 
 // ---------- Construtor de recomendações por fator ----------
-function recsForOperation(op: Operation, audience: RecAudience): GeneratedRecommendation[] {
-  const b = scoreOperation(op);
-  const inputs = inputsForOperation(op);
-  const baseP = priorityFromScore(b.total);
+function recsForOperation(
+  op: Operation,
+  audience: RecAudience,
+  options?: RiskEvaluationOptions,
+): GeneratedRecommendation[] {
+  const result = options?.result ?? riskResultForOperation(op, options?.weights, options?.overrides);
+  const b = result.breakdown;
+  const inputs = inputsForOperationWithOverrides(op, options?.overrides);
+  const baseP = priorityFromScore(result.finalScore);
   const candidates: GeneratedRecommendation[] = [];
 
   const push = (r: Omit<GeneratedRecommendation, "id" | "audience"> & Partial<Pick<GeneratedRecommendation, "id">>) => {
@@ -100,7 +113,7 @@ function recsForOperation(op: Operation, audience: RecAudience): GeneratedRecomm
         : "Avaliar adiamento da operação enquanto a chuva persistir.",
       rationale: `Condição climática: ${climaPart.detail.toLowerCase()} — eleva o risco em campo aberto.`,
       category: "Horário",
-      priority: b.level === "alto" ? "alta" : "média",
+      priority: result.level === "alto" ? "alta" : "média",
       factor: "Clima",
     });
   } else if (climaPart && climaPart.points >= 8) {
@@ -181,7 +194,7 @@ function recsForOperation(op: Operation, audience: RecAudience): GeneratedRecomm
         : "Programar inspeção e reforço de treinamento da equipe.",
       rationale: `Equipamento acumula ${histTotal} alerta(s) recente(s).`,
       category: histTotal >= 3 ? "Manutenção" : "Prevenção de sinistro",
-      priority: b.level === "alto" ? "alta" : "média",
+      priority: result.level === "alto" ? "alta" : "média",
       factor: "Histórico operacional",
     });
   }
@@ -191,10 +204,24 @@ function recsForOperation(op: Operation, audience: RecAudience): GeneratedRecomm
     push({
       title: "Manter operação dentro dos padrões",
       description: "Sem fatores críticos detectados no momento.",
-      rationale: `Score atual ${b.total}/100 — risco baixo.`,
+      rationale: `Score atual ${result.finalScore}/100 — risco baixo.`,
       category: "Prevenção de sinistro",
       priority: "baixa",
       factor: b.mainFactor,
+    });
+  }
+
+  // O componente predominante dá precedência às regras já existentes,
+  // preservando o comportamento determinístico e explicando o cenário atual.
+  if (result.dominantFactor !== "balanced") {
+    candidates.forEach((candidate) => {
+      const isClimateRule = candidate.factor === "Clima";
+      if (
+        (result.dominantFactor === "climate" && isClimateRule) ||
+        (result.dominantFactor === "operational" && !isClimateRule)
+      ) {
+        candidate.priority = bumpPriority(candidate.priority);
+      }
     });
   }
 
@@ -206,12 +233,16 @@ function recsForOperation(op: Operation, audience: RecAudience): GeneratedRecomm
 }
 
 // ---------- API pública ----------
-export const recommendationsForOperation = (op: Operation, audience: RecAudience = "operador") =>
-  recsForOperation(op, audience);
+export const recommendationsForOperation = (
+  op: Operation,
+  audience: RecAudience = "operador",
+  options?: RiskEvaluationOptions,
+) => recsForOperation(op, audience, options);
 
 export function recommendationsForMachine(
   machineId: string,
   audience: RecAudience = "gestor",
+  options?: RiskEvaluationOptions,
 ): GeneratedRecommendation[] {
   const op = currentOperationFor(machineId);
   if (!op) {
@@ -227,29 +258,33 @@ export function recommendationsForMachine(
       factor: "Histórico operacional",
     }];
   }
-  return recsForOperation(op, audience);
+  return recsForOperation(op, audience, options);
 }
 
 export function recommendationsForArea(
   areaId: string,
   audience: RecAudience = "gestor",
+  options?: RiskEvaluationOptions,
 ): GeneratedRecommendation[] {
   const ops = operations.filter((o) => o.areaId === areaId);
   if (ops.length === 0) return [];
   // pega a operação de maior score na área
-  const top = [...ops].sort((a, b) => scoreOperation(b).total - scoreOperation(a).total)[0];
-  return recsForOperation(top, audience);
+  const top = [...ops].sort(
+    (a, b) => riskResultForOperation(b, options?.weights).finalScore - riskResultForOperation(a, options?.weights).finalScore,
+  )[0];
+  return recsForOperation(top, audience, options);
 }
 
 export function recommendationsForClient(
   clientId: string,
   audience: RecAudience = "consultor",
+  options?: RiskEvaluationOptions,
 ): GeneratedRecommendation[] {
-  const cs = scoreClient(clientId);
+  const cs = scoreClientWithWeights(clientId, options?.weights);
   // Agrega: top 3 entre todas as máquinas do cliente
   const ms = machines.filter((m) => m.clientId === clientId);
   const all: GeneratedRecommendation[] = [];
-  ms.forEach((m) => all.push(...recommendationsForMachine(m.id, audience)));
+  ms.forEach((m) => all.push(...recommendationsForMachine(m.id, audience, options)));
   // dedup por (title + factor)
   const seen = new Set<string>();
   const unique = all.filter((r) => {
@@ -272,8 +307,11 @@ export interface NextBestAction {
   category: RecCategory;
 }
 
-export function nextBestActionForOperation(op: Operation): NextBestAction {
-  const [first] = recsForOperation(op, "operador");
+export function nextBestActionForOperation(
+  op: Operation,
+  options?: RiskEvaluationOptions,
+): NextBestAction {
+  const [first] = recsForOperation(op, "operador", options);
   return {
     title: first.title,
     description: first.description,
@@ -283,7 +321,10 @@ export function nextBestActionForOperation(op: Operation): NextBestAction {
   };
 }
 
-export function nextBestActionForMachine(machineId: string): NextBestAction {
+export function nextBestActionForMachine(
+  machineId: string,
+  options?: RiskEvaluationOptions,
+): NextBestAction {
   const op = currentOperationFor(machineId);
   if (!op) {
     return {
@@ -294,14 +335,14 @@ export function nextBestActionForMachine(machineId: string): NextBestAction {
       category: "Manutenção",
     };
   }
-  return nextBestActionForOperation(op);
+  return nextBestActionForOperation(op, options);
 }
 
 // ---------- Explicação narrativa (consultor) ----------
-export function clientExplanation(clientId: string): string {
+export function clientExplanation(clientId: string, options?: RiskEvaluationOptions): string {
   const c = getClient(clientId)!;
-  const cs = scoreClient(clientId);
-  const recs = recommendationsForClient(clientId, "consultor");
+  const cs = scoreClientWithWeights(clientId, options?.weights);
+  const recs = recommendationsForClient(clientId, "consultor", options);
   const top = recs[0];
   const actions = recs.slice(0, 3).map((r) => r.title.toLowerCase()).join("; ");
   return (
@@ -324,24 +365,24 @@ export interface AdminRecRow {
   rec: GeneratedRecommendation;
 }
 
-export function allRecommendationsConsolidated(): AdminRecRow[] {
+export function allRecommendationsConsolidated(weights?: Partial<RiskWeights>): AdminRecRow[] {
   const rows: AdminRecRow[] = [];
   machines.forEach((m) => {
-    const b = scoreMachine(m.id);
-    recommendationsForMachine(m.id, "gestor").forEach((rec) =>
+    const result = riskResultForMachine(m.id, weights);
+    recommendationsForMachine(m.id, "gestor", { weights, result }).forEach((rec) =>
       rows.push({
         clientName: m.client,
         target: m.code,
         targetType: "equipamento",
-        score: b.total,
-        level: b.level,
+        score: result.finalScore,
+        level: result.level,
         rec,
       }),
     );
   });
   areas.forEach((a) => {
-    const s = scoreArea(a.id);
-    recommendationsForArea(a.id, "gestor").forEach((rec) =>
+    const s = scoreAreaWithWeights(a.id, weights);
+    recommendationsForArea(a.id, "gestor", { weights }).forEach((rec) =>
       rows.push({
         clientName: a.client,
         target: a.name,

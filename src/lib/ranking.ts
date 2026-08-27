@@ -9,7 +9,9 @@ import {
 } from "./mock-data";
 import {
   scoreMachine, scoreArea, scoreOperation, scoreByOperationType,
-  currentOperationFor, type ScoreBreakdown,
+  riskResultForMachine, riskResultForOperation, scoreAreaWithWeights,
+  scoreByOperationTypeWithWeights, dominantFactorLabel,
+  currentOperationFor, type ScoreBreakdown, type RiskWeights,
 } from "./risk-score";
 
 // ---------- Filtros ----------
@@ -72,18 +74,21 @@ export interface AreaRankRow {
 }
 
 // ---------- Rankings ----------
-export function rankMachines(filters: RankingFilters = {}): MachineRankRow[] {
+export function rankMachines(
+  filters: RankingFilters = {},
+  weights?: Partial<RiskWeights>,
+): MachineRankRow[] {
   return machines
     .map<MachineRankRow>((m) => {
       const op = currentOperationFor(m.id);
-      const b = scoreMachine(m.id);
+      const result = riskResultForMachine(m.id, weights);
       return {
         machine: m,
         operation: op,
-        score: b.total,
-        level: b.level,
-        mainFactor: b.mainFactor,
-        breakdown: b,
+        score: result.finalScore,
+        level: result.level,
+        mainFactor: dominantFactorLabel(result.dominantFactor),
+        breakdown: result.breakdown,
         alertsCount: alertsByMachineCount(m.id),
         criticalAlerts: criticalAlertsByMachineCount(m.id),
       };
@@ -99,12 +104,15 @@ export function rankMachines(filters: RankingFilters = {}): MachineRankRow[] {
     );
 }
 
-export function rankAreas(filters: RankingFilters = {}): AreaRankRow[] {
+export function rankAreas(
+  filters: RankingFilters = {},
+  weights?: Partial<RiskWeights>,
+): AreaRankRow[] {
   return areas
     .map<AreaRankRow>((a) => {
-      const s = scoreArea(a.id);
+      const s = scoreAreaWithWeights(a.id, weights);
       const ms = machinesInArea(a.id);
-      const machinesHigh = ms.filter((m) => scoreMachine(m.id).level === "alto").length;
+      const machinesHigh = ms.filter((m) => riskResultForMachine(m.id, weights).level === "alto").length;
       return {
         area: a,
         score: s.score,
@@ -136,18 +144,24 @@ export interface OpTypeRankRow {
   mainFactor: string;
 }
 
-export function rankOperationTypes(filters: RankingFilters = {}): OpTypeRankRow[] {
-  return scoreByOperationType()
+export function rankOperationTypes(
+  filters: RankingFilters = {},
+  weights?: Partial<RiskWeights>,
+): OpTypeRankRow[] {
+  return scoreByOperationTypeWithWeights(weights)
     .map<OpTypeRankRow>((s) => {
       const ops = operations.filter((o) => o.type === s.type &&
         passClient(o.clientId, filters) &&
         passArea(o.areaId, filters));
-      const scores = ops.map((o) => scoreOperation(o));
+      const scores = ops.map((o) => riskResultForOperation(o, weights));
       const total = scores.length
-        ? Math.round(scores.reduce((a, b) => a + b.total, 0) / scores.length)
+        ? Math.round(scores.reduce((a, b) => a + b.finalScore, 0) / scores.length)
         : 0;
       const tally: Record<string, number> = {};
-      scores.forEach((b) => { tally[b.mainFactor] = (tally[b.mainFactor] ?? 0) + 1; });
+      scores.forEach((result) => {
+        const label = dominantFactorLabel(result.dominantFactor);
+        tally[label] = (tally[label] ?? 0) + 1;
+      });
       const mainFactor = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
       return {
         type: s.type,
@@ -166,8 +180,10 @@ export function rankOperationTypes(filters: RankingFilters = {}): OpTypeRankRow[
 }
 
 // ---------- Top N e distribuição ----------
-export const topMachines = (n = 3, f: RankingFilters = {}) => rankMachines(f).slice(0, n);
-export const topAreas    = (n = 3, f: RankingFilters = {}) => rankAreas(f).slice(0, n);
+export const topMachines = (n = 3, f: RankingFilters = {}, weights?: Partial<RiskWeights>) =>
+  rankMachines(f, weights).slice(0, n);
+export const topAreas = (n = 3, f: RankingFilters = {}, weights?: Partial<RiskWeights>) =>
+  rankAreas(f, weights).slice(0, n);
 
 export interface RiskDistribution {
   alto: number;
@@ -176,8 +192,11 @@ export interface RiskDistribution {
   total: number;
 }
 
-export function machineDistribution(f: RankingFilters = {}): RiskDistribution {
-  const rows = rankMachines({ ...f, level: "all" });
+export function machineDistribution(
+  f: RankingFilters = {},
+  weights?: Partial<RiskWeights>,
+): RiskDistribution {
+  const rows = rankMachines({ ...f, level: "all" }, weights);
   return {
     alto:  rows.filter((r) => r.level === "alto").length,
     medio: rows.filter((r) => r.level === "medio").length,
@@ -186,8 +205,11 @@ export function machineDistribution(f: RankingFilters = {}): RiskDistribution {
   };
 }
 
-export function areaDistribution(f: RankingFilters = {}): RiskDistribution {
-  const rows = rankAreas({ ...f, level: "all" });
+export function areaDistribution(
+  f: RankingFilters = {},
+  weights?: Partial<RiskWeights>,
+): RiskDistribution {
+  const rows = rankAreas({ ...f, level: "all" }, weights);
   return {
     alto:  rows.filter((r) => r.level === "alto").length,
     medio: rows.filter((r) => r.level === "medio").length,
@@ -197,9 +219,12 @@ export function areaDistribution(f: RankingFilters = {}): RiskDistribution {
 }
 
 // ---------- Resumo executivo de priorização ----------
-export function priorityHeadline(f: RankingFilters = {}): string {
-  const tops = topMachines(2, f);
-  const topAreasList = topAreas(2, f);
+export function priorityHeadline(
+  f: RankingFilters = {},
+  weights?: Partial<RiskWeights>,
+): string {
+  const tops = topMachines(2, f, weights);
+  const topAreasList = topAreas(2, f, weights);
   if (tops.length === 0) {
     return "Nenhum equipamento ou área atende aos filtros atuais.";
   }

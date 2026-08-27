@@ -19,6 +19,7 @@ import {
   Activity,
   Database,
   Layers,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -77,6 +78,7 @@ const NAV_BY_PROFILE: Record<ProfileId, NavItem[]> = {
     { label: "Áreas",         icon: MapPin,      to: "/admin", href: "#areas" },
     { label: "Operações",     icon: Wrench,      to: "/admin", href: "#operations" },
     { label: "Alertas",       icon: Bell,        to: "/admin", href: "#alerts" },
+    { label: "Motor de risco", icon: SlidersHorizontal, to: "/admin", href: "#motor-risco" },
   ],
 };
 
