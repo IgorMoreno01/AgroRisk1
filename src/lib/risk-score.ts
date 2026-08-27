@@ -24,21 +24,49 @@ export interface RiskInputs {
   terrain: Terrain;
 }
 
-// ---------- Regras de pontos (cada fator com seu máximo) ----------
-const WEATHER_PTS: Record<Weather, number> = { normal: 3, leve: 8, moderada: 14, forte: 20 };
-const WATER_PTS: Record<WaterDistance, number>  = { acima_150: 0, "100_150": 8, "50_100": 16, abaixo_50: 25 };
-const OPTYPE_PTS: Record<OperationType, number> = {
-  "Trabalho no campo": 8,
-  "Transporte": 12,
-  "Pulverização": 10,
-  "Colheita": 10,
-  "Deslocamento interno": 6,
-  "Operação próxima de água": 20,
-};
-const SPEED_PTS: Record<Speed, number> = { ok: 0, leve: 5, muito: 10 };
-const TERRAIN_PTS: Record<Terrain, number> = { normal: 0, umido: 4, critico: 8, baixa_aderencia: 10 };
+// ---------- Regras de pontos ----------
+// Os máximos vêm dos pesos mockados da Sompo. Assim, a soma dos seis
+// fatores representa exatamente 100 pontos no cenário de risco máximo.
+const factorWeight = (category: string) =>
+  riskFactors.find((factor) => factor.category === category)?.weight ?? 0;
 
-const historyPts = (n: number) => (n <= 0 ? 0 : n === 1 ? 5 : n === 2 ? 10 : 15);
+const WEATHER_MAX = factorWeight("Clima");
+const WATER_MAX = factorWeight("Proximidade de água");
+const OPERATION_MAX = factorWeight("Tipo de operação");
+const HISTORY_MAX = factorWeight("Histórico operacional");
+const SPEED_MAX = factorWeight("Velocidade/rota");
+const TERRAIN_MAX = factorWeight("Condição do terreno");
+
+const WEATHER_PTS: Record<Weather, number> = {
+  normal: Math.round(WEATHER_MAX * 0.15),
+  leve: Math.round(WEATHER_MAX * 0.4),
+  moderada: Math.round(WEATHER_MAX * 0.7),
+  forte: WEATHER_MAX,
+};
+const WATER_PTS: Record<WaterDistance, number>  = {
+  acima_150: 0,
+  "100_150": Math.round(WATER_MAX * 0.33),
+  "50_100": Math.round(WATER_MAX * 0.67),
+  abaixo_50: WATER_MAX,
+};
+const OPTYPE_PTS: Record<OperationType, number> = {
+  "Trabalho no campo": Math.round(OPERATION_MAX * 0.4),
+  "Transporte": Math.round(OPERATION_MAX * 0.6),
+  "Pulverização": Math.round(OPERATION_MAX * 0.53),
+  "Colheita": Math.round(OPERATION_MAX * 0.53),
+  "Deslocamento interno": Math.round(OPERATION_MAX * 0.27),
+  "Operação próxima de água": OPERATION_MAX,
+};
+const SPEED_PTS: Record<Speed, number> = { ok: 0, leve: Math.round(SPEED_MAX * 0.5), muito: SPEED_MAX };
+const TERRAIN_PTS: Record<Terrain, number> = {
+  normal: 0,
+  umido: Math.round(TERRAIN_MAX * 0.47),
+  critico: Math.round(TERRAIN_MAX * 0.87),
+  baixa_aderencia: TERRAIN_MAX,
+};
+
+const historyPts = (n: number) =>
+  n <= 0 ? 0 : n === 1 ? Math.round(HISTORY_MAX / 3) : n === 2 ? Math.round(HISTORY_MAX * 0.67) : HISTORY_MAX;
 
 // ---------- Rótulos legíveis ----------
 const weatherLabel: Record<Weather, string> = {
@@ -117,12 +145,12 @@ export function normalizeRiskWeights(value?: Partial<RiskWeights>): RiskWeights 
 
 export function calculateScore(inputs: RiskInputs): ScoreBreakdown {
   const parts: ScorePart[] = [
-    { category: "Clima",                 label: "Clima",                 detail: weatherLabel[inputs.weather],     points: WEATHER_PTS[inputs.weather], max: 20 },
-    { category: "Proximidade de água",   label: "Proximidade de água",   detail: waterLabel[inputs.waterDistance], points: WATER_PTS[inputs.waterDistance], max: 25 },
-    { category: "Tipo de operação",      label: "Tipo de operação",      detail: inputs.operationType,             points: OPTYPE_PTS[inputs.operationType], max: 20 },
-    { category: "Histórico operacional", label: "Histórico operacional", detail: `${inputs.historyAlertCount} alerta(s) anterior(es)`, points: historyPts(inputs.historyAlertCount), max: 15 },
-    { category: "Velocidade/rota",       label: "Velocidade / rota",     detail: speedLabel[inputs.speed],         points: SPEED_PTS[inputs.speed], max: 10 },
-    { category: "Condição do terreno",   label: "Condição do terreno",   detail: terrainLabel[inputs.terrain],     points: TERRAIN_PTS[inputs.terrain], max: 10 },
+    { category: "Clima",                 label: "Clima",                 detail: weatherLabel[inputs.weather],     points: WEATHER_PTS[inputs.weather], max: WEATHER_MAX },
+    { category: "Proximidade de água",   label: "Proximidade de água",   detail: waterLabel[inputs.waterDistance], points: WATER_PTS[inputs.waterDistance], max: WATER_MAX },
+    { category: "Tipo de operação",      label: "Tipo de operação",      detail: inputs.operationType,             points: OPTYPE_PTS[inputs.operationType], max: OPERATION_MAX },
+    { category: "Histórico operacional", label: "Histórico operacional", detail: `${inputs.historyAlertCount} alerta(s) anterior(es)`, points: historyPts(inputs.historyAlertCount), max: HISTORY_MAX },
+    { category: "Velocidade/rota",       label: "Velocidade / rota",     detail: speedLabel[inputs.speed],         points: SPEED_PTS[inputs.speed], max: SPEED_MAX },
+    { category: "Condição do terreno",   label: "Condição do terreno",   detail: terrainLabel[inputs.terrain],     points: TERRAIN_PTS[inputs.terrain], max: TERRAIN_MAX },
   ];
   const total = clamp(parts.reduce((s, p) => s + p.points, 0));
   const main  = [...parts].sort((a, b) => b.points - a.points)[0];
