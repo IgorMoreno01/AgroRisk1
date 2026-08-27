@@ -1,0 +1,987 @@
+# CONTEXTO DO PROJETO — AGRORISK
+
+Estamos desenvolvendo o **AgroRisk**, uma aplicação web de monitoramento e análise de risco voltada para seguros de máquinas e operações agrícolas.
+
+O projeto já possui diferentes perfis de acesso, incluindo:
+
+* Gestor
+* Operador
+* Consultor/Corretor
+* Admin/Sompo
+
+Nesta tarefa, quero trabalhar **EXCLUSIVAMENTE no acesso Admin/Sompo** para criação das configurações descritas abaixo.
+
+As demais telas e perfis **NÃO deverão poder modificar essas configurações**.
+
+Entretanto, as recomendações, classificações e scores exibidos aos demais usuários deverão posteriormente utilizar a configuração definida pela Sompo.
+
+---
+
+# OBJETIVO DESTA TAREFA
+
+Quero que você trabalhe inicialmente em **PLAN MODE**.
+
+**NÃO implemente nada ainda.**
+
+Primeiro:
+
+1. analise a arquitetura atual do projeto;
+2. identifique os arquivos, componentes, rotas e serviços envolvidos;
+3. identifique onde o sistema de score/recomendações está atualmente implementado;
+4. identifique como incorporar essa nova camada sem quebrar funcionalidades existentes;
+5. proponha a solução mais simples possível para o MVP;
+6. apresente um plano de implementação dividido em etapas;
+7. identifique o que é realmente necessário para a apresentação final;
+8. deixe funcionalidades mais sofisticadas claramente classificadas como futuras.
+
+Nosso prazo é curto.
+
+A apresentação final está prevista aproximadamente para **17 de setembro de 2026**.
+
+Portanto:
+
+> PRIORIZE SIMPLICIDADE, EXPLICABILIDADE, ESTABILIDADE E ENTREGA.
+
+Não proponha arquiteturas excessivamente complexas.
+
+Não transforme o projeto em uma solução enterprise.
+
+Não adicione tecnologias sem necessidade.
+
+---
+
+# NOVA ARQUITETURA DE RISCO
+
+Estamos desenvolvendo uma arquitetura baseada em **dois componentes principais de risco**.
+
+## 1. RISCO CLIMÁTICO
+
+Teremos um modelo relacionado ao risco climático.
+
+O objetivo será produzir algo semelhante a:
+
+`risco_climatico = 0 a 100`
+
+ou:
+
+`probabilidade_risco_climatico = 0 a 1`
+
+Esse componente deverá representar condições ambientais que possam aumentar a possibilidade de ocorrência de um sinistro.
+
+Exemplos de fatores climáticos que poderão ser utilizados conforme os dados disponíveis:
+
+* chuva;
+* chuva intensa;
+* precipitação acumulada;
+* vento;
+* temperaturas extremas;
+* tempestades;
+* condições meteorológicas adversas.
+
+IMPORTANTE:
+
+Não crie dados que não existam.
+
+O modelo deve utilizar somente variáveis realmente disponíveis nas bases que serão utilizadas.
+
+---
+
+# 2. RISCO OPERACIONAL / SINISTRO DE MÁQUINA
+
+Teremos outro modelo relacionado ao risco operacional das máquinas agrícolas.
+
+Esse modelo será baseado principalmente no histórico de sinistros disponível nas bases da SUSEP.
+
+O objetivo será produzir algo semelhante a:
+
+`risco_operacional = 0 a 100`
+
+ou:
+
+`probabilidade_risco_operacional = 0 a 1`
+
+Ele deverá considerar riscos relacionados a eventos como, quando disponíveis nos dados:
+
+* colisão;
+* abalroamento;
+* capotagem;
+* queda acidental;
+* danos elétricos;
+* incêndio;
+* furto;
+* roubo;
+* impacto;
+* acidentes;
+* outras causas operacionalmente relacionadas à máquina.
+
+Não assuma que conseguiremos prever mecanicamente uma falha específica da máquina.
+
+Estamos trabalhando com **probabilidade/risco baseado em dados históricos**, não com manutenção preditiva completa.
+
+---
+
+# MODELO DE MACHINE LEARNING
+
+A abordagem atualmente planejada é utilizar **Regressão Logística**.
+
+Já existe código de Regressão Logística desenvolvido por outro integrante do grupo.
+
+Portanto:
+
+* não proponha substituir o modelo apenas porque outra técnica poderia apresentar maior performance;
+* priorize aproveitar e adaptar o código já existente;
+* a arquitetura deve permitir integrar os resultados dos modelos ao AgroRisk;
+* modelos mais sofisticados poderão ser avaliados futuramente.
+
+O objetivo do MVP não é possuir o modelo matematicamente mais sofisticado possível.
+
+O objetivo é possuir um sistema:
+
+* funcional;
+* demonstrável;
+* explicável;
+* integrado ao produto.
+
+---
+
+# TELEMETRIA — RESTRIÇÃO MUITO IMPORTANTE
+
+NÃO considere telemetria avançada da máquina.
+
+No MVP, o único dado proveniente de telemetria/sensor que pretendemos utilizar é:
+
+## INCLINAÇÃO
+
+A inclinação poderá futuramente ser recebida através de sensores como ESP32/MPU6050.
+
+Para esta arquitetura, considere apenas algo como:
+
+`inclinacao = X graus`
+
+A inclinação poderá contribuir para o risco operacional.
+
+NÃO incluir:
+
+* RPM;
+* temperatura do motor;
+* pressão do óleo;
+* consumo de combustível;
+* vibração do motor;
+* horas de motor;
+* velocidade via telemetria;
+* CAN Bus;
+* OBD;
+* diagnóstico eletrônico;
+* manutenção preditiva;
+* sensores que ainda não possuímos.
+
+Não queremos prometer funcionalidades que não conseguiremos entregar.
+
+---
+
+# CAMADA DE COMBINAÇÃO DOS RISCOS
+
+Os dois componentes deverão gerar scores independentes.
+
+Exemplo:
+
+`Risco Climático = 72%`
+
+`Risco Operacional = 45%`
+
+Depois deverá existir uma camada simples responsável pela combinação desses resultados.
+
+Exemplo conceitual:
+
+`Score Final = (Risco Climático × Peso Climático) + (Risco Operacional × Peso Operacional)`
+
+Os pesos serão definidos pela **Sompo**.
+
+Exemplo:
+
+Sompo seleciona:
+
+`Clima = 70%`
+
+`Operacional = 30%`
+
+Então:
+
+`Score Final = Risco Climático × 0.70 + Risco Operacional × 0.30`
+
+Outro cenário:
+
+`Clima = 30%`
+
+`Operacional = 70%`
+
+Nesse caso, o sistema deverá dar maior importância aos fatores operacionais.
+
+---
+
+# REGRA FUNDAMENTAL
+
+Os pesos devem totalizar:
+
+**100%**
+
+Portanto:
+
+`Peso Climático + Peso Operacional = 100%`
+
+A interface precisa impedir ou corrigir configurações inválidas.
+
+Para o MVP, prefira uma solução extremamente simples.
+
+Por exemplo:
+
+* slider de Clima;
+* automaticamente o peso Operacional vira `100 - Clima`;
+
+OU
+
+* dois campos percentuais;
+* validação impedindo salvar enquanto a soma for diferente de 100%.
+
+Avalie qual solução apresenta menor complexidade e melhor UX.
+
+---
+
+# IMPORTANTE — NÃO RETREINAR O MODELO AO ALTERAR OS PESOS
+
+A alteração dos pesos pela Sompo **NÃO deve retreinar os modelos de Machine Learning**.
+
+Os modelos produzem seus scores independentemente.
+
+A configuração da Sompo apenas altera a **combinação final dos scores**.
+
+Arquitetura esperada:
+
+```text
+                 DADOS
+                   │
+        ┌──────────┴──────────┐
+        │                     │
+        ▼                     ▼
+ MODELO CLIMÁTICO      MODELO OPERACIONAL
+        │                     │
+        ▼                     ▼
+      Score                  Score
+       72%                    45%
+        │                     │
+        └──────────┬──────────┘
+                   │
+                   ▼
+          CAMADA DE PONDERAÇÃO
+                   │
+          ┌────────┴────────┐
+          │                 │
+          ▼                 ▼
+     Peso Clima       Peso Operacional
+        70%                 30%
+          │                 │
+          └────────┬────────┘
+                   ▼
+              SCORE FINAL
+                   │
+                   ▼
+        FATORES DOMINANTES
+                   │
+                   ▼
+            RECOMENDAÇÕES
+```
+
+---
+
+# MINI DASHBOARD EXCLUSIVO DA SOMPO
+
+Quero criar dentro do acesso **Admin/Sompo** um pequeno dashboard de configuração.
+
+Ele deve ser simples e visual.
+
+Nome sugerido da seção:
+
+## Configuração do Motor de Risco
+
+O dashboard poderá conter:
+
+### Card 1 — Peso Climático
+
+Exemplo:
+
+`70%`
+
+Controle simples para alterar o valor.
+
+---
+
+### Card 2 — Peso Operacional
+
+Exemplo:
+
+`30%`
+
+Se utilizarmos um único slider, esse valor poderá ser calculado automaticamente.
+
+---
+
+### Card 3 — Simulação do Score
+
+Mostrar de maneira simples como a configuração influencia um cenário.
+
+Exemplo:
+
+```text
+Risco Climático:      72%
+Risco Operacional:    45%
+
+Peso Climático:       70%
+Peso Operacional:     30%
+
+Score Final:          64%
+```
+
+Essa simulação poderá utilizar os dados disponíveis no sistema ou um exemplo claramente identificado como demonstração, dependendo do estado atual da aplicação.
+
+Não mascarar dados simulados como dados reais.
+
+---
+
+# PERFIL DOMINANTE DE RISCO
+
+A partir dos pesos configurados e dos scores existentes, quero avaliar uma classificação extremamente simples do fator dominante.
+
+Por exemplo:
+
+### Cenário A
+
+```text
+Clima: 80%
+Operacional: 20%
+```
+
+Resultado:
+
+`Predominância: Risco Climático`
+
+### Cenário B
+
+```text
+Clima: 25%
+Operacional: 75%
+```
+
+Resultado:
+
+`Predominância: Risco Operacional`
+
+### Cenário C
+
+```text
+Clima: 50%
+Operacional: 50%
+```
+
+Resultado:
+
+`Predominância: Risco Balanceado`
+
+Não criar algoritmos complexos para isso.
+
+---
+
+# RECOMENDAÇÕES
+
+Esse é um dos pontos mais importantes.
+
+As recomendações exibidas pelo AgroRisk deverão considerar:
+
+1. score climático;
+2. score operacional;
+3. configuração de pesos definida pela Sompo;
+4. fator predominante.
+
+---
+
+## EXEMPLO — PESO MAIOR PARA CLIMA
+
+Configuração Sompo:
+
+```text
+Clima:       75%
+Operacional: 25%
+```
+
+Se houver risco elevado relacionado à chuva, o sistema poderá priorizar recomendações como:
+
+* evitar operação durante chuva intensa;
+* avaliar condições meteorológicas antes da operação;
+* aguardar melhora das condições;
+* aumentar atenção em áreas potencialmente escorregadias.
+
+---
+
+## EXEMPLO — PESO MAIOR PARA OPERACIONAL
+
+Configuração:
+
+```text
+Clima:       25%
+Operacional: 75%
+```
+
+As recomendações poderão enfatizar fatores como:
+
+* atenção ao histórico de acidentes;
+* cuidado em terrenos com inclinação elevada;
+* evitar operação em situações de risco identificadas;
+* reforçar procedimentos operacionais.
+
+---
+
+# IMPORTANTE SOBRE AS RECOMENDAÇÕES
+
+Para o MVP, NÃO quero criar inicialmente:
+
+* LLM;
+* RAG;
+* agente de IA;
+* sistema generativo;
+* motor complexo de recomendações;
+* modelo adicional de Machine Learning.
+
+Prefira um mecanismo simples baseado em:
+
+```text
+condição → recomendação
+```
+
+Por exemplo:
+
+```text
+IF clima_alto AND chuva_intensa
+→ "Considere suspender a operação durante períodos de chuva intensa."
+```
+
+ou:
+
+```text
+IF operacional_alto AND inclinacao_alta
+→ "Atenção: operação em área com inclinação elevada."
+```
+
+Quero que as recomendações sejam:
+
+* determinísticas;
+* explicáveis;
+* fáceis de demonstrar;
+* fáceis de testar;
+* fáceis de alterar.
+
+---
+
+# PROPAGAÇÃO PARA OS OUTROS PERFIS
+
+Somente a Sompo poderá modificar os pesos.
+
+Entretanto, depois que os pesos forem salvos:
+
+```text
+Configuração Sompo
+        ↓
+Motor de Risco
+        ↓
+Score Final
+        ↓
+Recomendações
+        ↓
+Gestor
+Operador
+Consultor
+Admin/Sompo
+```
+
+Os demais perfis devem apenas consumir o resultado.
+
+Eles NÃO devem possuir:
+
+* sliders de peso;
+* configuração dos pesos;
+* possibilidade de modificar a estratégia do motor de risco.
+
+---
+
+# PERSISTÊNCIA
+
+Analise a infraestrutura atual do projeto e proponha a solução mais simples para persistir:
+
+```text
+peso_climatico
+peso_operacional
+updated_at
+```
+
+Opcionalmente:
+
+```text
+updated_by
+```
+
+Não adicione infraestrutura pesada apenas para armazenar essa configuração.
+
+Se o projeto ainda não possuir banco de dados adequado, apresente:
+
+### Opção MVP
+
+A implementação mais simples possível.
+
+### Opção futura
+
+Como isso poderia ser levado para um banco de dados real em produção.
+
+Mas para esta sprint, priorize aquilo que realmente conseguiremos demonstrar.
+
+---
+
+# CONFIGURAÇÃO PADRÃO
+
+Caso nenhuma configuração tenha sido salva pela Sompo, sugira um default conservador.
+
+Preferencialmente:
+
+```text
+Clima:       50%
+Operacional: 50%
+```
+
+Assim nenhum dos dois modelos é favorecido inicialmente.
+
+---
+
+# SCORE FINAL
+
+Para o MVP, prefira manter o cálculo transparente.
+
+Exemplo:
+
+```text
+score_final =
+(score_climatico * peso_climatico)
++
+(score_operacional * peso_operacional)
+```
+
+Depois normalizar para:
+
+```text
+0–100
+```
+
+Classificação sugerida, caso seja compatível com as regras atuais da aplicação:
+
+```text
+0–40   = Baixo
+41–70  = Médio
+71–100 = Alto
+```
+
+ANTES de implementar esses thresholds, verifique se o AgroRisk já possui alguma regra semelhante.
+
+Se já existir, priorize reutilizá-la para evitar regras duplicadas.
+
+---
+
+# EXPLICABILIDADE
+
+Quero que o sistema consiga mostrar de maneira simples por que determinado score foi obtido.
+
+Algo como:
+
+```text
+Score final: 68
+
+Composição:
+
+Clima:
+Score: 80
+Peso: 60%
+Contribuição: 48 pontos
+
+Operacional:
+Score: 50
+Peso: 40%
+Contribuição: 20 pontos
+
+Total:
+68 pontos
+```
+
+Isso é importante porque a Sompo precisa conseguir compreender o cálculo.
+
+Não precisamos de SHAP, LIME ou ferramentas avançadas de explicabilidade nesta sprint.
+
+A própria composição matemática já será suficiente para o MVP.
+
+---
+
+# INCLINAÇÃO
+
+A inclinação será o único dado de telemetria considerado.
+
+Analise como incorporar algo simples como:
+
+```text
+inclinacao_graus
+```
+
+ao componente operacional.
+
+Não quero que você invente thresholds arbitrários sem sinalizar isso.
+
+Caso sejam necessários limites de demonstração, classifique-os claramente como:
+
+`Regra provisória do MVP`
+
+e deixe-os centralizados/configuráveis no código.
+
+---
+
+# SEGURANÇA / PERMISSÃO
+
+Confirme que somente o perfil:
+
+`Admin/Sompo`
+
+consiga:
+
+* visualizar o painel de configuração;
+* alterar os pesos;
+* salvar a configuração.
+
+Os demais usuários podem visualizar os resultados derivados da configuração, mas não editar os parâmetros.
+
+Reutilize o sistema atual de autenticação/autorização sempre que possível.
+
+Não crie um novo sistema de autenticação apenas para essa funcionalidade.
+
+---
+
+# PRINCÍPIO DE DESENVOLVIMENTO
+
+Sempre escolha:
+
+**Solução simples funcionando > arquitetura sofisticada incompleta**
+
+Estamos construindo um MVP acadêmico/demonstrável.
+
+Portanto, NÃO adicionar sem necessidade:
+
+* microserviços;
+* Kafka;
+* filas;
+* Redis;
+* Kubernetes;
+* event sourcing;
+* vector database;
+* RAG;
+* agentes de IA;
+* novos frameworks;
+* telemetria adicional;
+* manutenção preditiva;
+* pipelines complexos de MLOps;
+* treinamento automático;
+* AutoML.
+
+Esses itens podem aparecer como evolução futura, mas NÃO como requisito desta sprint.
+
+---
+
+# O QUE EU QUERO QUE VOCÊ FAÇA AGORA NO PLAN MODE
+
+Antes de escrever código, faça uma análise completa do projeto atual.
+
+Quero receber um plano contendo obrigatoriamente:
+
+## 1. ESTADO ATUAL
+
+Identifique:
+
+* onde está o dashboard Admin/Sompo;
+* onde está o motor de score atual;
+* onde ficam as recomendações;
+* como os perfis são controlados;
+* quais dados atualmente são reais;
+* quais são simulados;
+* quais APIs já estão integradas;
+* quais componentes poderão ser reutilizados.
+
+---
+
+## 2. ARQUITETURA PROPOSTA
+
+Mostre o fluxo:
+
+```text
+Dados
+ ↓
+Score Climático
+ ↓
+             → Risk Engine → Score Final → Recomendações
+ ↓
+Score Operacional
+        ↑
+Configuração Sompo
+```
+
+Explique onde cada responsabilidade deve ficar.
+
+---
+
+## 3. ARQUIVOS QUE PRECISARÃO SER ALTERADOS
+
+Liste:
+
+```text
+arquivo
+responsabilidade atual
+alteração necessária
+risco da alteração
+```
+
+Não crie arquivos duplicados se componentes atuais puderem ser reutilizados.
+
+---
+
+## 4. NOVOS ARQUIVOS NECESSÁRIOS
+
+Somente se forem realmente necessários.
+
+Para cada um explique:
+
+```text
+nome
+responsabilidade
+motivo da criação
+```
+
+---
+
+## 5. MODELO DE DADOS
+
+Defina a estrutura mínima necessária.
+
+Algo semelhante a:
+
+```typescript
+type RiskWeights = {
+  climate: number
+  operational: number
+}
+```
+
+e, se necessário:
+
+```typescript
+type RiskResult = {
+  climateScore: number
+  operationalScore: number
+  climateContribution: number
+  operationalContribution: number
+  finalScore: number
+  level: "low" | "medium" | "high"
+  dominantFactor: "climate" | "operational" | "balanced"
+}
+```
+
+Adapte à arquitetura existente em vez de duplicar tipos já presentes no projeto.
+
+---
+
+## 6. MOTOR DE PONDERAÇÃO
+
+Explique como implementar a fórmula.
+
+Inclua:
+
+* validação;
+* normalização;
+* fallback;
+* tratamento de valores inválidos;
+* configuração default.
+
+---
+
+## 7. MINI DASHBOARD SOMPO
+
+Defina os componentes visuais mínimos necessários.
+
+Priorize:
+
+* leitura fácil;
+* poucos controles;
+* responsividade;
+* consistência com o design atual.
+
+Não redesenhe a aplicação inteira.
+
+---
+
+## 8. RECOMENDAÇÕES
+
+Defina uma primeira versão do motor determinístico.
+
+Mostre exemplos de regras.
+
+Separe:
+
+```text
+Clima
+Operacional
+Inclinação
+Combinação
+```
+
+---
+
+## 9. PROPAGAÇÃO DA CONFIGURAÇÃO
+
+Explique como uma alteração feita pela Sompo chega até:
+
+* Gestor;
+* Operador;
+* Consultor;
+* Admin/Sompo.
+
+Sem permitir que esses outros perfis alterem a configuração.
+
+---
+
+## 10. PERSISTÊNCIA
+
+Compare rapidamente as alternativas disponíveis no projeto atual e escolha a mais simples e segura para o MVP.
+
+---
+
+## 11. TESTES
+
+Defina testes mínimos para validar:
+
+### Pesos
+
+```text
+50/50
+70/30
+30/70
+100/0
+0/100
+```
+
+### Validações
+
+```text
+soma > 100
+soma < 100
+valor negativo
+valor > 100
+configuração inexistente
+```
+
+### Permissões
+
+```text
+Sompo consegue editar
+Gestor não consegue editar
+Operador não consegue editar
+Consultor não consegue editar
+```
+
+### Score
+
+Confirme matematicamente que a ponderação está funcionando.
+
+---
+
+# PRIORIZAÇÃO DA SPRINT
+
+Ao final do plano, classifique tudo em:
+
+## P0 — OBRIGATÓRIO PARA APRESENTAÇÃO
+
+Somente funcionalidades sem as quais a solução principal não funciona.
+
+## P1 — IMPORTANTE SE HOUVER TEMPO
+
+Melhorias que agregam valor, mas não impedem a apresentação.
+
+## P2 — PÓS-MVP
+
+Funcionalidades que devem deliberadamente ficar de fora desta entrega.
+
+---
+
+# CRITÉRIO DE SUCESSO DA SPRINT
+
+Ao final da implementação, queremos conseguir demonstrar este fluxo:
+
+```text
+1. Login/Admin Sompo
+
+2. Acessa "Configuração do Motor de Risco"
+
+3. Visualiza:
+   Clima 50%
+   Operacional 50%
+
+4. Altera para:
+   Clima 70%
+   Operacional 30%
+
+5. Salva.
+
+6. Sistema recalcula:
+   contribuição climática
+   contribuição operacional
+   score final
+
+7. Sistema identifica:
+   "Predominância Climática"
+
+8. Recomendações passam a enfatizar riscos climáticos.
+
+9. Outro perfil acessa o sistema.
+
+10. Esse usuário recebe o score e as recomendações considerando a configuração definida pela Sompo.
+
+11. O outro perfil NÃO consegue alterar os pesos.
+```
+
+Se conseguirmos demonstrar esse fluxo de ponta a ponta de forma estável, considero a funcionalidade principal da sprint concluída.
+
+---
+
+# MUITO IMPORTANTE
+
+Neste primeiro momento:
+
+**NÃO ESCREVA CÓDIGO.**
+
+**NÃO ALTERE O PROJETO.**
+
+**NÃO INSTALE DEPENDÊNCIAS.**
+
+**NÃO CRIE BANCO DE DADOS.**
+
+Primeiro faça a inspeção do projeto e apresente o plano completo.
+
+Ao encontrar alguma diferença entre o que descrevi neste prompt e o código existente:
+
+1. informe a diferença;
+2. priorize aproveitar a arquitetura existente;
+3. proponha a menor mudança necessária;
+4. não remova funcionalidades atuais sem necessidade.
+
+Ao final do plano, apresente também:
+
+### "O que NÃO faremos nesta sprint"
+
+para deixar explícito o controle de escopo e evitar overengineering.
