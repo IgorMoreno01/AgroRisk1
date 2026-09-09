@@ -24,8 +24,8 @@ export interface RiskInputs {
 }
 
 // ---------- Regras de pontos ----------
-// Os máximos vêm dos pesos mockados da Sompo. Assim, a soma dos seis
-// fatores representa exatamente 100 pontos no cenário de risco máximo.
+// Os máximos vêm dos pesos mockados da Sompo. A inclinação permanece como
+// sinal de segurança operacional, mas não participa desta pontuação.
 const factorWeight = (category: string) =>
   riskFactors.find((factor) => factor.category === category)?.weight ?? 0;
 
@@ -33,7 +33,6 @@ const WEATHER_MAX = factorWeight("Clima");
 const WATER_MAX = factorWeight("Proximidade de água");
 const OPERATION_MAX = factorWeight("Tipo de operação");
 const HISTORY_MAX = factorWeight("Histórico operacional");
-const INCLINATION_MAX = factorWeight("Inclinação");
 const TERRAIN_MAX = factorWeight("Condição do terreno");
 
 const WEATHER_PTS: Record<Weather, number> = {
@@ -56,12 +55,6 @@ const OPTYPE_PTS: Record<OperationType, number> = {
   "Deslocamento interno": Math.round(OPERATION_MAX * 0.27),
   "Operação próxima de água": OPERATION_MAX,
 };
-const inclinationPts = (degrees: number) => {
-  const absoluteDegrees = Math.abs(degrees);
-  if (absoluteDegrees < 5) return 0;
-  if (absoluteDegrees < 15) return Math.round(INCLINATION_MAX * 0.5);
-  return INCLINATION_MAX;
-};
 const TERRAIN_PTS: Record<Terrain, number> = {
   normal: 0,
   umido: Math.round(TERRAIN_MAX * 0.47),
@@ -80,7 +73,7 @@ const waterLabel: Record<WaterDistance, string> = {
   acima_150: "Acima de 150 m", "100_150": "Entre 100 e 150 m",
   "50_100": "Entre 50 e 100 m", abaixo_50: "Abaixo de 50 m",
 };
-const inclinationLabel = (degrees: number) => {
+export const inclinationLabel = (degrees: number) => {
   const absoluteDegrees = Math.abs(degrees);
   const classification = absoluteDegrees < 5
     ? "estável"
@@ -159,7 +152,6 @@ export function calculateScore(inputs: RiskInputs): ScoreBreakdown {
     { category: "Proximidade de água",   label: "Proximidade de água",   detail: waterLabel[inputs.waterDistance], points: WATER_PTS[inputs.waterDistance], max: WATER_MAX },
     { category: "Tipo de operação",      label: "Tipo de operação",      detail: inputs.operationType,             points: OPTYPE_PTS[inputs.operationType], max: OPERATION_MAX },
     { category: "Histórico operacional", label: "Histórico operacional", detail: `${inputs.historyAlertCount} alerta(s) anterior(es)`, points: historyPts(inputs.historyAlertCount), max: HISTORY_MAX },
-    { category: "Inclinação",            label: "Inclinação",            detail: inclinationLabel(inputs.inclinationDegrees), points: inclinationPts(inputs.inclinationDegrees), max: INCLINATION_MAX },
     { category: "Condição do terreno",   label: "Condição do terreno",   detail: terrainLabel[inputs.terrain],     points: TERRAIN_PTS[inputs.terrain], max: TERRAIN_MAX },
   ];
   const total = clamp(parts.reduce((s, p) => s + p.points, 0));
@@ -175,7 +167,6 @@ export function calculateScore(inputs: RiskInputs): ScoreBreakdown {
 export function calculateWeightedRisk(
   breakdown: ScoreBreakdown,
   inputWeights?: Partial<RiskWeights>,
-  calibration?: { operationalScore?: number },
 ): RiskResult {
   const weights = normalizeRiskWeights(inputWeights);
   const climatePart = breakdown.parts.find((part) => part.category === "Clima");
@@ -188,15 +179,7 @@ export function calculateWeightedRisk(
   const factorOperationalScore = Math.round(
     clamp((operationalPoints / Math.max(1, operationalMax)) * 100),
   );
-  // `Operation.score` is the deterministic scenario index already present in
-  // the MVP data. Keep it as a calibration floor so the new component score
-  // does not discard the risk level used by the existing dashboards.
-  const operationalReference = calibration?.operationalScore;
-  const operationalScore = Math.round(clamp(
-    operationalReference === undefined
-      ? factorOperationalScore
-      : Math.max(factorOperationalScore, operationalReference),
-  ));
+  const operationalScore = factorOperationalScore;
   const climateContribution = roundOneDecimal(climateScore * (weights.climate / 100));
   const operationalContribution = roundOneDecimal(operationalScore * (weights.operational / 100));
   const finalScore = Math.round(clamp(climateContribution + operationalContribution));
@@ -287,9 +270,7 @@ export function riskResultForOperation(
   overrides?: Partial<RiskInputs>,
 ): RiskResult {
   const inputs = inputsForOperationWithOverrides(op, overrides);
-  return calculateWeightedRisk(calculateScore(inputs), weights, {
-    operationalScore: op.score,
-  });
+  return calculateWeightedRisk(calculateScore(inputs), weights);
 }
 
 export function currentOperationFor(machineId: string): Operation | undefined {

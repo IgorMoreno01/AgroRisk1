@@ -14,6 +14,7 @@ import {
   scoreMachine, scoreArea, scoreClientWithWeights,
   currentOperationFor, inputsForOperationWithOverrides, riskResultForOperation,
   riskResultForMachine, scoreAreaWithWeights,
+  inclinationLabel,
   type ScoreBreakdown, type ScorePart, type RiskLevel, type RiskResult,
   type RiskWeights, type RiskInputs,
 } from "./risk-score";
@@ -127,17 +128,18 @@ function recsForOperation(
     });
   }
 
-  // ---- Inclinação medida pelo ESP32 + MPU6050 ----
-  const inclinationPart = partByCategory(b, "Inclinação");
-  if (inclinationPart && inclinationPart.points >= 5) {
+  // ---- Segurança operacional: inclinação medida pelo ESP32 + MPU6050 ----
+  // Esta regra gera orientação sem participar do score ou de sua composição.
+  const absoluteInclination = Math.abs(inputs.inclinationDegrees);
+  if (absoluteInclination >= 5) {
     push({
       title: "Selecionar rota com menor inclinação",
       description: audience === "operador"
         ? "Interrompa o avanço e retome somente por um trecho com inclinação segura."
         : "Replanejar a rota para evitar trechos com inclinação acima do limite.",
-      rationale: `Inclinação ${inclinationPart.detail.toLowerCase()} medida pelo MPU6050 aumenta o risco de tombamento.`,
+      rationale: `Inclinação ${inclinationLabel(inputs.inclinationDegrees).toLowerCase()} medida pelo MPU6050 aumenta o risco de tombamento.`,
       category: "Inclinação",
-      priority: inclinationPart.points >= 10 ? "alta" : bumpPriority(baseP),
+      priority: absoluteInclination >= 15 ? "alta" : "média",
       factor: "Inclinação",
     });
   }

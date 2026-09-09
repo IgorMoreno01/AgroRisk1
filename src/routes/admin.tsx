@@ -226,7 +226,7 @@ function RiskEngineConfigurationPanel() {
                   <Wrench className="h-4 w-4 text-warning" /> Peso operacional
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Água, tipo de operação, histórico, inclinação e terreno.
+                  Água, tipo de operação, histórico e terreno.
                 </div>
               </div>
               <span className="text-2xl font-semibold tabular-nums text-foreground">{operationalWeight}%</span>

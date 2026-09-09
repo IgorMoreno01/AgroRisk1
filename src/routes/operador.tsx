@@ -14,6 +14,7 @@ import {
 import {
   riskResultForOperation,
   deriveWeatherFromReal, deriveWaterDistanceFromReal,
+  inputsForOperationWithOverrides, inclinationLabel,
 } from "@/lib/risk-score";
 import {
   recommendationsForOperation, nextBestActionForOperation,
@@ -135,9 +136,9 @@ function OperadorPage() {
     : weather
     ? `${Math.round(weather.current.windSpeed)} km/h ${weather.current.windDirectionLabel}`
     : "14 km/h NE";
-  const inclinationValue =
-    breakdown.parts.find((part) => part.category === "Inclinação")?.detail ??
-    "Leitura indisponível";
+  const inclinationValue = inclinationLabel(
+    inputsForOperationWithOverrides(operation, riskOptions.overrides).inclinationDegrees,
+  );
 
   const conditions = [
     { icon: Cloud,    label: "Clima",   value: climaValue },

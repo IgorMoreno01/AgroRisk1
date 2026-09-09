@@ -15,3 +15,13 @@ Admin/Sompo. Interfaces de outros perfis apenas leem a configuração compartilh
 evolução para persistência de produção, mantenha o contrato de pesos e a validação
 server-side, adicionando auditoria e armazenamento durável sem deslocar a autoridade para
 o cliente.
+
+A inclinação é exclusivamente uma camada de segurança operacional: pode gerar classificação,
+alerta, orientação ao operador, acionamento de buzzer e registro, mas nunca pontos, contribuição
+operacional ou climática, score final ou fator dominante.
+
+**Why:** a leitura do ESP32 + MPU6050 representa uma condição imediata de segurança e deve
+continuar acionável sem alterar o cálculo atuarial do risco.
+
+**How to apply:** mantenha a inclinação fora do breakdown matemático e dos pesos Sompo. Regras
+de segurança podem consultar diretamente a leitura em graus, independentemente do score.
