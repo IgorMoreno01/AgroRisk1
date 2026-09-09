@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -40,6 +41,50 @@ export function RiskConfigProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("ready");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const requestVersion = useRef(0);
+  const saving = useRef(false);
+
+  const loadConfiguration = useCallback(async (background = false) => {
+    if (saving.current) return;
+    const version = ++requestVersion.current;
+    const token = getStoredSessionToken();
+    if (!token) {
+      if (!background) {
+        setConfiguration(DEFAULT_CONFIGURATION);
+        setStatus("error");
+        setError("Não foi possível carregar a configuração da sessão.");
+      }
+      return;
+    }
+
+    if (!background) {
+      setStatus("loading");
+      setError(null);
+    }
+
+    try {
+      const result = await getRiskConfiguration({ data: { token } });
+      if (version !== requestVersion.current) return;
+      if (!result.ok) {
+        if (!background) {
+          setConfiguration(DEFAULT_CONFIGURATION);
+          setStatus("error");
+          setError(result.error);
+        }
+        return;
+      }
+      setConfiguration(result.configuration);
+      setStatus("ready");
+      setError(null);
+    } catch {
+      if (version !== requestVersion.current) return;
+      if (!background) {
+        setConfiguration(DEFAULT_CONFIGURATION);
+        setStatus("error");
+        setError("Não foi possível carregar a configuração. O padrão 50/50 está em uso.");
+      }
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,45 +96,36 @@ export function RiskConfigProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const token = getStoredSessionToken();
-    if (!token) {
-      setConfiguration(DEFAULT_CONFIGURATION);
-      setStatus("error");
-      setError("Não foi possível carregar a configuração da sessão.");
-      return;
-    }
+    void loadConfiguration();
 
-    setStatus("loading");
-    setError(null);
-    getRiskConfiguration({ data: { token } })
-      .then((result) => {
-        if (cancelled) return;
-        if (!result.ok) {
-          setConfiguration(DEFAULT_CONFIGURATION);
-          setStatus("error");
-          setError(result.error);
-          return;
-        }
-        setConfiguration(result.configuration);
-        setStatus("ready");
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setConfiguration(DEFAULT_CONFIGURATION);
-        setStatus("error");
-        setError("Não foi possível carregar a configuração. O padrão 50/50 está em uso.");
-      });
+    const refresh = () => {
+      if (!cancelled && document.visibilityState === "visible") {
+        void loadConfiguration(true);
+      }
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    const interval = window.setInterval(refresh, 5_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {
       cancelled = true;
+      requestVersion.current += 1;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [authStatus, profile]);
+  }, [authStatus, loadConfiguration, profile]);
 
   const saveWeights = useCallback(async (climate: number) => {
     const operational = 100 - climate;
     const token = getStoredSessionToken();
     if (!token) return { ok: false, error: "Sessão não autorizada." };
 
+    saving.current = true;
+    const version = ++requestVersion.current;
     setIsSaving(true);
     setError(null);
     try {
@@ -97,17 +133,20 @@ export function RiskConfigProvider({ children }: { children: ReactNode }) {
         data: { token, climate, operational },
       });
       if (!result.ok) {
-        setError(result.error);
+        if (version === requestVersion.current) setError(result.error);
         return { ok: false, error: result.error };
       }
-      setConfiguration(result.configuration);
-      setStatus("ready");
+      if (version === requestVersion.current) {
+        setConfiguration(result.configuration);
+        setStatus("ready");
+      }
       return { ok: true };
     } catch {
       const message = "Não foi possível salvar a configuração.";
-      setError(message);
+      if (version === requestVersion.current) setError(message);
       return { ok: false, error: message };
     } finally {
+      saving.current = false;
       setIsSaving(false);
     }
   }, []);
