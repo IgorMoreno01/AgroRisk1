@@ -18,6 +18,7 @@ import {
 } from "@/lib/risk-score";
 import {
   recommendationsForOperation, nextBestActionForOperation,
+  telemetrySafetyRecommendationsForOperation,
 } from "@/lib/recommendations";
 import { AlertTriangle, Cloud, Droplets, Wind, MapPin, Mountain, Loader2, Wifi, WifiOff } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
@@ -117,6 +118,11 @@ function OperadorPage() {
     },
   };
   const recs = recommendationsForOperation(operation, "operador", riskOptions);
+  const telemetryRecs = telemetrySafetyRecommendationsForOperation(
+    operation,
+    "operador",
+    riskOptions.overrides,
+  );
   const nextAction = nextBestActionForOperation(operation, riskOptions);
 
   const topFactors = [...breakdown.parts]
@@ -253,7 +259,7 @@ function OperadorPage() {
           operation={operation}
           machine={machine}
           area={area}
-          breakdown={breakdown}
+          result={scoreContext}
           nextAction={nextAction}
         />
         <section id="geo" className="scroll-mt-20">
@@ -281,6 +287,18 @@ function OperadorPage() {
               <RecommendationCard key={r.id} rec={r} showAction />
             ))}
           </div>
+          {telemetryRecs.length > 0 && (
+            <div className="mt-4 border-t border-border pt-4">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Segurança imediata por telemetria
+              </div>
+              <div className="space-y-3">
+                {telemetryRecs.map((r) => (
+                  <RecommendationCard key={r.id} rec={r} showAction />
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
       </div>
 
@@ -330,7 +348,7 @@ function OperadorPage() {
 
       {/* Histórico recente */}
       <section id="historico" className="mt-6 scroll-mt-20">
-        <RecentHistoryCard operation={operation} breakdown={breakdown} area={area} />
+        <RecentHistoryCard operation={operation} result={scoreContext} area={area} recommendation={recs[0]} />
       </section>
 
       {/* Alertas da operação (US 5 · personalização por perfil) */}

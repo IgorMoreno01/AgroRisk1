@@ -14,7 +14,7 @@ import {
   scoreMachine, scoreArea, scoreClientWithWeights,
   currentOperationFor, inputsForOperationWithOverrides, riskResultForOperation,
   riskResultForMachine, scoreAreaWithWeights,
-  inclinationLabel,
+  dominantFactorLabel, inclinationLabel, riskFromScore,
   type ScoreBreakdown, type ScorePart, type RiskLevel, type RiskResult,
   type RiskWeights, type RiskInputs,
 } from "./risk-score";
@@ -31,7 +31,7 @@ export type RecCategory =
   | "Prevenção de sinistro";
 
 export type RecPriority = "baixa" | "média" | "alta";
-export type RecAudience = "operador" | "gestor" | "consultor";
+export type RecAudience = "operador" | "gestor" | "consultor" | "admin";
 
 export interface GeneratedRecommendation {
   id: string;
@@ -57,181 +57,135 @@ const partByCategory = (b: ScoreBreakdown, category: string): ScorePart | undefi
 export const mainPart = (b: ScoreBreakdown): ScorePart | undefined =>
   [...b.parts].sort((a, b) => b.points / Math.max(1, b.max) - a.points / Math.max(1, a.max))[0];
 
+const dominantInternalPart = (result: RiskResult): ScorePart | undefined => {
+  const relevantParts = result.dominantFactor === "climate"
+    ? result.breakdown.parts.filter((part) => part.category === "Clima")
+    : result.dominantFactor === "operational"
+    ? result.breakdown.parts.filter((part) => part.category !== "Clima")
+    : result.breakdown.parts;
+  return [...relevantParts].sort((a, b) => b.points - a.points)[0];
+};
+
+const categoryForFactor = (factor?: string): RecCategory => {
+  if (factor === "Clima") return "Horário";
+  if (factor === "Proximidade de água") return "Rota";
+  if (factor === "Tipo de operação") return "Operação";
+  if (factor === "Histórico operacional") return "Manutenção";
+  if (factor === "Condição do terreno") return "Atenção ambiental";
+  return "Prevenção de sinistro";
+};
+
 const priorityFromScore = (score: number): RecPriority =>
   score >= 71 ? "alta" : score >= 41 ? "média" : "baixa";
 
-const bumpPriority = (p: RecPriority): RecPriority =>
-  p === "alta" ? "alta" : p === "média" ? "alta" : "média";
+const titleForFactor = (factor?: string) => {
+  if (factor === "Clima") return "Reavaliar a janela climática";
+  if (factor === "Proximidade de água") return "Revisar a rota próxima à água";
+  if (factor === "Tipo de operação") return "Revisar as condições da operação";
+  if (factor === "Histórico operacional") return "Priorizar inspeção preventiva";
+  if (factor === "Condição do terreno") return "Revisar a condição do terreno";
+  return "Manter a operação sob monitoramento";
+};
 
-const historyAlertCount = (machineId: string) =>
-  alerts.filter((a) => a.machineId === machineId).length;
+const descriptionForAudience = (audience: RecAudience, factor: string) => {
+  if (audience === "operador") {
+    return `Evite continuar sem verificar ${factor.toLowerCase()} e interrompa a operação se houver agravamento.`;
+  }
+  if (audience === "consultor") {
+    return `O principal ponto de atenção está relacionado a ${factor.toLowerCase()}; orientar acompanhamento preventivo ao cliente.`;
+  }
+  if (audience === "admin") {
+    return `Componente dominante identificado pelo motor, com ação preventiva sobre ${factor.toLowerCase()}.`;
+  }
+  return `Priorize esta operação para revisão e controle de ${factor.toLowerCase()}.`;
+};
 
-// ---------- Construtor de recomendações por fator ----------
+function recommendationForResult(
+  result: RiskResult,
+  audience: RecAudience,
+  id: string,
+): GeneratedRecommendation[] {
+  const responsiblePart = dominantInternalPart(result);
+  const factor = responsiblePart?.category ?? result.breakdown.mainFactor;
+  return [{
+    id,
+    title: titleForFactor(factor),
+    description: descriptionForAudience(audience, factor),
+    rationale: responsiblePart
+      ? `${dominantFactorLabel(result.dominantFactor)}; fator responsável: ${responsiblePart.label.toLowerCase()} (${responsiblePart.detail.toLowerCase()}).`
+      : `Score atual ${result.finalScore}/100, sem fator interno significativo.`,
+    category: categoryForFactor(factor),
+    priority: priorityFromScore(result.finalScore),
+    audience,
+    factor,
+  }];
+}
+
 function recsForOperation(
   op: Operation,
   audience: RecAudience,
   options?: RiskEvaluationOptions,
 ): GeneratedRecommendation[] {
   const result = options?.result ?? riskResultForOperation(op, options?.weights, options?.overrides);
-  const b = result.breakdown;
-  const inputs = inputsForOperationWithOverrides(op, options?.overrides);
-  const baseP = priorityFromScore(result.finalScore);
-  const candidates: GeneratedRecommendation[] = [];
+  return recommendationForResult(result, audience, `${op.id}-engine`);
+}
 
-  const push = (r: Omit<GeneratedRecommendation, "id" | "audience"> & Partial<Pick<GeneratedRecommendation, "id">>) => {
-    candidates.push({
-      id: r.id ?? `${op.id}-${candidates.length + 1}`,
-      audience,
-      ...r,
-    } as GeneratedRecommendation);
+function aggregateRiskResults(
+  results: RiskResult[],
+  summary: { score: number; level: RiskLevel; topFactor: string },
+): RiskResult | undefined {
+  if (results.length === 0) return undefined;
+  const average = (values: number[]) =>
+    Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10;
+  const parts = results[0].breakdown.parts.map((part) => ({
+    ...part,
+    points: Math.round(average(results.map((result) =>
+      result.breakdown.parts.find((candidate) => candidate.category === part.category)?.points ?? 0
+    ))),
+    detail: "Média consolidada",
+  }));
+  const dominantFactor = summary.topFactor === "Risco climático"
+    ? "climate"
+    : summary.topFactor === "Risco operacional"
+    ? "operational"
+    : "balanced";
+  return {
+    climateScore: Math.round(average(results.map((result) => result.climateScore))),
+    operationalScore: Math.round(average(results.map((result) => result.operationalScore))),
+    climateContribution: average(results.map((result) => result.climateContribution)),
+    operationalContribution: average(results.map((result) => result.operationalContribution)),
+    finalScore: summary.score,
+    level: summary.level,
+    dominantFactor,
+    breakdown: {
+      total: Math.round(average(results.map((result) => result.breakdown.total))),
+      level: riskFromScore(summary.score),
+      parts,
+      mainFactor: [...parts].sort((a, b) => b.points - a.points)[0]?.category ?? "—",
+    },
   };
+}
 
-  // ---- Proximidade de água ----
-  const waterPart = partByCategory(b, "Proximidade de água");
-  if (waterPart && waterPart.points >= 16) {
-    const p: RecPriority = inputs.waterDistance === "abaixo_50" ? "alta" : bumpPriority(baseP);
-    push({
-      title: "Alterar rota para evitar área próxima de água",
-      description: audience === "operador"
-        ? "Evite o trajeto atual e mantenha distância segura do corpo d'água."
-        : audience === "consultor"
-        ? "Recomendar ao cliente alterar a rota para se afastar do corpo d'água."
-        : "Priorizar replanejamento de rota nas operações próximas à água.",
-      rationale: `Distância da água: ${waterPart.detail.toLowerCase()} — risco elevado de atolamento e contaminação.`,
-      category: "Rota",
-      priority: p,
-      factor: "Proximidade de água",
-    });
-  }
-
-  // ---- Clima ----
-  const climaPart = partByCategory(b, "Clima");
-  if (climaPart && climaPart.points >= 14) {
-    push({
-      title: "Reagendar operação para janela climática melhor",
-      description: audience === "operador"
-        ? "Aguarde melhora das condições antes de continuar."
-        : "Avaliar adiamento da operação enquanto a chuva persistir.",
-      rationale: `Condição climática: ${climaPart.detail.toLowerCase()} — eleva o risco em campo aberto.`,
-      category: "Horário",
-      priority: result.level === "alto" ? "alta" : "média",
-      factor: "Clima",
-    });
-  } else if (climaPart && climaPart.points >= 8) {
-    push({
-      title: "Atenção reforçada ao clima",
-      description: "Monitorar a previsão e pausar a operação se a chuva intensificar.",
-      rationale: `Clima atual: ${climaPart.detail.toLowerCase()}.`,
-      category: "Atenção ambiental",
-      priority: "média",
-      factor: "Clima",
-    });
-  }
-
-  // ---- Segurança operacional: inclinação medida pelo ESP32 + MPU6050 ----
-  // Esta regra gera orientação sem participar do score ou de sua composição.
+export function telemetrySafetyRecommendationsForOperation(
+  op: Operation,
+  audience: RecAudience = "operador",
+  overrides?: Partial<RiskInputs>,
+): GeneratedRecommendation[] {
+  const inputs = inputsForOperationWithOverrides(op, overrides);
   const absoluteInclination = Math.abs(inputs.inclinationDegrees);
-  if (absoluteInclination >= 5) {
-    push({
-      title: "Selecionar rota com menor inclinação",
-      description: audience === "operador"
-        ? "Interrompa o avanço e retome somente por um trecho com inclinação segura."
-        : "Replanejar a rota para evitar trechos com inclinação acima do limite.",
-      rationale: `Inclinação ${inclinationLabel(inputs.inclinationDegrees).toLowerCase()} medida pelo MPU6050 aumenta o risco de tombamento.`,
-      category: "Inclinação",
-      priority: absoluteInclination >= 15 ? "alta" : "média",
-      factor: "Inclinação",
-    });
-  }
-
-  // ---- Condição do terreno ----
-  const terrenoPart = partByCategory(b, "Condição do terreno");
-  if (terrenoPart && terrenoPart.points >= 4) {
-    push({
-      title: "Cuidado com solo crítico ou baixa aderência",
-      description: audience === "operador"
-        ? "Evite manobras bruscas e selecione rota alternativa se possível."
-        : "Indicar rota alternativa e revisão das condições antes do próximo turno.",
-      rationale: `Condição do terreno: ${terrenoPart.detail.toLowerCase()}.`,
-      category: terrenoPart.points >= 8 ? "Rota" : "Atenção ambiental",
-      priority: terrenoPart.points >= 8 ? bumpPriority(baseP) : "média",
-      factor: "Condição do terreno",
-    });
-  }
-
-  // ---- Tipo de operação ----
-  const opPart = partByCategory(b, "Tipo de operação");
-  if (op.type === "Operação próxima de água") {
-    push({
-      title: "Operação supervisionada próxima a corpos d'água",
-      description: audience === "operador"
-        ? "Mantenha atenção redobrada e interrompa em caso de instabilidade."
-        : "Designar supervisão direta e checagem de rota.",
-      rationale: "Operação classificada como crítica por proximidade direta de água.",
-      category: "Operação",
-      priority: "alta",
-      factor: "Tipo de operação",
-    });
-  } else if (op.type === "Transporte" && opPart && opPart.points >= 10) {
-    push({
-      title: "Revisar trajeto e adotar condução preventiva",
-      description: "Evite trechos críticos no deslocamento.",
-      rationale: "Transporte exige planejamento de rota e condução defensiva.",
-      category: "Rota",
-      priority: baseP,
-      factor: "Tipo de operação",
-    });
-  }
-
-  // ---- Histórico operacional ----
-  const histPart = partByCategory(b, "Histórico operacional");
-  const histTotal = historyAlertCount(op.machineId);
-  if ((histPart && histPart.points >= 10) || histTotal >= 2) {
-    push({
-      title: "Priorizar inspeção preventiva do equipamento",
-      description: audience === "operador"
-        ? "Notifique o gestor antes do próximo turno."
-        : audience === "consultor"
-        ? "Recomendar ao cliente manutenção preventiva e revisão do histórico."
-        : "Programar inspeção e reforço de treinamento da equipe.",
-      rationale: `Equipamento acumula ${histTotal} alerta(s) recente(s).`,
-      category: histTotal >= 3 ? "Manutenção" : "Prevenção de sinistro",
-      priority: result.level === "alto" ? "alta" : "média",
-      factor: "Histórico operacional",
-    });
-  }
-
-  // Caso de risco baixo: apenas uma recomendação preventiva leve
-  if (candidates.length === 0) {
-    push({
-      title: "Manter operação dentro dos padrões",
-      description: "Sem fatores críticos detectados no momento.",
-      rationale: `Score atual ${result.finalScore}/100 — risco baixo.`,
-      category: "Prevenção de sinistro",
-      priority: "baixa",
-      factor: b.mainFactor,
-    });
-  }
-
-  // O componente predominante dá precedência às regras já existentes,
-  // preservando o comportamento determinístico e explicando o cenário atual.
-  if (result.dominantFactor !== "balanced") {
-    candidates.forEach((candidate) => {
-      const isClimateRule = candidate.factor === "Clima";
-      if (
-        (result.dominantFactor === "climate" && isClimateRule) ||
-        (result.dominantFactor === "operational" && !isClimateRule)
-      ) {
-        candidate.priority = bumpPriority(candidate.priority);
-      }
-    });
-  }
-
-  // Ordena por prioridade (alta > média > baixa), depois por score do fator
-  const order: Record<RecPriority, number> = { alta: 0, "média": 1, baixa: 2 };
-  candidates.sort((a, b) => order[a.priority] - order[b.priority]);
-
-  return candidates.slice(0, 3);
+  if (absoluteInclination < 5) return [];
+  return [{
+    id: `${op.id}-telemetry-inclination`,
+    title: "Selecionar rota com menor inclinação",
+    description: audience === "operador"
+      ? "Interrompa o avanço e retome somente por um trecho com inclinação segura."
+      : "Replanejar a rota para evitar trechos com inclinação acima do limite.",
+    rationale: `Telemetria MPU6050: inclinação ${inclinationLabel(inputs.inclinationDegrees).toLowerCase()} aumenta o risco de tombamento.`,
+    category: "Inclinação",
+    priority: absoluteInclination >= 15 ? "alta" : "média",
+    audience,
+    factor: "Inclinação",
+  }];
 }
 
 // ---------- API pública ----------
@@ -270,11 +224,12 @@ export function recommendationsForArea(
 ): GeneratedRecommendation[] {
   const ops = operations.filter((o) => o.areaId === areaId);
   if (ops.length === 0) return [];
-  // pega a operação de maior score na área
-  const top = [...ops].sort(
-    (a, b) => riskResultForOperation(b, options?.weights).finalScore - riskResultForOperation(a, options?.weights).finalScore,
-  )[0];
-  return recsForOperation(top, audience, options);
+  const summary = scoreAreaWithWeights(areaId, options?.weights);
+  const result = aggregateRiskResults(
+    ops.map((operation) => riskResultForOperation(operation, options?.weights)),
+    summary,
+  );
+  return result ? recommendationForResult(result, audience, `${areaId}-engine`) : [];
 }
 
 export function recommendationsForClient(
@@ -282,22 +237,13 @@ export function recommendationsForClient(
   audience: RecAudience = "consultor",
   options?: RiskEvaluationOptions,
 ): GeneratedRecommendation[] {
-  const cs = scoreClientWithWeights(clientId, options?.weights);
-  // Agrega: top 3 entre todas as máquinas do cliente
+  const summary = scoreClientWithWeights(clientId, options?.weights);
   const ms = machines.filter((m) => m.clientId === clientId);
-  const all: GeneratedRecommendation[] = [];
-  ms.forEach((m) => all.push(...recommendationsForMachine(m.id, audience, options)));
-  // dedup por (title + factor)
-  const seen = new Set<string>();
-  const unique = all.filter((r) => {
-    const k = `${r.title}::${r.factor}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  const order: Record<RecPriority, number> = { alta: 0, "média": 1, baixa: 2 };
-  unique.sort((a, b) => order[a.priority] - order[b.priority]);
-  return unique.slice(0, 4);
+  const result = aggregateRiskResults(
+    ms.map((machine) => riskResultForMachine(machine.id, options?.weights)),
+    summary,
+  );
+  return result ? recommendationForResult(result, audience, `${clientId}-engine`) : [];
 }
 
 // ---------- Próxima melhor ação ----------
@@ -371,7 +317,7 @@ export function allRecommendationsConsolidated(weights?: Partial<RiskWeights>): 
   const rows: AdminRecRow[] = [];
   machines.forEach((m) => {
     const result = riskResultForMachine(m.id, weights);
-    recommendationsForMachine(m.id, "gestor", { weights, result }).forEach((rec) =>
+    recommendationsForMachine(m.id, "admin", { weights, result }).forEach((rec) =>
       rows.push({
         clientName: m.client,
         target: m.code,
@@ -384,7 +330,7 @@ export function allRecommendationsConsolidated(weights?: Partial<RiskWeights>): 
   });
   areas.forEach((a) => {
     const s = scoreAreaWithWeights(a.id, weights);
-    recommendationsForArea(a.id, "gestor", { weights }).forEach((rec) =>
+    recommendationsForArea(a.id, "admin", { weights }).forEach((rec) =>
       rows.push({
         clientName: a.client,
         target: a.name,

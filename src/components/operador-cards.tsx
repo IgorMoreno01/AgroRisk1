@@ -1,9 +1,9 @@
 import { Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge } from "@/components/risk-badge";
 import { cn } from "@/lib/utils";
-import type { ScoreBreakdown } from "@/lib/risk-score";
+import { dominantFactorLabel, type RiskResult, type ScoreBreakdown } from "@/lib/risk-score";
 import type { Machine, Area, Operation } from "@/lib/mock-data";
-import type { NextBestAction } from "@/lib/recommendations";
+import type { GeneratedRecommendation, NextBestAction } from "@/lib/recommendations";
 import type { WaterGeoData, RouteData } from "@/lib/external-data.types";
 import {
   Activity, Tractor, MapPin, Gauge, AlertTriangle, ArrowRight,
@@ -15,12 +15,12 @@ import {
 // Resumo operacional
 // ============================================================
 export function OperationalSummary({
-  operation, machine, area, breakdown, nextAction,
+  operation, machine, area, result, nextAction,
 }: {
   operation: Operation;
   machine: Machine;
   area: Area;
-  breakdown: ScoreBreakdown;
+  result: RiskResult;
   nextAction: NextBestAction | null;
 }) {
   const rows: Array<{ label: string; value: string; icon: React.ElementType }> = [
@@ -28,7 +28,8 @@ export function OperationalSummary({
     { label: "Equipamento",  value: machine.name,         icon: Tractor },
     { label: "Área",         value: area.name,            icon: MapPin },
     { label: "Tipo",         value: operation.type,       icon: Navigation },
-    { label: "Fator dominante", value: breakdown.mainFactor, icon: AlertTriangle },
+    { label: "Componente dominante", value: dominantFactorLabel(result.dominantFactor), icon: AlertTriangle },
+    { label: "Fator responsável", value: nextAction?.factor ?? result.breakdown.mainFactor, icon: AlertTriangle },
   ];
 
   return (
@@ -61,8 +62,8 @@ export function OperationalSummary({
             Score atual
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-foreground">{breakdown.total}/100</span>
-            <RiskBadge level={breakdown.level} />
+            <span className="text-sm font-semibold text-foreground">{result.finalScore}/100</span>
+            <RiskBadge level={result.level} />
           </div>
         </div>
 
@@ -292,19 +293,20 @@ const eventStyle: Record<EventType, { icon: React.ElementType; color: string; bg
 };
 
 export function RecentHistoryCard({
-  operation, breakdown, area,
+  operation, result, area, recommendation,
 }: {
   operation: Operation;
-  breakdown: ScoreBreakdown;
+  result: RiskResult;
   area: Area;
+  recommendation?: GeneratedRecommendation;
 }) {
   const events: Array<{ time: string; type: EventType; title: string; desc: string }> = [
     { time: "07:12", type: "start", title: "Operação iniciada", desc: `${operation.id} iniciada no ${area.name}` },
-    { time: "07:14", type: "score", title: "Score atualizado",  desc: `Risco ${breakdown.level} calculado em ${breakdown.total}/100` },
-    { time: "07:15", type: "rec",   title: "Recomendação gerada", desc: "Alterar rota para evitar área próxima de água" },
-    { time: "07:16", type: "alert", title: "Alerta registrado",   desc: `Fator dominante: ${breakdown.mainFactor}` },
+    { time: "07:14", type: "score", title: "Score atualizado",  desc: `Risco ${result.level} calculado em ${result.finalScore}/100` },
+    { time: "07:15", type: "rec",   title: "Recomendação gerada", desc: recommendation?.title ?? "Nenhuma ação adicional recomendada" },
+    { time: "07:16", type: "alert", title: "Alerta registrado",   desc: `Fator responsável: ${recommendation?.factor ?? result.breakdown.mainFactor}` },
     { time: "07:17", type: "ack",   title: "Ação confirmada",     desc: "Operador confirmou ciência da recomendação" },
-    { time: "07:19", type: "score", title: "Score recalculado",   desc: "Aguardando confirmação de mudança de rota" },
+    { time: "07:19", type: "score", title: "Score recalculado",   desc: recommendation ? `Aguardando confirmação: ${recommendation.title}` : "Operação mantida sob monitoramento" },
   ];
 
   return (

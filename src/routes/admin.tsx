@@ -35,13 +35,11 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-const recCount = allRecommendationsConsolidated().length;
-
 const tabs = [
   { id: "visao-geral", label: "Visão geral",            icon: ShieldCheck, count: null as number | null },
   { id: "rankings",    label: "Rankings de risco",      icon: Trophy,      count: 2 },
   { id: "scores",      label: "Scores consolidados",    icon: Gauge,       count: 4 },
-  { id: "recs",        label: "Recomendações prioritárias", icon: Lightbulb, count: recCount },
+  { id: "recs",        label: "Recomendações prioritárias", icon: Lightbulb, count: null as number | null },
   { id: "clients",     label: "Clientes monitorados",   icon: Building2,   count: clients.length },
   { id: "machines",    label: "Máquinas monitoradas",   icon: Tractor,     count: machines.length },
   { id: "areas",       label: "Áreas e regiões",        icon: Map,         count: areas.length },
@@ -53,6 +51,7 @@ const tabs = [
 type TabId = (typeof tabs)[number]["id"];
 
 function AdminPage() {
+  const { weights } = useRiskConfig();
   const [tab, setTab] = useState<TabId>("visao-geral");
 
   useEffect(() => {
@@ -69,6 +68,9 @@ function AdminPage() {
   }, []);
 
   const current = tabs.find((t) => t.id === tab)!;
+  const currentCount = tab === "recs"
+    ? allRecommendationsConsolidated(weights).length
+    : current.count;
   const Icon = current.icon;
 
   return (
@@ -86,9 +88,9 @@ function AdminPage() {
           <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Seção ativa</div>
           <div className="truncate text-lg font-semibold text-foreground">{current.label}</div>
         </div>
-        {current.count !== null && (
+        {currentCount !== null && (
           <span className="ml-auto rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground tabular-nums">
-            {current.count}
+            {currentCount}
           </span>
         )}
       </div>
@@ -129,7 +131,7 @@ function RiskEngineConfigurationPanel() {
     climate: climateWeight,
     operational: operationalWeight,
   });
-  const scenarioRecommendations = recommendationsForOperation(scenario, "gestor", {
+  const scenarioRecommendations = recommendationsForOperation(scenario, "admin", {
     weights: { climate: climateWeight, operational: operationalWeight },
     result,
   });
