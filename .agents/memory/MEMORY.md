@@ -2,3 +2,4 @@
 - [Carregamento de fontes web](web-font-loading.md) — no pipeline Vite/Lightning CSS atual, use `@font-face` remoto em vez de `@import` do Google Fonts.
 - [Configuração de pesos de risco](risk-weight-configuration.md) — pesos Sompo são server-side; inclinação é segurança operacional e nunca participa do score.
 - [Risco explicável](recommendation-origin.md) — recomendações e explicações compartilham score, componente e fator; inclinação permanece em telemetria separada.
+- [Fundação de dados](data-foundation.md) — PostgreSQL gerenciado fica atrás de repositórios compatíveis; mocks seguem como origem até uma migração explícita.
