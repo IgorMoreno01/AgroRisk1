@@ -1,14 +1,14 @@
 import { cn } from "@/lib/utils";
 import type { GeneratedRecommendation, RecCategory, RecPriority } from "@/lib/recommendations";
 import {
-  Route, Clock, Gauge, Settings, Wrench, GraduationCap,
+  Route, Clock, Mountain, Settings, Wrench, GraduationCap,
   Leaf, ShieldAlert, Lightbulb, CheckCircle2,
 } from "lucide-react";
 
 const categoryIcon: Record<RecCategory, React.ComponentType<{ className?: string }>> = {
   "Rota": Route,
   "Horário": Clock,
-  "Velocidade": Gauge,
+  "Inclinação": Mountain,
   "Operação": Settings,
   "Manutenção": Wrench,
   "Treinamento": GraduationCap,

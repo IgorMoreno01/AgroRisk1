@@ -22,7 +22,7 @@ import {
 export type RecCategory =
   | "Rota"
   | "Horário"
-  | "Velocidade"
+  | "Inclinação"
   | "Operação"
   | "Manutenção"
   | "Treinamento"
@@ -119,7 +119,7 @@ function recsForOperation(
   } else if (climaPart && climaPart.points >= 8) {
     push({
       title: "Atenção reforçada ao clima",
-      description: "Monitorar previsão e reduzir velocidade se a chuva intensificar.",
+      description: "Monitorar a previsão e pausar a operação se a chuva intensificar.",
       rationale: `Clima atual: ${climaPart.detail.toLowerCase()}.`,
       category: "Atenção ambiental",
       priority: "média",
@@ -127,18 +127,18 @@ function recsForOperation(
     });
   }
 
-  // ---- Velocidade / rota ----
-  const speedPart = partByCategory(b, "Velocidade/rota");
-  if (speedPart && speedPart.points >= 5) {
+  // ---- Inclinação medida pelo ESP32 + MPU6050 ----
+  const inclinationPart = partByCategory(b, "Inclinação");
+  if (inclinationPart && inclinationPart.points >= 5) {
     push({
-      title: "Reduzir velocidade imediatamente",
+      title: "Selecionar rota com menor inclinação",
       description: audience === "operador"
-        ? "Reduza para o limite recomendado e aguarde estabilização."
-        : "Acompanhar e orientar o operador sobre o limite operacional.",
-      rationale: `Velocidade ${speedPart.detail.toLowerCase()} aumenta risco de tombamento e perda de controle.`,
-      category: "Velocidade",
-      priority: speedPart.points >= 10 ? "alta" : bumpPriority(baseP),
-      factor: "Velocidade/rota",
+        ? "Interrompa o avanço e retome somente por um trecho com inclinação segura."
+        : "Replanejar a rota para evitar trechos com inclinação acima do limite.",
+      rationale: `Inclinação ${inclinationPart.detail.toLowerCase()} medida pelo MPU6050 aumenta o risco de tombamento.`,
+      category: "Inclinação",
+      priority: inclinationPart.points >= 10 ? "alta" : bumpPriority(baseP),
+      factor: "Inclinação",
     });
   }
 
@@ -163,7 +163,7 @@ function recsForOperation(
     push({
       title: "Operação supervisionada próxima a corpos d'água",
       description: audience === "operador"
-        ? "Mantenha velocidade reduzida e atenção redobrada."
+        ? "Mantenha atenção redobrada e interrompa em caso de instabilidade."
         : "Designar supervisão direta e checagem de rota.",
       rationale: "Operação classificada como crítica por proximidade direta de água.",
       category: "Operação",
@@ -400,7 +400,7 @@ export function allRecommendationsConsolidated(weights?: Partial<RiskWeights>): 
 
 export function countByCategory(rows: AdminRecRow[]): Record<RecCategory, number> {
   const base: Record<RecCategory, number> = {
-    "Rota": 0, "Horário": 0, "Velocidade": 0, "Operação": 0,
+    "Rota": 0, "Horário": 0, "Inclinação": 0, "Operação": 0,
     "Manutenção": 0, "Treinamento": 0, "Atenção ambiental": 0, "Prevenção de sinistro": 0,
   };
   rows.forEach((r) => { base[r.rec.category] += 1; });

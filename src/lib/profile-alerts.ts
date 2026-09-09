@@ -25,9 +25,9 @@ export interface ProfileAlertsBundle {
 const operadorAlerts: ProfileAlert[] = [
   {
     id: "OPA-01",
-    title: "Velocidade acima do recomendado",
+    title: "Inclinação acima do limite seguro",
     context: "TR-001 · Operação OP-1001",
-    detail: "Reduza a velocidade na operação atual — terreno úmido.",
+    detail: "MPU6050 detectou inclinação crítica; selecione uma rota mais segura.",
     criticality: "alta",
     status: "aberto",
     time: "há 8 min",

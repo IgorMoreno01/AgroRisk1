@@ -12,7 +12,6 @@ import {
 // ---------- Tipos de entrada ----------
 export type Weather = "normal" | "leve" | "moderada" | "forte";
 export type WaterDistance = "acima_150" | "100_150" | "50_100" | "abaixo_50";
-export type Speed = "ok" | "leve" | "muito";
 export type Terrain = "normal" | "umido" | "critico" | "baixa_aderencia";
 
 export interface RiskInputs {
@@ -20,7 +19,7 @@ export interface RiskInputs {
   waterDistance: WaterDistance;
   operationType: OperationType;
   historyAlertCount: number;
-  speed: Speed;
+  inclinationDegrees: number;
   terrain: Terrain;
 }
 
@@ -34,7 +33,7 @@ const WEATHER_MAX = factorWeight("Clima");
 const WATER_MAX = factorWeight("Proximidade de água");
 const OPERATION_MAX = factorWeight("Tipo de operação");
 const HISTORY_MAX = factorWeight("Histórico operacional");
-const SPEED_MAX = factorWeight("Velocidade/rota");
+const INCLINATION_MAX = factorWeight("Inclinação");
 const TERRAIN_MAX = factorWeight("Condição do terreno");
 
 const WEATHER_PTS: Record<Weather, number> = {
@@ -57,7 +56,12 @@ const OPTYPE_PTS: Record<OperationType, number> = {
   "Deslocamento interno": Math.round(OPERATION_MAX * 0.27),
   "Operação próxima de água": OPERATION_MAX,
 };
-const SPEED_PTS: Record<Speed, number> = { ok: 0, leve: Math.round(SPEED_MAX * 0.5), muito: SPEED_MAX };
+const inclinationPts = (degrees: number) => {
+  const absoluteDegrees = Math.abs(degrees);
+  if (absoluteDegrees < 5) return 0;
+  if (absoluteDegrees < 15) return Math.round(INCLINATION_MAX * 0.5);
+  return INCLINATION_MAX;
+};
 const TERRAIN_PTS: Record<Terrain, number> = {
   normal: 0,
   umido: Math.round(TERRAIN_MAX * 0.47),
@@ -76,8 +80,14 @@ const waterLabel: Record<WaterDistance, string> = {
   acima_150: "Acima de 150 m", "100_150": "Entre 100 e 150 m",
   "50_100": "Entre 50 e 100 m", abaixo_50: "Abaixo de 50 m",
 };
-const speedLabel: Record<Speed, string> = {
-  ok: "Dentro do recomendado", leve: "Levemente acima", muito: "Muito acima",
+const inclinationLabel = (degrees: number) => {
+  const absoluteDegrees = Math.abs(degrees);
+  const classification = absoluteDegrees < 5
+    ? "estável"
+    : absoluteDegrees < 15
+    ? "atenção"
+    : "crítica";
+  return `${absoluteDegrees.toFixed(1)}° (${classification})`;
 };
 const terrainLabel: Record<Terrain, string> = {
   normal: "Terreno normal", umido: "Solo úmido", critico: "Solo crítico", baixa_aderencia: "Baixa aderência",
@@ -149,7 +159,7 @@ export function calculateScore(inputs: RiskInputs): ScoreBreakdown {
     { category: "Proximidade de água",   label: "Proximidade de água",   detail: waterLabel[inputs.waterDistance], points: WATER_PTS[inputs.waterDistance], max: WATER_MAX },
     { category: "Tipo de operação",      label: "Tipo de operação",      detail: inputs.operationType,             points: OPTYPE_PTS[inputs.operationType], max: OPERATION_MAX },
     { category: "Histórico operacional", label: "Histórico operacional", detail: `${inputs.historyAlertCount} alerta(s) anterior(es)`, points: historyPts(inputs.historyAlertCount), max: HISTORY_MAX },
-    { category: "Velocidade/rota",       label: "Velocidade / rota",     detail: speedLabel[inputs.speed],         points: SPEED_PTS[inputs.speed], max: SPEED_MAX },
+    { category: "Inclinação",            label: "Inclinação",            detail: inclinationLabel(inputs.inclinationDegrees), points: inclinationPts(inputs.inclinationDegrees), max: INCLINATION_MAX },
     { category: "Condição do terreno",   label: "Condição do terreno",   detail: terrainLabel[inputs.terrain],     points: TERRAIN_PTS[inputs.terrain], max: TERRAIN_MAX },
   ];
   const total = clamp(parts.reduce((s, p) => s + p.points, 0));
@@ -243,9 +253,12 @@ function deriveTerrain(op: Operation): Terrain {
   return "normal";
 }
 
-function deriveSpeed(op: Operation): Speed {
-  if (has(op, "RF-05")) return op.score >= 85 ? "muito" : "muito";
-  return "ok";
+function deriveInclinationDegrees(op: Operation): number {
+  // Fallback determinístico até o ESP32 + MPU6050 enviar a leitura real.
+  if (has(op, "RF-05")) return 18;
+  const terrain = deriveTerrain(op);
+  if (terrain === "critico" || terrain === "baixa_aderencia") return 10;
+  return 2;
 }
 
 function deriveHistoryCount(op: Operation): number {
@@ -259,7 +272,7 @@ export function inputsForOperation(op: Operation): RiskInputs {
     waterDistance: deriveWaterDistance(op),
     operationType: op.type,
     historyAlertCount: deriveHistoryCount(op),
-    speed: deriveSpeed(op),
+    inclinationDegrees: deriveInclinationDegrees(op),
     terrain: deriveTerrain(op),
   };
 }

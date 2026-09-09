@@ -18,7 +18,7 @@ import {
 import {
   recommendationsForOperation, nextBestActionForOperation,
 } from "@/lib/recommendations";
-import { AlertTriangle, Cloud, Droplets, Wind, MapPin, Loader2, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, Cloud, Droplets, Wind, MapPin, Mountain, Loader2, Wifi, WifiOff } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
@@ -135,11 +135,15 @@ function OperadorPage() {
     : weather
     ? `${Math.round(weather.current.windSpeed)} km/h ${weather.current.windDirectionLabel}`
     : "14 km/h NE";
+  const inclinationValue =
+    breakdown.parts.find((part) => part.category === "Inclinação")?.detail ??
+    "Leitura indisponível";
 
   const conditions = [
     { icon: Cloud,    label: "Clima",   value: climaValue },
     { icon: Droplets, label: "Solo",    value: area.condition },
     { icon: Wind,     label: "Vento",   value: ventoValue },
+    { icon: Mountain, label: "Inclinação", value: `${inclinationValue} · MPU6050 simulado` },
     { icon: MapPin,   label: "Posição", value: `${area.name} · ${area.type}` },
   ];
 
@@ -202,7 +206,7 @@ function OperadorPage() {
             )}
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
             {conditions.map((c) => (
               <div key={c.label} className="rounded-lg border border-border p-3">
                 <c.icon className="h-4 w-4 text-muted-foreground" />

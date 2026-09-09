@@ -203,7 +203,7 @@ O motor está em `src/lib/risk-score.ts`. Ele recebe inputs discretos, calcula c
 | Proximidade de água | 25 | Acima de 150 m, 100–150 m, 50–100 m ou abaixo de 50 m |
 | Tipo de operação | 20 | Operações próximas de água recebem o maior peso |
 | Histórico operacional | 15 | 0, 1, 2 ou 3+ alertas resolvidos |
-| Velocidade/rota | 10 | Dentro do recomendado, levemente acima ou muito acima |
+| Inclinação | 20 | Leitura em graus pelo ESP32 + MPU6050: estável, atenção ou crítica |
 | Condição do terreno | 10 | Normal, úmido, crítico ou baixa aderência |
 | **Total** | **100** | Soma limitada a 100 |
 
@@ -228,7 +228,7 @@ Conversões atuais:
 - distância nula ou superior a 150 m → acima de 150 m;
 - demais faixas seguem os limites de 150, 100 e 50 m.
 
-O restante dos fatores — tipo de operação, histórico, velocidade e terreno — ainda é derivado do domínio simulado.
+O restante dos fatores — tipo de operação, histórico, inclinação e terreno — ainda é derivado do domínio simulado. A inclinação aceita leitura numérica em graus e usa fallback mockado até a conexão do ESP32 + MPU6050.
 
 ### Rankings e recomendações
 

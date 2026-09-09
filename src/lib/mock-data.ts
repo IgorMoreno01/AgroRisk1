@@ -131,7 +131,7 @@ export interface RiskFactor {
     | "Proximidade de água"
     | "Tipo de operação"
     | "Histórico operacional"
-    | "Velocidade/rota"
+    | "Inclinação"
     | "Condição do terreno";
   weight: number; // 0..100 (simulado)
   description: string;
@@ -222,7 +222,7 @@ export const areas: Area[] = [
 
 // ---------- Máquinas ----------
 export const machines: Machine[] = [
-  { id: "MQ-001", code: "MQ-001", name: "Trator John Deere 6110J",          model: "6110J",        type: "Trator",          clientId: "CL-01", client: "Fazenda Santa Clara", areaId: "AR-01", area: "Talhão Norte",  operatorId: "USR-OP-1", operator: "Carlos Mendes",   status: "em alerta", score: 100, level: "alto", lastAlert: "Velocidade acima do recomendado", lastUpdate: "há 8 min" },
+  { id: "MQ-001", code: "MQ-001", name: "Trator John Deere 6110J",          model: "6110J",        type: "Trator",          clientId: "CL-01", client: "Fazenda Santa Clara", areaId: "AR-01", area: "Talhão Norte",  operatorId: "USR-OP-1", operator: "Carlos Mendes",   status: "em alerta", score: 100, level: "alto", lastAlert: "Inclinação acima do limite seguro", lastUpdate: "há 8 min" },
   { id: "MQ-002", code: "MQ-002", name: "Colheitadeira CR7.90",             model: "CR7.90",       type: "Colheitadeira",   clientId: "CL-01", client: "Fazenda Santa Clara", areaId: "AR-02", area: "Talhão Sul",    operatorId: "USR-OP-2", operator: "Júlia Ferreira",  status: "ativa",     score: 74, level: "alto",  lastAlert: "Proximidade de corpo d'água",    lastUpdate: "há 12 min" },
   { id: "MQ-003", code: "MQ-003", name: "Pulverizador Jacto Uniport",       model: "Uniport 3030", type: "Pulverizador",    clientId: "CL-01", client: "Fazenda Santa Clara", areaId: "AR-01", area: "Talhão Norte",  operatorId: "USR-OP-3", operator: "Rafael Souza",    status: "ativa",     score: 61, level: "medio", lastAlert: "Vento aumentando",                lastUpdate: "há 22 min" },
   { id: "MQ-004", code: "MQ-004", name: "Trator Massey 7415",               model: "7415",         type: "Trator",          clientId: "CL-02", client: "Agro Vale Norte",     areaId: "AR-03", area: "Talhão Leste",  operatorId: "USR-OP-4", operator: "Pedro Lima",      status: "ativa",     score: 55, level: "medio", lastAlert: "Manutenção próxima do prazo",     lastUpdate: "há 35 min" },
@@ -238,13 +238,13 @@ export const riskFactors: RiskFactor[] = [
   { id: "RF-02", name: "Operação próxima a corpos d'água", category: "Proximidade de água",     weight: 18, description: "Aumenta risco de atolamento e contaminação.",          impact: "alto"  },
   { id: "RF-03", name: "Tipo de operação crítica",         category: "Tipo de operação",        weight: 15, description: "Pulverização e transporte agregam mais risco.",        impact: "medio" },
   { id: "RF-04", name: "Histórico recente de incidente",   category: "Histórico operacional",   weight: 12, description: "Equipamento ou área com ocorrências recentes.",        impact: "medio" },
-  { id: "RF-05", name: "Velocidade ou rota inadequada",    category: "Velocidade/rota",         weight: 20, description: "Velocidade incompatível com condição do terreno.",     impact: "alto"  },
+  { id: "RF-05", name: "Inclinação acima do limite seguro", category: "Inclinação",              weight: 20, description: "Inclinação medida pelo MPU6050 eleva o risco de tombamento.", impact: "alto" },
   { id: "RF-06", name: "Condição crítica do terreno",      category: "Condição do terreno",     weight: 15, description: "Solo encharcado, arenoso ou irregular.",               impact: "medio" },
 ];
 
 // ---------- Recomendações ----------
 export const recommendations: Recommendation[] = [
-  { id: "RC-01", riskType: "Velocidade/rota",     text: "Reduzir velocidade para no máximo 6 km/h no trecho atual.",             rationale: "Solo úmido reduz aderência e aumenta risco de tombamento.", audience: "operador" },
+  { id: "RC-01", riskType: "Inclinação",           text: "Selecionar uma rota com menor inclinação antes de continuar.",          rationale: "Inclinação crítica aumenta o risco de tombamento do equipamento.", audience: "operador" },
   { id: "RC-02", riskType: "Proximidade de água", text: "Evitar rota próxima ao curso d'água a leste do talhão.",                 rationale: "Risco de atolamento e contaminação ambiental.",            audience: "operador" },
   { id: "RC-03", riskType: "Clima",               text: "Reagendar operação para horário com menor probabilidade de chuva.",     rationale: "Janela climática melhora nas próximas 2h.",                 audience: "operador" },
   { id: "RC-04", riskType: "Histórico operacional", text: "Priorizar inspeção preventiva do equipamento antes do próximo turno.", rationale: "Manutenção atrasada eleva chance de falha em campo.",       audience: "gestor" },
@@ -270,21 +270,21 @@ export const operations: Operation[] = [
 
 // ---------- Alertas ----------
 export const alerts: Alert[] = [
-  { id: "AL-01", machineId: "MQ-001", machine: "MQ-001", operationId: "OP-1001", type: "Velocidade acima do recomendado", criticality: "alta",  level: "alto",  message: "Velocidade acima do recomendado em terreno úmido.",       mainFactor: "RF-05", status: "aberto",     datetime: "2026-06-16 09:20", time: "há 8 min" },
+  { id: "AL-01", machineId: "MQ-001", machine: "MQ-001", operationId: "OP-1001", type: "Inclinação acima do limite seguro", criticality: "alta", level: "alto", message: "MPU6050 identificou inclinação crítica durante a operação.", mainFactor: "RF-05", status: "aberto", datetime: "2026-06-16 09:20", time: "há 8 min" },
   { id: "AL-02", machineId: "MQ-002", machine: "MQ-002", operationId: "OP-1002", type: "Proximidade de água",             criticality: "alta",  level: "alto",  message: "Rota próxima a corpo d'água — risco de atolamento.",      mainFactor: "RF-02", status: "em análise", datetime: "2026-06-16 09:06", time: "há 22 min" },
   { id: "AL-03", machineId: "MQ-003", machine: "MQ-003", operationId: "OP-1003", type: "Chuva prevista",                  criticality: "média", level: "medio", message: "Vento aumentando — atenção em pulverização.",             mainFactor: "RF-01", status: "aberto",     datetime: "2026-06-16 08:53", time: "há 35 min" },
   { id: "AL-04", machineId: "MQ-003", machine: "MQ-003", operationId: "OP-1003", type: "Histórico de incidente",          criticality: "média", level: "medio", message: "Manutenção preventiva próxima do vencimento.",            mainFactor: "RF-04", status: "aberto",     datetime: "2026-06-16 08:28", time: "há 1h" },
   { id: "AL-05", machineId: "MQ-004", machine: "MQ-004", operationId: "OP-1004", type: "Solo crítico",                    criticality: "média", level: "medio", message: "Solo com baixa estabilidade no setor norte do talhão.",  mainFactor: "RF-06", status: "em análise", datetime: "2026-06-16 08:10", time: "há 1h 18m" },
   { id: "AL-06", machineId: "MQ-006", machine: "MQ-006", operationId: "OP-1005", type: "Operação em área crítica",        criticality: "alta",  level: "alto",  message: "Trajeto cruza área de acesso restrito.",                  mainFactor: "RF-03", status: "aberto",     datetime: "2026-06-16 07:55", time: "há 1h 33m" },
   { id: "AL-07", machineId: "MQ-002", machine: "MQ-002", operationId: "OP-1008", type: "Proximidade de água",             criticality: "alta",  level: "alto",  message: "Operação anterior registrou alagamento parcial.",         mainFactor: "RF-02", status: "resolvido",  datetime: "2026-06-15 17:42", time: "ontem" },
-  { id: "AL-08", machineId: "MQ-001", machine: "MQ-001", operationId: "OP-1009", type: "Velocidade acima do recomendado", criticality: "alta",  level: "alto",  message: "Operação interrompida por excesso de velocidade.",        mainFactor: "RF-05", status: "resolvido",  datetime: "2026-06-15 14:11", time: "ontem" },
+  { id: "AL-08", machineId: "MQ-001", machine: "MQ-001", operationId: "OP-1009", type: "Inclinação crítica", criticality: "alta", level: "alto", message: "Operação interrompida após leitura crítica de inclinação.", mainFactor: "RF-05", status: "resolvido", datetime: "2026-06-15 14:11", time: "ontem" },
   { id: "AL-09", machineId: "MQ-005", machine: "MQ-005", operationId: "OP-1006", type: "Solo crítico",                    criticality: "baixa", level: "medio", message: "Solo arenoso identificado no Setor Oeste.",               mainFactor: "RF-06", status: "resolvido",  datetime: "2026-06-15 11:30", time: "ontem" },
   { id: "AL-10", machineId: "MQ-007", machine: "MQ-007", operationId: "OP-1007", type: "Chuva prevista",                  criticality: "baixa", level: "baixo", message: "Previsão de chuva leve no fim da tarde.",                mainFactor: "RF-01", status: "aberto",     datetime: "2026-06-16 09:00", time: "há 30 min" },
 ];
 
 // ---------- Histórico operacional ----------
 export const operationHistory: HistoryEntry[] = [
-  { id: "HX-01", date: "2026-06-15", machineId: "MQ-001", operationId: "OP-1009", summary: "Operação interrompida por velocidade alta", score: 88 },
+  { id: "HX-01", date: "2026-06-15", machineId: "MQ-001", operationId: "OP-1009", summary: "Operação interrompida por inclinação crítica", score: 88 },
   { id: "HX-02", date: "2026-06-15", machineId: "MQ-002", operationId: "OP-1008", summary: "Colheita concluída próximo a corpo d'água", score: 71 },
   { id: "HX-03", date: "2026-06-15", machineId: "MQ-005", operationId: "OP-1006", summary: "Plantio concluído em solo arenoso",          score: 42 },
   { id: "HX-04", date: "2026-06-14", machineId: "MQ-003", operationId: "OP-1011", summary: "Pulverização concluída sem ocorrências",     score: 49 },
