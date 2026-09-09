@@ -25,3 +25,12 @@ continuar acionável sem alterar o cálculo atuarial do risco.
 
 **How to apply:** mantenha a inclinação fora do breakdown matemático e dos pesos Sompo. Regras
 de segurança podem consultar diretamente a leitura em graus, independentemente do score.
+
+O componente dominante deve comparar as contribuições ponderadas finais de clima e operação,
+não apenas os percentuais configurados. Contribuições iguais resultam em componente balanceado.
+
+**Why:** o peso isolado não representa predominância quando o score-base do outro componente é
+maior; a contribuição combina corretamente intensidade do risco e configuração Sompo.
+
+**How to apply:** todas as personas devem consumir o componente retornado pelo Risk Engine. O
+fator interno dominante permanece separado e vem exclusivamente das partes do breakdown.

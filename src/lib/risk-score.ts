@@ -183,9 +183,9 @@ export function calculateWeightedRisk(
   const climateContribution = roundOneDecimal(climateScore * (weights.climate / 100));
   const operationalContribution = roundOneDecimal(operationalScore * (weights.operational / 100));
   const finalScore = Math.round(clamp(climateContribution + operationalContribution));
-  const dominantFactor = weights.climate === weights.operational
+  const dominantFactor = climateContribution === operationalContribution
     ? "balanced"
-    : weights.climate > weights.operational
+    : climateContribution > operationalContribution
     ? "climate"
     : "operational";
 
