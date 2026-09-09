@@ -11,10 +11,10 @@ import {
   getMachine, getArea, getClient,
 } from "./mock-data";
 import {
-  scoreMachine, scoreArea, scoreClientWithWeights,
+  scoreMachine, scoreArea, scoreClientWithWeights, scoreAreaWithWeights,
   currentOperationFor, inputsForOperationWithOverrides, riskResultForOperation,
-  riskResultForMachine, scoreAreaWithWeights,
-  dominantFactorLabel, inclinationLabel, riskFromScore,
+  riskResultForMachine, riskResultForArea, riskResultForClient,
+  dominantFactorLabel, inclinationLabel,
   type ScoreBreakdown, type ScorePart, type RiskLevel, type RiskResult,
   type RiskWeights, type RiskInputs,
 } from "./risk-score";
@@ -130,42 +130,6 @@ function recsForOperation(
   return recommendationForResult(result, audience, `${op.id}-engine`);
 }
 
-function aggregateRiskResults(
-  results: RiskResult[],
-  summary: { score: number; level: RiskLevel; topFactor: string },
-): RiskResult | undefined {
-  if (results.length === 0) return undefined;
-  const average = (values: number[]) =>
-    Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10;
-  const parts = results[0].breakdown.parts.map((part) => ({
-    ...part,
-    points: Math.round(average(results.map((result) =>
-      result.breakdown.parts.find((candidate) => candidate.category === part.category)?.points ?? 0
-    ))),
-    detail: "Média consolidada",
-  }));
-  const dominantFactor = summary.topFactor === "Risco climático"
-    ? "climate"
-    : summary.topFactor === "Risco operacional"
-    ? "operational"
-    : "balanced";
-  return {
-    climateScore: Math.round(average(results.map((result) => result.climateScore))),
-    operationalScore: Math.round(average(results.map((result) => result.operationalScore))),
-    climateContribution: average(results.map((result) => result.climateContribution)),
-    operationalContribution: average(results.map((result) => result.operationalContribution)),
-    finalScore: summary.score,
-    level: summary.level,
-    dominantFactor,
-    breakdown: {
-      total: Math.round(average(results.map((result) => result.breakdown.total))),
-      level: riskFromScore(summary.score),
-      parts,
-      mainFactor: [...parts].sort((a, b) => b.points - a.points)[0]?.category ?? "—",
-    },
-  };
-}
-
 export function telemetrySafetyRecommendationsForOperation(
   op: Operation,
   audience: RecAudience = "operador",
@@ -224,11 +188,7 @@ export function recommendationsForArea(
 ): GeneratedRecommendation[] {
   const ops = operations.filter((o) => o.areaId === areaId);
   if (ops.length === 0) return [];
-  const summary = scoreAreaWithWeights(areaId, options?.weights);
-  const result = aggregateRiskResults(
-    ops.map((operation) => riskResultForOperation(operation, options?.weights)),
-    summary,
-  );
+  const result = riskResultForArea(areaId, options?.weights);
   return result ? recommendationForResult(result, audience, `${areaId}-engine`) : [];
 }
 
@@ -237,12 +197,9 @@ export function recommendationsForClient(
   audience: RecAudience = "consultor",
   options?: RiskEvaluationOptions,
 ): GeneratedRecommendation[] {
-  const summary = scoreClientWithWeights(clientId, options?.weights);
   const ms = machines.filter((m) => m.clientId === clientId);
-  const result = aggregateRiskResults(
-    ms.map((machine) => riskResultForMachine(machine.id, options?.weights)),
-    summary,
-  );
+  if (ms.length === 0) return [];
+  const result = riskResultForClient(clientId, options?.weights);
   return result ? recommendationForResult(result, audience, `${clientId}-engine`) : [];
 }
 

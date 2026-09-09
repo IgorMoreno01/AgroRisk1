@@ -25,6 +25,7 @@ import { useRiskConfig } from "@/lib/risk-config";
 import { Slider } from "@/components/ui/slider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { RecommendationCard } from "@/components/recommendation-card";
+import { RiskExplanation } from "@/components/risk-explanation";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "AgroRisk · Admin / Sompo" }] }),
@@ -259,28 +260,13 @@ function RiskEngineConfigurationPanel() {
             </div>
             <RiskBadge score={result.finalScore} />
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <EngineMetric label="Score climático" value={`${result.climateScore} / 100`} detail={`${climateWeight}% do peso`} />
-            <EngineMetric label="Score operacional" value={`${result.operationalScore} / 100`} detail={`${operationalWeight}% do peso`} />
-            <EngineMetric label="Contribuição climática" value={result.climateContribution.toFixed(1)} detail={`${result.climateScore} × ${climateWeight}%`} />
-            <EngineMetric label="Contribuição operacional" value={result.operationalContribution.toFixed(1)} detail={`${result.operationalScore} × ${operationalWeight}%`} />
-          </div>
-          <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-xs uppercase tracking-wide text-muted-foreground">Score final ponderado</div>
-                <div className="mt-1 text-3xl font-semibold tabular-nums text-foreground">
-                  {result.finalScore}<span className="text-base text-muted-foreground"> / 100</span>
-                </div>
-              </div>
-              <span className="rounded-full bg-card px-3 py-1 text-sm font-medium text-foreground">
-                {dominantFactorLabel(result.dominantFactor)}
-              </span>
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Fórmula: {result.climateScore} × {climateWeight}% + {result.operationalScore} × {operationalWeight}% ={" "}
-              {result.climateContribution.toFixed(1)} + {result.operationalContribution.toFixed(1)}, arredondado para {result.finalScore}.
-            </p>
+          <div className="mt-5">
+            <RiskExplanation
+              result={result}
+              weights={{ climate: climateWeight, operational: operationalWeight }}
+              recommendation={scenarioRecommendations[0]}
+              audience="admin"
+            />
           </div>
           <div className="mt-5">
             <div className="mb-2 text-sm font-semibold text-foreground">Recomendações do cenário</div>
@@ -292,16 +278,6 @@ function RiskEngineConfigurationPanel() {
           </div>
         </Card>
       </div>
-    </div>
-  );
-}
-
-function EngineMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="mt-1 text-xl font-semibold tabular-nums text-foreground">{value}</div>
-      <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
     </div>
   );
 }

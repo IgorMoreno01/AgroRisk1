@@ -1,4 +1,4 @@
 - [External API adapters](external-api-adapters.md) — 4 adapters implementados com cache, fallback para mock e chaves só no server-side.
 - [Carregamento de fontes web](web-font-loading.md) — no pipeline Vite/Lightning CSS atual, use `@font-face` remoto em vez de `@import` do Google Fonts.
 - [Configuração de pesos de risco](risk-weight-configuration.md) — pesos Sompo são server-side; inclinação é segurança operacional e nunca participa do score.
-- [Origem das recomendações](recommendation-origin.md) — recomendações seguem a cadeia central score, componente e fator; telemetria de inclinação é um fluxo separado.
+- [Risco explicável](recommendation-origin.md) — recomendações e explicações compartilham score, componente e fator; inclinação permanece em telemetria separada.

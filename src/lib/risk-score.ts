@@ -300,6 +300,42 @@ export function riskResultForMachine(
 }
 
 const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((s, n) => s + n, 0) / xs.length) : 0);
+const avgOneDecimal = (xs: number[]) =>
+  xs.length ? Math.round((xs.reduce((sum, value) => sum + value, 0) / xs.length) * 10) / 10 : 0;
+
+function aggregateRiskResults(
+  results: RiskResult[],
+  summary: { score: number; level: RiskLevel; topFactor: string },
+): RiskResult | undefined {
+  if (results.length === 0) return undefined;
+  const parts = results[0].breakdown.parts.map((part) => ({
+    ...part,
+    points: Math.round(avgOneDecimal(results.map((result) =>
+      result.breakdown.parts.find((candidate) => candidate.category === part.category)?.points ?? 0
+    ))),
+    detail: "Média consolidada",
+  }));
+  const dominantFactor = summary.topFactor === "Risco climático"
+    ? "climate"
+    : summary.topFactor === "Risco operacional"
+    ? "operational"
+    : "balanced";
+  return {
+    climateScore: Math.round(avgOneDecimal(results.map((result) => result.climateScore))),
+    operationalScore: Math.round(avgOneDecimal(results.map((result) => result.operationalScore))),
+    climateContribution: avgOneDecimal(results.map((result) => result.climateContribution)),
+    operationalContribution: avgOneDecimal(results.map((result) => result.operationalContribution)),
+    finalScore: summary.score,
+    level: summary.level,
+    dominantFactor,
+    breakdown: {
+      total: Math.round(avgOneDecimal(results.map((result) => result.breakdown.total))),
+      level: summary.level,
+      parts,
+      mainFactor: [...parts].sort((a, b) => b.points - a.points)[0]?.category ?? "—",
+    },
+  };
+}
 
 export interface ClientScore {
   clientId: string; name: string; score: number; level: RiskLevel;
@@ -358,6 +394,16 @@ export function scoreClientWithWeights(
   };
 }
 
+export function riskResultForClient(
+  clientId: string,
+  weights?: Partial<RiskWeights>,
+): RiskResult | undefined {
+  const results = machines
+    .filter((machine) => machine.clientId === clientId)
+    .map((machine) => riskResultForMachine(machine.id, weights));
+  return aggregateRiskResults(results, scoreClientWithWeights(clientId, weights));
+}
+
 export interface AreaScore {
   areaId: string; name: string; clientName: string; score: number; level: RiskLevel;
   condition: string; topFactor: string;
@@ -401,6 +447,16 @@ export function scoreAreaWithWeights(
     condition: area.condition,
     topFactor,
   };
+}
+
+export function riskResultForArea(
+  areaId: string,
+  weights?: Partial<RiskWeights>,
+): RiskResult | undefined {
+  const results = operations
+    .filter((operation) => operation.areaId === areaId)
+    .map((operation) => riskResultForOperation(operation, weights));
+  return aggregateRiskResults(results, scoreAreaWithWeights(areaId, weights));
 }
 
 export interface OperationTypeStats {

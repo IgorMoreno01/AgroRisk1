@@ -3,11 +3,12 @@ import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { RiskComposition } from "@/components/risk-composition";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { NextBestActionCard } from "@/components/next-best-action";
+import { RiskExplanation } from "@/components/risk-explanation";
 import {
   type Machine,
   alerts, operationHistory, getOperator, getArea,
 } from "@/lib/mock-data";
-import { riskResultForMachine, currentOperationFor, dominantFactorLabel } from "@/lib/risk-score";
+import { riskResultForMachine, currentOperationFor } from "@/lib/risk-score";
 import { recommendationsForMachine, nextBestActionForMachine } from "@/lib/recommendations";
 import { AlertTriangle, MapPin, Tractor, User, Activity, History, Flame } from "lucide-react";
 import { useRiskConfig } from "@/lib/risk-config";
@@ -69,18 +70,7 @@ export function MachineDetailDialog({
         </div>
 
         <div className="mt-2 rounded-xl border border-border bg-muted/30 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Score de risco</div>
-              <div className="mt-0.5 text-3xl font-semibold tabular-nums text-foreground">
-                 {b.finalScore}<span className="text-base text-muted-foreground"> / 100</span>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Principal fator</div>
-               <div className="mt-0.5 text-sm font-medium text-foreground">{dominantFactorLabel(b.dominantFactor)}</div>
-            </div>
-          </div>
+          <RiskExplanation result={b} weights={weights} recommendation={recs[0]} audience="gestor" />
         </div>
 
         <div>

@@ -4,17 +4,18 @@ import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { RiskComposition } from "@/components/risk-composition";
 import { RecommendationCard } from "@/components/recommendation-card";
+import { RiskExplanation } from "@/components/risk-explanation";
 import { NextBestActionCard } from "@/components/next-best-action";
 import { clients, machinesByClient } from "@/lib/mock-data";
 import {
-  scoreClientWithWeights, riskResultForMachine, scoreAreaWithWeights,
+  scoreClientWithWeights, riskResultForClient, riskResultForMachine, scoreAreaWithWeights,
   dominantFactorLabel,
 } from "@/lib/risk-score";
 import { areas as allAreas } from "@/lib/mock-data";
 import {
-  recommendationsForClient, clientExplanation, nextBestActionForMachine,
+  recommendationsForClient, nextBestActionForMachine,
 } from "@/lib/recommendations";
-import { Building2, FileText, AlertTriangle } from "lucide-react";
+import { Building2, FileText } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
@@ -34,6 +35,7 @@ function ConsultorPage() {
   const [clientId, setClientId] = useState(clients[0].id);
   const client = clients.find((c) => c.id === clientId)!;
   const cs = scoreClientWithWeights(client.id, weights);
+  const clientResult = riskResultForClient(client.id, weights);
 
   const clientMachines = machinesByClient(client.id)
     .map((m) => ({ m, b: riskResultForMachine(m.id, weights) }))
@@ -44,36 +46,11 @@ function ConsultorPage() {
     .map((a) => scoreAreaWithWeights(a.id, weights))
     .sort((a, b) => b.score - a.score);
 
-  // Fatores mais recorrentes nas máquinas do cliente
-  const tally: Record<string, number> = {};
-  clientMachines.forEach(({ b }) => {
-    b.breakdown.parts.forEach((p) => {
-      if (p.points > 0) tally[p.label] = (tally[p.label] ?? 0) + p.points;
-    });
-  });
-  const totalPts = Object.values(tally).reduce((s, n) => s + n, 0) || 1;
-  const factors = Object.entries(tally)
-    .map(([label, pts]) => ({ label, weight: Math.round((pts / totalPts) * 100) }))
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, 6);
-
-  // Composição do cliente: média ponto-a-ponto das máquinas
-  const avgParts = clientMachines[0].b.breakdown.parts.map((p, idx) => {
-    const points = Math.round(
-      clientMachines.reduce((s, { b }) => s + b.breakdown.parts[idx].points, 0) / clientMachines.length,
-    );
-    return { ...p, points, detail: `Média da frota do cliente` };
-  });
-  const clientBreakdown = { total: cs.score, level: cs.level, parts: avgParts, mainFactor: cs.topFactor };
-
   const recommendations = recommendationsForClient(client.id, "consultor", { weights });
-  const topMachineId = clientMachines[0]?.m.id;
-  const nextAction = topMachineId
-    ? nextBestActionForMachine(topMachineId, { weights })
-    : undefined;
-  const narrative = clientExplanation(client.id, { weights });
-
   const topMachine = clientMachines[0];
+  const nextAction = topMachine
+    ? nextBestActionForMachine(topMachine.m.id, { weights, result: topMachine.b })
+    : undefined;
 
   return (
     <AppLayout title="Visão do Consultor" subtitle="Análise consolidada por cliente e recomendações preventivas">
@@ -122,7 +99,7 @@ function ConsultorPage() {
             <div className="text-5xl font-semibold tabular-nums text-foreground">{cs.score}</div>
             <RiskBadge score={cs.score} />
             <p className="text-center text-xs text-muted-foreground">
-              Principal fator: <span className="font-medium text-foreground">{cs.topFactor}</span>
+              Componente consolidado: <span className="font-medium text-foreground">{cs.topFactor}</span>
             </p>
           </div>
         </Card>
@@ -183,32 +160,30 @@ function ConsultorPage() {
         <Card>
           <SectionTitle
             title="Composição do score do cliente"
-            description="Média dos pontos por fator entre as máquinas"
+             description="Fatores internos consolidados pelo Risk Engine"
           />
-          <RiskComposition breakdown={clientBreakdown} compact />
+           {clientResult ? (
+             <RiskComposition breakdown={clientResult.breakdown} compact />
+           ) : (
+             <p className="text-sm text-muted-foreground">Sem dados suficientes para compor o score.</p>
+           )}
         </Card>
 
         <Card>
           <SectionTitle
-            title="Fatores recorrentes na frota"
-            description="Contribuição relativa ao score do cliente"
+            title="Origem do risco"
+            description="Explicação preventiva baseada no resultado central"
           />
-          <ul className="space-y-3">
-            {factors.map((f) => (
-              <li key={f.label}>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-2 text-foreground">
-                    <AlertTriangle className="h-3.5 w-3.5 text-warning" />
-                    {f.label}
-                  </span>
-                  <span className="tabular-nums text-muted-foreground">{f.weight}%</span>
-                </div>
-                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-secondary" style={{ width: `${f.weight}%` }} />
-                </div>
-              </li>
-            ))}
-          </ul>
+          {clientResult ? (
+            <RiskExplanation
+              result={clientResult}
+              weights={weights}
+              recommendation={recommendations[0]}
+              audience="consultor"
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">Sem dados suficientes para explicar o risco.</p>
+          )}
         </Card>
       </div>
 
@@ -241,20 +216,21 @@ function ConsultorPage() {
               </button>
             }
           />
-          <div className="space-y-3 text-sm leading-relaxed text-foreground">
-            <p>
-              Olá, <strong>{client.name}</strong>. O score médio da sua frota está em{" "}
-              <strong>{cs.score}/100</strong>, classificado como{" "}
-              <strong>risco {cs.level}</strong>.
+          {clientResult ? (
+            <RiskExplanation
+              result={clientResult}
+              weights={weights}
+              recommendation={recommendations[0]}
+              audience="consultor"
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">Sem dados suficientes para explicar o risco.</p>
+          )}
+          {topMachine && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Destaque operacional: <strong>{topMachine.m.name}</strong> (score {topMachine.b.finalScore}).
             </p>
-            <p>{narrative}</p>
-            {topMachine && (
-              <p className="text-muted-foreground">
-                 Destaque para o equipamento <strong>{topMachine.m.name}</strong> (score {topMachine.b.finalScore}) —
-                ação principal sugerida abaixo.
-              </p>
-            )}
-          </div>
+          )}
           {nextAction && <div className="mt-4"><NextBestActionCard action={nextAction} /></div>}
         </Card>
         </section>

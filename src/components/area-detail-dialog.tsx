@@ -1,11 +1,12 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { RecommendationCard } from "@/components/recommendation-card";
+import { RiskExplanation } from "@/components/risk-explanation";
 import {
   type Area,
   alerts, operations, machines,
 } from "@/lib/mock-data";
-import { scoreAreaWithWeights, riskResultForMachine, riskResultForOperation } from "@/lib/risk-score";
+import { scoreAreaWithWeights, riskResultForArea, riskResultForMachine, riskResultForOperation } from "@/lib/risk-score";
 import { recommendationsForArea } from "@/lib/recommendations";
 import { AlertTriangle, MapPin, Tractor, Activity, History, Flame } from "lucide-react";
 import { useRiskConfig } from "@/lib/risk-config";
@@ -22,24 +23,14 @@ export function AreaDetailDialog({
   const { weights } = useRiskConfig();
   if (!area) return null;
   const s = scoreAreaWithWeights(area.id, weights);
+  const result = riskResultForArea(area.id, weights);
   const areaMachines = machines.filter((m) => m.areaId === area.id);
   const areaOps = operations.filter((o) => o.areaId === area.id);
   const activeOps = areaOps.filter((o) => o.status === "Em andamento");
   const concluded = areaOps.filter((o) => o.status === "Concluída" || o.status === "Interrompida").slice(0, 4);
   const areaAlerts = alerts.filter((a) => areaOps.some((o) => o.id === a.operationId));
 
-  // Top fatores agregando operações
-  const tally: Record<string, number> = {};
-  areaOps.forEach((o) => {
-     const b = riskResultForOperation(o, weights).breakdown;
-     b.parts.forEach((p) => { if (p.points > 0) tally[p.label] = (tally[p.label] ?? 0) + p.points; });
-  });
-  const topFactors = Object.entries(tally)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([label]) => label);
-
-   const recs = recommendationsForArea(area.id, "gestor", { weights });
+  const recs = recommendationsForArea(area.id, "gestor", { weights });
   const isPriority = s.score >= 80;
 
   return (
@@ -75,30 +66,11 @@ export function AreaDetailDialog({
         </div>
 
         <div className="rounded-xl border border-border bg-muted/30 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Score médio</div>
-              <div className="mt-0.5 text-3xl font-semibold tabular-nums text-foreground">
-                {s.score}<span className="text-base text-muted-foreground"> / 100</span>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Principal fator</div>
-              <div className="mt-0.5 text-sm font-medium text-foreground">{s.topFactor}</div>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <h3 className="mb-2 text-sm font-semibold text-foreground">Principais fatores de risco</h3>
-          <div className="flex flex-wrap gap-2">
-            {topFactors.length === 0 && <span className="text-xs text-muted-foreground">Sem fatores significativos.</span>}
-            {topFactors.map((f) => (
-              <span key={f} className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/15 px-2.5 py-0.5 text-xs font-medium text-warning-foreground">
-                <AlertTriangle className="h-3 w-3" /> {f}
-              </span>
-            ))}
-          </div>
+          {result ? (
+            <RiskExplanation result={result} weights={weights} recommendation={recs[0]} audience="gestor" />
+          ) : (
+            <p className="text-sm text-muted-foreground">Sem operações suficientes para explicar o score desta área.</p>
+          )}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">

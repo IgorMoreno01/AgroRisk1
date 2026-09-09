@@ -4,6 +4,7 @@ import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge } from "@/components/risk-badge";
 import { RiskComposition } from "@/components/risk-composition";
 import { RecommendationCard } from "@/components/recommendation-card";
+import { RiskExplanation } from "@/components/risk-explanation";
 import { NextBestActionCard } from "@/components/next-best-action";
 import {
   OperationalSummary, GeoContextCard, RecentHistoryCard,
@@ -125,11 +126,6 @@ function OperadorPage() {
   );
   const nextAction = nextBestActionForOperation(operation, riskOptions);
 
-  const topFactors = [...breakdown.parts]
-    .filter((p) => p.points > 0)
-    .sort((a, b) => b.points - a.points)
-    .slice(0, 3);
-
   // ---- Cards de condição: real quando disponível, mock como fallback ----
   const climaValue = loadingWeather
     ? "Carregando…"
@@ -163,8 +159,8 @@ function OperadorPage() {
           <div className="flex-1">
             <div className="font-semibold text-danger">ALERTA DE RISCO ALTO</div>
             <p className="mt-0.5 text-sm text-foreground/80">
-              Motivo: {topFactors.map((f) => f.label.toLowerCase()).join(" + ")}.
-              Siga as ações abaixo ou pause a operação até a normalização.
+              Motivo principal: {recs[0]?.factor.toLowerCase() ?? breakdown.mainFactor.toLowerCase()}.
+              {recs[0] ? ` ${recs[0].title}.` : " Pause a operação se houver agravamento."}
             </p>
           </div>
         </div>
@@ -238,16 +234,8 @@ function OperadorPage() {
             <p className="mt-3 text-center text-xs text-muted-foreground">
               Atualizado há instantes · escala 0–100
             </p>
-             <p className="mt-1 text-center text-xs text-muted-foreground">
-               Motor Sompo: clima {weights.climate}% · operacional {weights.operational}%
-             </p>
-            <div className="mt-3 w-full rounded-lg bg-muted/60 p-3 text-xs">
-              <div className="font-medium text-foreground">Risco {level} devido a:</div>
-              <ul className="mt-1 space-y-0.5 text-muted-foreground">
-                {topFactors.map((f) => (
-                  <li key={f.category}>• {f.detail}</li>
-                ))}
-              </ul>
+            <div className="mt-3 w-full">
+              <RiskExplanation result={scoreContext} weights={weights} recommendation={recs[0]} audience="operador" />
             </div>
           </div>
         </Card>
