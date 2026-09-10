@@ -1,0 +1,144 @@
+Vamos esclarecer SOMENTE os dois bloqueios identificados.
+
+NÃO implemente o modelo ainda.
+NÃO altere arquivos.
+NÃO instale dependências.
+NÃO faça git add.
+NÃO faça commit.
+NÃO faça push.
+
+==================================================
+1. AUDITAR A SEMÂNTICA DO HASH
+==================================================
+
+Abra:
+
+agrorisk_manifesto_modelo_v1.json
+
+e mostre EXATAMENTE:
+
+- nome do campo que contém:
+  11f1aded2ec3d92206de2d3c815f3431848b90f2d0015bdd55f1e120049a2b3e
+
+- contexto completo desse campo;
+- descrição associada;
+- qualquer nome de arquivo associado ao hash.
+
+Não assuma que esse hash pertence ao
+agrorisk_modelo_portatil_v1.json.
+
+Depois abra o próprio:
+
+agrorisk_modelo_portatil_v1.json
+
+e procure qualquer campo relacionado a:
+
+hash
+sha
+sha256
+source
+joblib
+manifest
+benchmark
+model
+
+Informe todos os campos encontrados e seus valores.
+
+Também verifique se o manifesto indica que o hash corresponde a:
+
+- agrorisk_modelo_logistico_v1.joblib;
+- modelo sklearn original;
+- pacote de deploy;
+- JSON portátil;
+- ou outro artefato.
+
+Se o arquivo:
+
+agrorisk_modelo_logistico_v1.joblib
+
+também estiver disponível, calcule seu SHA-256 SOMENTE para
+comparação de leitura e informe o resultado.
+
+NÃO modifique nenhum artefato.
+
+==================================================
+2. AVALIAR A NECESSIDADE REAL DO PARQUET
+==================================================
+
+Confirme no JSON portátil:
+
+- quantidade da referência embutida;
+- se ela contém todos os valores individuais, e não apenas percentis;
+- se está ordenada;
+- fórmula declarada para mlRelativeScore.
+
+Já foi observado:
+
+121686 valores
+e fórmula:
+
+100 * count(reference <= probability) / len(reference)
+
+Confirme isso diretamente.
+
+Depois determine:
+
+A implementação TypeScript do mlRelativeScore consegue reproduzir
+o Python usando SOMENTE a referência completa embutida no JSON?
+
+Responda SIM/NÃO e explique tecnicamente.
+
+Também confirme se os Golden Vectors possuem:
+
+PROBA_ESPERADA
+SCORE_RELATIVO_ESPERADO
+
+e se portanto permitem validar tanto:
+
+- probabilidade;
+- score relativo.
+
+==================================================
+3. CONSISTÊNCIA MATEMÁTICA
+==================================================
+
+Sem implementar TypeScript ainda, confirme novamente:
+
+- JSON: 50 coeficientes;
+- CSV coeficientes: 50;
+- diferença máxima entre eles;
+- Golden Vectors: 25;
+- inputs Golden = contrato raw do JSON;
+- erro máximo Python portátil × sklearn;
+- features proibidas ausentes.
+
+==================================================
+4. DECISÃO
+==================================================
+
+Classifique separadamente:
+
+HASH:
+- inconsistência real;
+- comparação entre artefatos diferentes;
+- ou inconclusivo.
+
+PARQUET:
+- obrigatório para runtime/paridade;
+- útil apenas para auditoria;
+- ou inconclusivo.
+
+Ao final responda:
+
+A. Campo exato do hash no manifesto
+B. Artefato ao qual o hash realmente pertence
+C. Hash do joblib, se disponível
+D. Referência embutida no JSON
+E. Parquet é necessário para implementar? SIM/NÃO
+F. Golden Vectors suficientes para validar probability + score? SIM/NÃO
+G. Existe inconsistência REAL entre os artefatos? SIM/NÃO/INCONCLUSIVO
+H. STEP 4 pode prosseguir? SIM/NÃO
+
+PARE depois disso.
+
+NÃO implemente código.
