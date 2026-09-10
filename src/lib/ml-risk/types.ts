@@ -18,6 +18,19 @@ export interface MlRiskInput {
   HIST_ITEM_SAFE_N_365D: number | null;
 }
 
+export type MlRiskComponent = "climate" | "structure" | "history";
+
+export interface MlRiskComponentContribution {
+  component: MlRiskComponent;
+  /**
+   * Soma algébrica local dos termos da família no logit.
+   * Não representa probabilidade, percentual causal ou importância global.
+   */
+  contribution: number;
+  direction: "increase" | "decrease" | "neutral";
+  label: string;
+}
+
 export interface MlRiskModelV1Result {
   modelVersion: string;
   /** Diagnóstico matemático interno, não destinado à UI. */
@@ -32,4 +45,6 @@ export interface MlRiskModelV1Result {
    * Não representa probabilidade absoluta.
    */
   mlRelativeScore: number;
+  /** Decomposição local dos termos do logit, sem o intercept. */
+  components: MlRiskComponentContribution[];
 }

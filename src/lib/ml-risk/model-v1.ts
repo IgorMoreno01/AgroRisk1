@@ -1,5 +1,10 @@
 import { MODEL_V1_DATA } from "./model-v1.data";
-import type { MlRiskInput, MlRiskModelV1Result } from "./types";
+import type {
+  MlRiskComponent,
+  MlRiskComponentContribution,
+  MlRiskInput,
+  MlRiskModelV1Result,
+} from "./types";
 
 type NumericFeatureName =
   | "LOG1P_PRECIP_D1"
@@ -20,6 +25,59 @@ type NumericFeatureName =
   | "LOG1P_HIST_N_90D"
   | "LOG1P_HIST_N_365D"
   | "LOG1P_HIST_DIAS_DESDE_ULT";
+
+const NUMERIC_FEATURE_FAMILY: Record<NumericFeatureName, MlRiskComponent> = {
+  LOG1P_PRECIP_D1: "climate",
+  LOG1P_CHUVA_7D: "climate",
+  LOG1P_CHUVA_30D: "climate",
+  TEMP_MEDIA_D1_C: "climate",
+  TEMP_MEDIA_D1_C_SQ: "climate",
+  TEMP_AMPLITUDE_D1_C: "climate",
+  TEMP_AMPLITUDE_D1_C_SQ: "climate",
+  UMIDADE_D1_PCT: "climate",
+  UMIDADE_D1_PCT_SQ: "climate",
+  VENTO_D1_MS: "climate",
+  ALTITUDE_ML_M: "structure",
+  DOY_SIN: "climate",
+  DOY_COS: "climate",
+  HIST_TEM_ANT: "history",
+  LOG1P_HIST_N_TOTAL: "history",
+  LOG1P_HIST_N_90D: "history",
+  LOG1P_HIST_N_365D: "history",
+  LOG1P_HIST_DIAS_DESDE_ULT: "history",
+};
+
+const COMPONENT_LABELS: Record<MlRiskComponent, string> = {
+  climate: "Clima",
+  structure: "Estrutura do risco",
+  history: "Histórico",
+};
+
+const COMPONENT_ORDER: readonly MlRiskComponent[] = [
+  "climate",
+  "structure",
+  "history",
+];
+
+const DIRECTION_TOLERANCE = 1e-12;
+
+const componentDirection = (
+  contribution: number,
+): MlRiskComponentContribution["direction"] => {
+  if (contribution > DIRECTION_TOLERANCE) return "increase";
+  if (contribution < -DIRECTION_TOLERANCE) return "decrease";
+  return "neutral";
+};
+
+const buildComponents = (
+  contributions: Readonly<Record<MlRiskComponent, number>>,
+): MlRiskComponentContribution[] =>
+  COMPONENT_ORDER.map((component) => ({
+    component,
+    contribution: contributions[component],
+    direction: componentDirection(contributions[component]),
+    label: COMPONENT_LABELS[component],
+  }));
 
 const finiteOrNaN = (value: number | null): number =>
   value !== null && Number.isFinite(value) ? value : Number.NaN;
@@ -158,21 +216,35 @@ export const evaluateMlRiskModelV1 = (
 ): MlRiskModelV1Result => {
   const engineered = engineerNumericFeatures(input);
   let logit = MODEL_V1_DATA.intercept;
+  const familyContributions: Record<MlRiskComponent, number> = {
+    climate: 0,
+    structure: 0,
+    history: 0,
+  };
 
   for (const [name, config] of Object.entries(
     MODEL_V1_DATA.numeric_features,
   )) {
-    const engineeredValue = engineered[name as NumericFeatureName];
+    const featureName = name as NumericFeatureName;
+    const engineeredValue = engineered[featureName];
     const imputedValue = Number.isFinite(engineeredValue)
       ? engineeredValue
       : config.imputer_median;
     const scaledValue =
       (imputedValue - config.scaler_mean) / config.scaler_scale;
-    logit += scaledValue * config.coeficiente;
+    const featureContribution = scaledValue * config.coeficiente;
+    logit += featureContribution;
+    familyContributions[NUMERIC_FEATURE_FAMILY[featureName]] +=
+      featureContribution;
   }
 
-  logit += categoricalContribution("COD_MOD", input.COD_MOD);
-  logit += categoricalContribution("UF", input.UF);
+  const codModContribution = categoricalContribution("COD_MOD", input.COD_MOD);
+  logit += codModContribution;
+  familyContributions.structure += codModContribution;
+
+  const ufContribution = categoricalContribution("UF", input.UF);
+  logit += ufContribution;
+  familyContributions.structure += ufContribution;
 
   const sampleProbabilityInternal = stableSigmoid(logit);
   const referencePosition = upperBound(
@@ -187,5 +259,6 @@ export const evaluateMlRiskModelV1 = (
     logit,
     sampleProbabilityInternal,
     mlRelativeScore,
+    components: buildComponents(familyContributions),
   };
 };

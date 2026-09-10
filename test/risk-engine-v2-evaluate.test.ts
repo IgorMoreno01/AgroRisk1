@@ -96,36 +96,26 @@ describe("Risk Engine V2 · orquestrador isolado", () => {
     expect(result.dominantComponent).toBe("operational_rules");
   });
 
-  test("mantém explicabilidade ML vazia e drivers operacionais ativos", () => {
+  test("propaga componentes reais do ML e gera drivers automaticamente", () => {
     const result = evaluateRiskEngineV2(validInput());
 
-    expect(result.ml.components).toEqual([]);
-    expect(
-      result.drivers.filter((driver) => driver.source === "ml"),
-    ).toEqual([]);
-    expect(
-      result.drivers.map(({ source, code, contribution }) => ({
-        source,
-        code,
-        contribution,
-      })),
-    ).toEqual([
-      {
-        source: "operational_rules",
-        code: "water_proximity",
-        contribution: 12,
-      },
-      {
-        source: "operational_rules",
-        code: "terrain",
-        contribution: 7,
-      },
-      {
-        source: "operational_rules",
-        code: "operation_type",
-        contribution: 6,
-      },
+    expect(result.ml.components).toHaveLength(3);
+    expect(result.ml.components.map((component) => component.component)).toEqual(
+      ["climate", "structure", "history"],
+    );
+
+    const mlDrivers = result.drivers.filter(
+      (driver) => driver.source === "ml",
+    );
+    expect(mlDrivers).toHaveLength(3);
+    expect(mlDrivers.map((driver) => driver.code).sort()).toEqual([
+      "climate",
+      "history",
+      "structure",
     ]);
+    expect(mlDrivers.every((driver) => driver.contribution !== undefined)).toBe(
+      true,
+    );
   });
 
   test("propaga erro de pesos inválidos do combinador", () => {

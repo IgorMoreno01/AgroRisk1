@@ -26,11 +26,7 @@ export const evaluateRiskEngineV2 = (
     modelVersion: mlModelResult.modelVersion,
     sampleProbabilityInternal: mlModelResult.sampleProbabilityInternal,
     mlRelativeScore: mlModelResult.mlRelativeScore,
-    /**
-     * A previsão do modelo é válida, mas a explicabilidade agregada por
-     * famílias ainda não foi implementada. O array vazio é deliberado.
-     */
-    components: [],
+    components: mlModelResult.components,
   };
 
   const operationalRules = evaluateOperationalRulesV2(
