@@ -1,0 +1,189 @@
+Estamos na reta final do MVP AgroRisk e vamos realizar uma alteração importante na arquitetura do Motor de Risco e na tela Admin/Sompo.
+
+IMPORTANTE:
+NESTA ETAPA NÃO ALTERE NENHUM ARQUIVO.
+NÃO CRIE ARQUIVOS.
+NÃO EDITE CÓDIGO.
+NÃO INSTALE DEPENDÊNCIAS.
+NÃO FAÇA REFACTOR.
+NÃO EXECUTE MIGRAÇÕES.
+NÃO SUBSTITUA A LÓGICA ATUAL.
+
+Esta etapa é EXCLUSIVAMENTE de auditoria e planejamento do código existente.
+
+Contexto da alteração futura:
+
+Hoje existe uma tela Admin/Sompo com configuração do Motor de Risco e pesos de cenário.
+
+Vamos posteriormente evoluí-la para uma arquitetura em que:
+
+1. Existe um modelo de Machine Learning AgroRisk V1 já treinado e congelado.
+2. O ML utiliza:
+   - clima;
+   - estrutura de risco;
+   - histórico de sinistros.
+
+3. O ML produzirá um SCORE RELATIVO 0–100.
+   Esse score NÃO representa probabilidade absoluta de sinistro.
+
+4. Separadamente existirão REGRAS OPERACIONAIS determinísticas,
+   como proximidade de água e regras de negócio Sompo.
+
+5. O Admin/Sompo poderá configurar apenas a combinação:
+
+   Peso do Score ML
+   +
+   Peso das Regras Operacionais
+   =
+   100%
+
+6. Esses pesos NÃO alteram, NÃO retreinam e NÃO modificam
+   os coeficientes internos do modelo de Machine Learning.
+
+7. O clima NÃO deverá existir como peso externo separado,
+   pois já faz parte do ML e isso causaria double counting.
+
+8. Futuramente teremos:
+
+   Score ML
+   +
+   Score de Regras Operacionais
+   ↓
+   pesos definidos pela Sompo
+   ↓
+   Score Final do Risk Engine
+   ↓
+   fatores dominantes
+   ↓
+   recomendações
+
+9. A nova arquitetura deverá ser implementada de maneira ADITIVA
+   e segura, mantendo fallback para o comportamento atual
+   até que o Risk Engine V2 seja validado.
+
+10. Gestor, Operador, Consultor/Corretor e Admin/Sompo
+    deverão posteriormente compartilhar a mesma lógica central
+    de risco, diferenciando-se apenas em acesso, profundidade
+    e ações disponíveis.
+
+NESTA ETAPA, faça somente uma auditoria do projeto atual.
+
+Preciso que você identifique e me entregue:
+
+A. TELA SOMPO
+- arquivo/rota principal da tela Admin/Sompo;
+- componentes utilizados especificamente na área
+  "Configuração do Motor de Risco";
+- onde estão implementados os sliders/pesos atuais;
+- onde o botão de salvar pesos grava o estado;
+- se os pesos ficam client-side, server-side ou ambos;
+- quais funções são chamadas ao alterar/salvar os pesos.
+
+B. RISK ENGINE ATUAL
+- arquivo(s) onde o score de risco é calculado;
+- fórmula atual do score;
+- fatores atuais;
+- pesos atuais;
+- thresholds atuais para baixo/médio/alto;
+- funções que geram fatores dominantes;
+- funções que geram recomendações;
+- se há mais de uma implementação de score espalhada pelo projeto.
+
+C. DADOS
+- origem dos dados utilizados pelo Risk Engine;
+- arquivos de mocks envolvidos;
+- APIs/funções server-side envolvidas;
+- interfaces/types usados para representar:
+  score,
+  fatores,
+  recomendação,
+  operação,
+  máquina,
+  área,
+  cliente.
+
+D. DEPENDÊNCIAS ENTRE PERSONAS
+Identifique exatamente quais arquivos/telas de:
+- Admin/Sompo;
+- Gestor;
+- Operador;
+- Consultor/Corretor
+
+consomem o Risk Engine atual ou dados derivados dele.
+
+Quero saber se alterar determinada função central atualmente
+afetaria automaticamente outras personas.
+
+E. CONTRATOS
+Mostre os formatos atuais de entrada e saída do Risk Engine.
+
+Exemplo esperado:
+
+input:
+{
+  ...
+}
+
+output:
+{
+  score,
+  level,
+  factors,
+  recommendations,
+  ...
+}
+
+Não invente campos. Mostre apenas o que existe no código atual.
+
+F. RISCO DE REGRESSÃO
+Liste os arquivos que seriam perigosos de modificar diretamente
+e explique o motivo.
+
+Classifique cada área como:
+- baixo risco;
+- médio risco;
+- alto risco.
+
+G. ESTRATÉGIA ADITIVA
+Sem implementar nada ainda, proponha onde seria mais seguro criar
+futuramente módulos novos como:
+
+- ml-risk
+- risk-engine-v2
+- types do novo motor
+- feature flag
+- adapter/fallback para o Risk Engine atual
+
+Não substitua os arquivos existentes nesta etapa.
+
+H. FEATURE FLAG
+Identifique o local mais adequado no projeto atual para,
+posteriormente, termos algo equivalente a:
+
+USE_ML_RISK_ENGINE = false
+
+Com false:
+100% do comportamento atual deve continuar igual.
+
+Com true:
+poderemos ativar posteriormente o Risk Engine V2.
+
+NÃO implemente ainda.
+
+I. ROLLBACK
+Explique como a nova arquitetura poderia ser adicionada mantendo
+um caminho simples de retorno ao comportamento atual.
+
+J. RESULTADO FINAL DA AUDITORIA
+Finalize com:
+
+1. mapa dos arquivos relevantes;
+2. fluxo atual do Risk Engine;
+3. dependências entre telas;
+4. pontos de maior risco;
+5. proposta de arquitetura paralela;
+6. ordem recomendada das futuras alterações.
+
+IMPORTANTE:
+Nesta etapa quero SOMENTE análise.
+Não aplique nenhuma mudança no projeto.
