@@ -1,0 +1,131 @@
+Vamos fazer somente o fechamento da STEP 3.
+
+NÃO iniciar STEP 4.
+NÃO integrar ML.
+NÃO alterar nenhum arquivo produtivo existente.
+NÃO alterar o conteúdo de src/lib/risk-engine-v2/types.ts.
+NÃO fazer push.
+NÃO fazer merge.
+NÃO fazer rebase.
+NÃO fazer reset.
+
+==================================================
+1. VALIDAR NOVAMENTE
+==================================================
+
+Execute:
+
+bun test
+
+Resultado esperado:
+
+23 pass
+0 fail
+
+Depois execute:
+
+bun run build
+
+Resultado esperado:
+
+PASS
+
+Se qualquer um falhar:
+
+NÃO faça commit.
+Pare e me informe.
+
+==================================================
+2. INSPEÇÃO GIT
+==================================================
+
+Confirme que o único arquivo técnico novo da STEP 3 é:
+
+src/lib/risk-engine-v2/types.ts
+
+Pode existir attached_assets automático do Replit.
+
+NÃO adicione attached_assets ao commit técnico.
+
+Confirme também que NÃO existem:
+
+- arquivos src/ existentes modificados;
+- arquivos produtivos deletados;
+- package.json modificado;
+- bun.lock modificado;
+- testes V1 modificados.
+
+==================================================
+3. STAGE SOMENTE DO TYPES
+==================================================
+
+Se tudo estiver correto, adicione SOMENTE:
+
+src/lib/risk-engine-v2/types.ts
+
+NÃO use:
+
+git add .
+git add -A
+git add --all
+
+==================================================
+4. COMMIT
+==================================================
+
+Faça um commit com a mensagem:
+
+feat: define Risk Engine V2 contracts
+
+Esse commit deve conter SOMENTE:
+
+src/lib/risk-engine-v2/types.ts
+
+NÃO faça push.
+
+==================================================
+5. VERIFICAÇÃO FINAL
+==================================================
+
+Depois informe:
+
+- branch atual;
+- hash curto do HEAD;
+- mensagem do HEAD;
+- arquivos incluídos nesse commit;
+- resultado de bun test;
+- resultado de bun run build;
+- arquivos tracked modificados;
+- arquivos untracked;
+- working tree limpo: SIM/NÃO.
+
+Se existir somente attached_assets automático untracked,
+informe separadamente e não tente limpar/reorganizar o histórico.
+
+==================================================
+6. CONFIRMAÇÃO DE SEGURANÇA
+==================================================
+
+Responda SIM/NÃO:
+
+- Risk Engine V1 foi alterado?
+- UI foi alterada?
+- Personas foram alteradas?
+- ML foi integrado?
+- Fórmula V2 foi criada?
+- Feature flag foi criada?
+- API V2 foi criada?
+- Adapter foi criado?
+- Comportamento produtivo mudou?
+
+Esperado:
+NÃO em todos.
+
+==================================================
+7. PARE
+==================================================
+
+NÃO inicie STEP 4.
+
+Apenas confirme que a STEP 3 ficou congelada em commit próprio
+e que o projeto está pronto para a integração isolada do ML.
