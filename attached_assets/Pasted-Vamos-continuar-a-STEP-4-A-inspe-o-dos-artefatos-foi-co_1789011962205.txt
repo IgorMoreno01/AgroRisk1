@@ -1,0 +1,842 @@
+Vamos continuar a STEP 4.
+
+A inspeção dos artefatos foi concluída e a implementação está LIBERADA.
+
+IMPORTANTE SOBRE GIT:
+
+EU faço commits e atualizações Git manualmente.
+
+Portanto:
+
+NÃO execute git add.
+NÃO execute git commit.
+NÃO execute git push.
+NÃO execute git merge.
+NÃO execute git rebase.
+NÃO execute git reset.
+
+O ambiente pode criar checkpoints automáticos.
+Não tente reorganizá-los.
+
+==================================================
+ESTADO VALIDADO DOS ARTEFATOS
+==================================================
+
+Foi confirmado:
+
+- JSON portátil versão 1.0;
+- status FINAL_TESTED;
+- Logistic Regression binária;
+- intercept:
+  -2.3870327927846393
+
+Contrato bruto:
+17 inputs.
+
+Features numéricas após engenharia:
+18.
+
+Features categóricas:
+COD_MOD
+UF
+
+Coeficientes finais:
+50.
+
+Golden Vectors:
+25.
+
+O Golden contém:
+
+PROBA_ESPERADA
+SCORE_RELATIVO_ESPERADO
+
+Referência embutida no JSON:
+
+score_reference_sorted
+
+Quantidade:
+
+121686
+
+A referência está completa e ordenada.
+
+Fórmula do score relativo:
+
+100 * count(reference_probability <= current_probability)
+      / len(reference)
+
+O Parquet foi classificado como útil apenas para auditoria
+e NÃO é necessário para runtime/paridade.
+
+O hash do manifesto permanece inconclusivo quanto ao artefato
+físico de origem.
+
+Isso NÃO deve bloquear esta implementação.
+
+==================================================
+OBJETIVO DESTA EXECUÇÃO
+==================================================
+
+Implementar SOMENTE:
+
+1. contrato de input do ML;
+2. carregamento estático/fiel do modelo portátil;
+3. feature engineering;
+4. regressão logística;
+5. sampleProbabilityInternal;
+6. mlRelativeScore;
+7. teste TypeScript × Golden Vectors.
+
+Ainda NÃO integrar com:
+
+- Risk Engine V1;
+- Risk Engine V2;
+- Admin/Sompo;
+- Gestor;
+- Operador;
+- Consultor;
+- recomendações;
+- APIs;
+- banco;
+- mocks;
+- feature flag.
+
+==================================================
+PASTA PERMITIDA
+==================================================
+
+Criar somente:
+
+src/lib/ml-risk/
+
+Arquivos permitidos:
+
+src/lib/ml-risk/types.ts
+src/lib/ml-risk/model-v1.ts
+src/lib/ml-risk/model-v1.data.ts
+
+Teste permitido:
+
+test/ml-risk-v1.parity.test.ts
+
+Se conseguir fazer com menos arquivos, melhor.
+
+NÃO criar index.ts.
+
+NÃO criar API.
+
+NÃO criar server function.
+
+NÃO criar adapter.
+
+==================================================
+ARTEFATO PORTÁTIL
+==================================================
+
+Use o arquivo recebido:
+
+agrorisk_modelo_portatil_v1.json
+
+como FONTE DA VERDADE.
+
+Não reconstruir coeficientes manualmente a partir do prompt.
+
+Não usar o CSV de coeficientes como fonte principal.
+
+O CSV pode ser usado somente para conferência.
+
+A implementação TypeScript deve reproduzir exatamente o JSON.
+
+Se for necessário converter o JSON em um arquivo TypeScript
+estático para evitar mudanças de configuração de build,
+faça isso mantendo os valores EXATOS.
+
+NÃO arredondar.
+
+NÃO simplificar.
+
+NÃO mudar a ordem.
+
+==================================================
+CONTRATO DE INPUT
+==================================================
+
+O input deve refletir exatamente os 17 campos brutos:
+
+DT_REFERENCIA
+COD_MOD
+UF
+PRECIPITACAO_D1_MM
+CHUVA_7D_MM
+CHUVA_30D_MM
+TEMP_MEDIA_D1_C
+TEMP_MAX_D1_C
+TEMP_MIN_D1_C
+UMIDADE_D1_PCT
+VENTO_D1_MS
+ALTITUDE_ML_M
+HIST_ITEM_SAFE_N_TOTAL
+HIST_ITEM_SAFE_TEM_ANT
+HIST_ITEM_SAFE_DIAS_DESDE_ULT
+HIST_ITEM_SAFE_N_90D
+HIST_ITEM_SAFE_N_365D
+
+NÃO adicionar:
+
+COBERTURA
+CULTURA
+N_ESTADOS_ATIVOS
+N_LOCALIZACOES_R
+
+==================================================
+FEATURE ENGINEERING
+==================================================
+
+Implemente exatamente como declarado no JSON.
+
+Chuva:
+
+log1p(max(x, 0))
+
+Aplicar em:
+
+PRECIPITACAO_D1_MM
+CHUVA_7D_MM
+CHUVA_30D_MM
+
+Amplitude:
+
+TEMP_MAX_D1_C - TEMP_MIN_D1_C
+
+Quadrados:
+
+TEMP_MEDIA_D1_C_SQ
+TEMP_AMPLITUDE_D1_C_SQ
+UMIDADE_D1_PCT_SQ
+
+Sazonalidade:
+
+DOY_SIN =
+sin(2 * pi * day_of_year / 365.25)
+
+DOY_COS =
+cos(2 * pi * day_of_year / 365.25)
+
+Histórico:
+
+LOG1P_HIST_N_TOTAL
+LOG1P_HIST_N_90D
+LOG1P_HIST_N_365D
+LOG1P_HIST_DIAS_DESDE_ULT
+
+usando:
+
+log1p(max(x, 0))
+
+HIST_TEM_ANT permanece conforme contrato do artefato.
+
+==================================================
+DATA
+==================================================
+
+Tenha extremo cuidado com:
+
+DT_REFERENCIA
+
+O cálculo de day_of_year deve reproduzir o Python.
+
+Evite bugs de timezone do JavaScript.
+
+NÃO use uma conversão que possa deslocar a data para dia anterior
+ou seguinte dependendo do timezone.
+
+Trate a data civil YYYY-MM-DD de forma determinística.
+
+Teste isso com os Golden Vectors.
+
+==================================================
+VALORES AUSENTES
+==================================================
+
+Utilize exatamente:
+
+imputer_median
+
+de cada feature numérica no JSON.
+
+Não inventar fallback diferente.
+
+Não utilizar zero para todos os ausentes.
+
+Para categorias:
+
+missing token:
+
+__MISSING__
+
+conforme declarado no artefato.
+
+==================================================
+STANDARD SCALER
+==================================================
+
+Para cada uma das 18 features numéricas:
+
+scaled =
+(value - scaler_mean) / scaler_scale
+
+Utilize os valores EXATOS do JSON.
+
+Não arredondar intermediários.
+
+==================================================
+CATEGÓRICAS
+==================================================
+
+COD_MOD:
+
+categorias conhecidas conforme JSON.
+
+Categorias:
+
+10
+40
+50
+60
+70
+
+10 e 40 mapeiam para:
+
+COD_MOD_infrequent_sklearn
+
+Categorias desconhecidas:
+
+contribuição zero.
+
+UF:
+
+use exatamente o mapa declarado no JSON.
+
+AP é categoria infrequente e mapeia para:
+
+UF_infrequent_sklearn
+
+Categorias desconhecidas:
+
+contribuição zero.
+
+Não criar one-hot genérico baseado em suposição.
+
+Use o mapa real do JSON.
+
+==================================================
+CÁLCULO DO LOGIT
+==================================================
+
+Calcular:
+
+logit =
+intercept
++
+soma(
+  scaled_numeric_feature * numeric_coefficient
+)
++
+contribution(COD_MOD)
++
+contribution(UF)
+
+IMPORTANTE:
+
+Como o JSON já contém os coeficientes categóricos associados
+às categorias, NÃO some duas vezes os valores categóricos.
+
+A implementação deve ser matematicamente equivalente ao pipeline
+portátil Python.
+
+==================================================
+SIGMOID
+==================================================
+
+Calcular:
+
+sampleProbabilityInternal =
+1 / (1 + exp(-logit))
+
+Preferir implementação numericamente estável.
+
+Não arredondar.
+
+==================================================
+SCORE RELATIVO
+==================================================
+
+Usar:
+
+score_reference_sorted
+
+com os 121686 valores.
+
+Calcular exatamente:
+
+100 * count(reference <= probability) / reference.length
+
+Como o array já está ordenado:
+
+preferir busca binária equivalente a upper_bound.
+
+O resultado deve ser equivalente à contagem completa.
+
+IMPORTANTE:
+
+A comparação é:
+
+<=
+
+não:
+
+<
+
+Não usar:
+
+probability * 100
+
+Não usar threshold técnico.
+
+==================================================
+SAÍDA DO MODELO
+==================================================
+
+Criar resultado mínimo contendo:
+
+modelVersion
+sampleProbabilityInternal
+mlRelativeScore
+
+Pode conter logit apenas como diagnóstico interno se isso ajudar
+os testes.
+
+NÃO conectar ainda com MlRiskResult do Risk Engine V2.
+
+==================================================
+GOLDEN VECTORS
+==================================================
+
+Use:
+
+agrorisk_golden_vectors_v1.csv
+
+Quantidade esperada:
+
+25 vetores.
+
+Para cada linha:
+
+1. montar MlRiskInput;
+2. executar modelo TypeScript;
+3. comparar:
+
+sampleProbabilityInternal
+versus
+PROBA_ESPERADA
+
+4. comparar:
+
+mlRelativeScore
+versus
+SCORE_RELATIVO_ESPERADO
+
+==================================================
+TESTE DE PARIDADE
+==================================================
+
+Criar:
+
+test/ml-risk-v1.parity.test.ts
+
+O teste deve validar TODOS os 25 Golden Vectors.
+
+Para probabilidade:
+
+tolerância inicial:
+
+1e-12
+
+Se TODOS passarem com tolerância menor,
+pode usar tolerância menor.
+
+NÃO aumentar acima de 1e-10 sem PARAR e explicar.
+
+Para score relativo:
+
+usar inicialmente:
+
+1e-10
+
+Se houver diferença maior:
+
+NÃO aumentar tolerância automaticamente.
+
+PARE e diagnostique.
+
+==================================================
+DIAGNÓSTICO DE DIVERGÊNCIA
+==================================================
+
+Se algum Golden Vector falhar:
+
+mostrar:
+
+- índice/linha;
+- input;
+- PROBA_ESPERADA;
+- PROBA_TS;
+- DIF_PROBA;
+- SCORE_ESPERADO;
+- SCORE_TS;
+- DIF_SCORE.
+
+Também identificar, quando possível:
+
+- feature engineering;
+- imputação;
+- date/day-of-year;
+- scaler;
+- categoria;
+- logit;
+- busca na referência.
+
+NÃO altere expected para fazer passar.
+
+==================================================
+TESTE PYTHON PORTABLE × SKLEARN
+==================================================
+
+O arquivo:
+
+agrorisk_teste_paridade_v1.csv
+
+já mostrou erro máximo:
+
+2.220446049250313e-16
+
+Isso é evidência de que o artefato portátil Python reproduz
+o sklearn.
+
+NÃO precisamos reproduzir esse CSV no TypeScript.
+
+O teste importante agora é:
+
+TypeScript
+×
+Golden Vectors Python.
+
+==================================================
+TESTES EXISTENTES
+==================================================
+
+Depois da implementação execute:
+
+bun test
+
+Esperado:
+
+23 testes V1 existentes
++
+testes ML novos
+
+todos PASS.
+
+NÃO modificar os testes V1.
+
+==================================================
+BUILD
+==================================================
+
+Depois execute:
+
+bun run build
+
+Esperado:
+
+PASS.
+
+Se falhar por causa do novo módulo:
+
+corrigir SOMENTE arquivos dentro de:
+
+src/lib/ml-risk/
+
+ou o novo teste.
+
+Não alterar V1.
+
+==================================================
+ISOLAMENTO
+==================================================
+
+Confirme que nenhum arquivo produtivo existente importa:
+
+src/lib/ml-risk/
+
+Esperado:
+
+0 consumidores produtivos.
+
+Também confirme:
+
+src/lib/risk-engine-v2/types.ts
+
+permaneceu intacto.
+
+==================================================
+ARQUIVOS PROIBIDOS
+==================================================
+
+NÃO modificar:
+
+src/lib/risk-score.ts
+src/lib/recommendations.ts
+src/lib/ranking.ts
+src/lib/mock-data.ts
+
+src/lib/risk-engine-v2/types.ts
+
+src/routes/admin.tsx
+src/routes/gestor.tsx
+src/routes/operador.tsx
+src/routes/consultor.tsx
+src/routes/__root.tsx
+
+src/lib/risk-config.tsx
+src/lib/risk-config.server.ts
+src/lib/api/risk-config.functions.ts
+
+package.json
+bun.lock
+
+test/risk-score-v1.characterization.test.ts
+test/risk-aggregation-v1.characterization.test.ts
+test/recommendations-v1.characterization.test.ts
+
+==================================================
+SEM DEPENDÊNCIAS NOVAS
+==================================================
+
+NÃO instalar:
+
+csv parser
+parquet
+ML library
+Python
+scikit-learn
+math library
+
+Use apenas recursos já disponíveis no projeto/runtime.
+
+==================================================
+SEM API
+==================================================
+
+NÃO usar:
+
+OpenAI
+API externa
+Secret
+OPENAI_API_KEY
+Python runtime
+serviço remoto
+
+Tudo deve rodar localmente em TypeScript.
+
+==================================================
+GIT
+==================================================
+
+Ao final:
+
+NÃO faça stage.
+NÃO faça commit.
+NÃO faça push.
+
+Apenas inspecione.
+
+Separe:
+
+- arquivos técnicos criados;
+- arquivos técnicos modificados;
+- attached_assets automáticos;
+- checkpoints automáticos do ambiente.
+
+==================================================
+RELATÓRIO FINAL
+==================================================
+
+Responda com:
+
+A. ARQUIVOS CRIADOS
+
+Liste todos os arquivos técnicos criados.
+
+B. INPUT CONTRACT
+
+Mostre o tipo de input criado.
+
+C. PIPELINE IMPLEMENTADO
+
+Descreva exatamente a sequência:
+
+input
+→ engenharia
+→ imputação
+→ scaler
+→ categorias
+→ logit
+→ sigmoid
+→ score relativo
+
+D. ARTEFATO USADO
+
+Confirme:
+
+modelVersion
+intercept
+18 features numéricas
+2 categóricas
+50 coeficientes
+121686 valores de referência
+
+E. PARIDADE GOLDEN
+
+Informe:
+
+quantidade de vetores:
+25
+
+quantidade PASS:
+quantidade FAIL:
+
+maior erro absoluto de probabilidade:
+
+maior erro absoluto de score:
+
+tolerância de probabilidade:
+
+tolerância de score:
+
+F. DIVERGÊNCIAS
+
+Se houver alguma:
+liste todas.
+
+Se nenhuma:
+NENHUMA.
+
+G. TESTES
+
+bun test
+
+V1:
+pass/fail
+
+ML:
+pass/fail
+
+TOTAL:
+pass/fail
+
+H. BUILD
+
+bun run build:
+PASS/FAIL
+
+I. ISOLAMENTO
+
+Consumidores produtivos de src/lib/ml-risk/:
+quantidade
+
+Risk Engine V1 alterado?
+SIM/NÃO
+
+Risk Engine V2 alterado?
+SIM/NÃO
+
+UI alterada?
+SIM/NÃO
+
+Personas alteradas?
+SIM/NÃO
+
+J. FEATURES PROIBIDAS
+
+Confirmar ausência:
+
+COBERTURA
+CULTURA
+N_ESTADOS_ATIVOS
+N_LOCALIZACOES_R
+
+K. SEMÂNTICA
+
+mlRelativeScore é percentil relativo?
+SIM/NÃO
+
+É probabilidade absoluta de sinistro?
+SIM/NÃO
+
+sampleProbabilityInternal é probabilidade da amostra?
+SIM/NÃO
+
+L. GIT
+
+Informe:
+
+branch
+HEAD
+working tree
+arquivos técnicos pendentes
+attached_assets
+checkpoints automáticos
+
+NÃO reorganizar histórico.
+
+M. DECISÃO
+
+Responda:
+
+PARIDADE TYPESCRIPT × PYTHON COMPROVADA?
+SIM/NÃO
+
+BASE SEGURA PARA PRÓXIMA STEP?
+SIM/NÃO
+
+==================================================
+CRITÉRIO DE PARADA
+==================================================
+
+Se QUALQUER Golden Vector falhar além da tolerância:
+
+NÃO avance.
+
+PARE e reporte.
+
+Se testes V1 falharem:
+
+NÃO avance.
+
+Se build falhar:
+
+NÃO avance.
+
+==================================================
+PARE AO FINAL
+==================================================
+
+NÃO conecte ML ao Risk Engine V2.
+
+NÃO altere Sompo.
+
+NÃO altere nenhuma persona.
+
+NÃO implemente próxima STEP automaticamente.
