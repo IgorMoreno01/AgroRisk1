@@ -37,8 +37,8 @@ const directionLabels = {
   neutral: "efeito neutro",
 } as const;
 const dominantLabels = {
-  ml: "Modelo ML",
-  operational_rules: "Regras operacionais",
+  ml: "Climático",
+  operational_rules: "Operacional",
   balanced: "Equilibrado",
 } as const;
 
@@ -61,12 +61,12 @@ export const recommendationForV2Result = (
     : "as condições operacionais";
   const dominant =
     result.dominantComponent === "ml"
-      ? "o score relativo do ML tem a maior contribuição ponderada"
+      ? "o score climático tem a maior contribuição ponderada"
       : result.dominantComponent === "operational_rules"
-        ? "as regras operacionais têm a maior contribuição ponderada"
-        : "ML e regras têm contribuições ponderadas equivalentes";
+        ? "o score operacional tem a maior contribuição ponderada"
+        : "os componentes climático e operacional têm contribuições ponderadas equivalentes";
   const mlContext = mlDriver
-    ? ` O principal sinal explicativo do ML é ${mlDriver.label.toLowerCase()}, sem indicar causalidade.`
+    ? ` O principal sinal explicativo climático é ${mlDriver.label.toLowerCase()}, sem indicar causalidade.`
     : "";
 
   if (result.level === "alto") {
@@ -226,7 +226,7 @@ function ContributionTable({ result }: { result: RiskEngineV2Result }) {
           {result.contributions.map((item) => (
             <tr key={item.component}>
               <td className="py-2 pr-3 font-medium">
-                {item.component === "ml" ? "ML" : "Regras operacionais"}
+                 {item.component === "ml" ? "Climático" : "Operacional"}
               </td>
               <td className="py-2 pr-3 tabular-nums text-muted-foreground">
                 {fmt(item.sourceScore)} × {item.weight}%
@@ -375,8 +375,8 @@ export function AdminV2RiskPanel() {
           </div>
           <div className="mt-5 flex items-end justify-between">
             <div>
-              <div className="text-sm font-medium">Peso ML</div>
-              <div className="text-xs text-muted-foreground">Peso do score ML</div>
+               <div className="text-sm font-medium">Peso climático</div>
+               <div className="text-xs text-muted-foreground">Peso do score climático</div>
             </div>
             <div className="text-3xl font-semibold tabular-nums text-primary">{mlWeight}%</div>
           </div>
@@ -386,27 +386,27 @@ export function AdminV2RiskPanel() {
             step={1}
             value={[mlWeight]}
             onValueChange={([value]) => handleDraftChange(value)}
-            aria-label="Peso ML no Risk Engine V2"
+             aria-label="Peso climático no Risk Engine V2"
             className="mt-4"
           />
           <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-            <span>0% ML</span>
-            <span>100% ML</span>
+             <span>0% Climático</span>
+             <span>100% Climático</span>
           </div>
           <div className="mt-5 rounded-lg border border-border bg-muted/30 p-3">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-sm font-medium">
-                <Wrench className="h-4 w-4 text-warning" /> Regras operacionais
+                 <Wrench className="h-4 w-4 text-warning" /> Operacional
               </span>
               <span className="text-xl font-semibold tabular-nums">{operationalRulesWeight}%</span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Peso das regras operacionais
+               Peso operacional
             </p>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
             Os pesos definem quanto cada componente participa do Score Final. Eles não alteram o
-            treinamento do ML.
+             treinamento das fontes futuras de probabilidade.
           </p>
           </div>
           <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -415,7 +415,7 @@ export function AdminV2RiskPanel() {
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3">
               <div>
-                <div className="text-xs text-muted-foreground">ML</div>
+                 <div className="text-xs text-muted-foreground">Climático</div>
                 <div className="text-3xl font-semibold tabular-nums text-info">{mlWeight}%</div>
               </div>
               <div>
@@ -427,7 +427,7 @@ export function AdminV2RiskPanel() {
             </div>
           <div className="mt-4 border-t border-border pt-4">
             <p className="text-xs font-medium text-foreground">
-              Configuração ativa: ML {savedMlWeight}% / Regras {savedOperationalRulesWeight}%
+               Configuração ativa: Climático {savedMlWeight}% / Operacional {savedOperationalRulesWeight}%
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button
@@ -464,7 +464,7 @@ export function AdminV2RiskPanel() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.15em] text-info">
-                Score ML
+                 Score climático
               </div>
               <div className="mt-2 text-5xl font-semibold tabular-nums text-foreground">
                 {fmt(result.ml.mlRelativeScore)}
@@ -476,13 +476,13 @@ export function AdminV2RiskPanel() {
             </span>
           </div>
           <p className="mt-3 text-sm font-medium text-foreground">
-            Score relativo de risco do ML
+             Score climático
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             Baseado em clima, histórico e estrutura do risco.
           </p>
           <div className="mt-5 border-t border-info/20 pt-4">
-            <h3 className="mb-4 text-sm font-semibold text-foreground">Componentes do ML</h3>
+             <h3 className="mb-4 text-sm font-semibold text-foreground">Componentes climáticos</h3>
             <MlComponents result={result} />
           </div>
         </Card>
@@ -503,7 +503,7 @@ export function AdminV2RiskPanel() {
             </span>
           </div>
           <p className="mt-3 text-sm font-medium text-foreground">
-            Risco operacional atual fora do ML
+             Score operacional
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             Baseado nas condições atuais da operação demonstrativa.
@@ -569,7 +569,7 @@ export function AdminV2RiskPanel() {
           {mlDriver && (
             <div className="rounded-lg border border-border bg-muted/20 p-3">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Primeiro driver ML
+                 Primeiro driver climático
               </div>
               <div className="mt-1 text-sm font-medium">
                 {mlDriver.label} ·{" "}

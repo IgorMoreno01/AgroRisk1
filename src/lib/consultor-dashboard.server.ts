@@ -76,17 +76,17 @@ function buildClientView(
   const results = machines.map((row) => resultByMachine.get(row.machine.id)!).filter(Boolean);
   const avg = (select: (result: RiskEngineV2Result) => number) =>
     results.length ? results.reduce((sum, result) => sum + select(result), 0) / results.length : 0;
-  const mlContribution = avg((result) => result.contributions.find((item) => item.component === "ml")?.weightedContribution ?? 0);
-  const operationalRulesContribution = avg((result) => result.contributions.find((item) => item.component === "operational_rules")?.weightedContribution ?? 0);
-  const dominantComponent = Math.abs(mlContribution - operationalRulesContribution) < 0.05
+  const climateContribution = avg((result) => result.contributions.find((item) => item.component === "ml")?.weightedContribution ?? 0);
+  const operationalContribution = avg((result) => result.contributions.find((item) => item.component === "operational_rules")?.weightedContribution ?? 0);
+  const dominantComponent = Math.abs(climateContribution - operationalContribution) < 0.05
     ? "balanced" as const
-    : mlContribution > operationalRulesContribution ? "ml" as const : "operational_rules" as const;
+    : climateContribution > operationalContribution ? "climate" as const : "operational" as const;
   const recurringFactors = Object.entries(machines.reduce<Record<string, number>>((counts, row) => {
     counts[row.mainFactor] = (counts[row.mainFactor] ?? 0) + 1;
     return counts;
   }, {})).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([factor, count]) => ({ factor, count }));
   const recommendation = recommendationFor(client.id, summary.score, summary.mainFactor);
-  const componentLabel = dominantComponent === "ml" ? "modelo ML" : dominantComponent === "operational_rules" ? "regras operacionais" : "componentes balanceados";
+  const componentLabel = dominantComponent === "climate" ? "componente climático" : dominantComponent === "operational" ? "componente operacional" : "componentes balanceados";
   const nextAction: NextBestAction = {
     title: recommendation.title,
     description: recommendation.description,
@@ -101,10 +101,10 @@ function buildClientView(
     areas,
     recurringFactors,
     composition: {
-      mlScore: Math.round(avg((result) => result.ml.mlRelativeScore)),
-      operationalRulesScore: Math.round(avg((result) => result.operationalRules.operationalRulesScore)),
-      mlContribution,
-      operationalRulesContribution,
+      climateScore: Math.round(avg((result) => result.ml.mlRelativeScore)),
+      operationalScore: Math.round(avg((result) => result.operationalRules.operationalRulesScore)),
+      climateContribution,
+      operationalContribution,
       dominantComponent,
     },
     recommendation,

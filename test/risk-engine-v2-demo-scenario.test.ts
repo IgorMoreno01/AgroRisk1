@@ -33,10 +33,8 @@ describe("Risk Engine V2 · cenário demonstrativo do Admin", () => {
       "utf8",
     );
 
-    expect(panelSource).toContain("Score ML");
-    expect(panelSource).toContain("Score relativo de risco do ML");
+    expect(panelSource).toContain("Score climático");
     expect(panelSource).toContain("Score operacional");
-    expect(panelSource).toContain("Risco operacional atual fora do ML");
     expect(panelSource).toContain("Score final de risco");
     expect(panelSource).toContain("result.level");
     expect(panelSource).toContain("result.ml.components");

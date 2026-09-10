@@ -10,14 +10,14 @@ const panelSource = readFileSync(
 );
 
 describe("Admin · hierarquia executiva do Risk Engine V2", () => {
-  test("exibe scores ML, operacional e final em escala de 100", () => {
-    expect(panelSource).toContain("Score ML");
+  test("exibe scores climático, operacional e final em escala de 100", () => {
+    expect(panelSource).toContain("Score climático");
     expect(panelSource).toContain("Score operacional");
     expect(panelSource).toContain("Score final de risco");
     expect(panelSource.match(/\/ 100/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("exibe os breakdowns reais de ML e regras operacionais", () => {
+  test("exibe os breakdowns reais dos componentes climático e operacional", () => {
     expect(panelSource).toContain("result.ml.components.map");
     expect(panelSource).toContain("result.operationalRules.factors.map");
     expect(panelSource).toContain("factor.points");

@@ -84,7 +84,7 @@ export function AreaDetailDialog({
             <div className="space-y-2 text-sm">
               <div className="font-semibold">Score {relationalDetail.score}/100 · risco {relationalDetail.level}</div>
               <p className="text-muted-foreground">Fator prioritário: <span className="font-medium text-foreground">{relationalDetail.mainFactor}</span>.</p>
-              <p className="text-muted-foreground">Pesos Sompo: ML {relationalDetail.weights.ml}% · regras operacionais {relationalDetail.weights.operationalRules}%.</p>
+               <p className="text-muted-foreground">Pesos Sompo: Climático {relationalDetail.weights.ml}% · Operacional {relationalDetail.weights.operationalRules}%.</p>
             </div>
           ) : result ? (
             <RiskExplanation result={result} weights={weights} recommendation={recs[0]} audience="gestor" />

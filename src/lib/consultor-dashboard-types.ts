@@ -3,11 +3,11 @@ import type { AdminAreaRow, AdminClientRow, AdminMachineRow } from "./admin-dash
 import type { GeneratedRecommendation, NextBestAction } from "./recommendations";
 
 export interface ConsultorComposition {
-  mlScore: number;
-  operationalRulesScore: number;
-  mlContribution: number;
-  operationalRulesContribution: number;
-  dominantComponent: "ml" | "operational_rules" | "balanced";
+  climateScore: number;
+  operationalScore: number;
+  climateContribution: number;
+  operationalContribution: number;
+  dominantComponent: "climate" | "operational" | "balanced";
 }
 
 export interface ConsultorClientView {

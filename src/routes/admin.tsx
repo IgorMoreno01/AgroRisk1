@@ -172,7 +172,7 @@ function AdminPage() {
       >
         {snapshot.degraded
           ? "PostgreSQL indisponível para clientes, máquinas, áreas e operações — exibindo fallback seguro com dados demonstrativos."
-          : `Clientes, máquinas, áreas e operações: PostgreSQL · scores calculados pelo Risk Engine V2 com pesos ${snapshot.weights.ml}/${snapshot.weights.operationalRules}; sinais ainda não persistidos usam os vetores de referência homologados.`}
+          : `Clientes, máquinas, áreas e operações: PostgreSQL · scores calculados pelo Risk Engine V2 com pesos Climático ${snapshot.weights.ml}% / Operacional ${snapshot.weights.operationalRules}%; sinais ainda não persistidos usam os vetores de referência homologados.`}
       </div>
 
       <div className="mb-5 flex items-center gap-3 border-b border-border pb-3">

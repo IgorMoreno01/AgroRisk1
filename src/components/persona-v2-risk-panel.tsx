@@ -37,9 +37,9 @@ const personaCopy = {
 } as const;
 
 const dominantLabels = {
-  ml: "Modelo ML",
-  operational_rules: "Regras operacionais",
-  balanced: "ML e regras equilibrados",
+  ml: "Climático",
+  operational_rules: "Operacional",
+  balanced: "Climático e operacional equilibrados",
 } as const;
 
 const directionLabel = (direction?: "increase" | "decrease" | "neutral") => {
@@ -119,7 +119,7 @@ export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
             </p>
           </div>
           <span className="w-fit shrink-0 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
-            Engine {result.engineVersion} · ML {result.weights.ml}% / Regras{" "}
+             Engine {result.engineVersion} · Climático {result.weights.ml}% / Operacional{" "}
             {result.weights.operationalRules}%
           </span>
         </div>
@@ -136,13 +136,13 @@ export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
             <ScoreMetric label="Score final" value={result.finalScore} />
             {persona !== "operador" && (
               <ScoreMetric
-                label="Score relativo de risco do ML"
+                 label="Score climático"
                 value={result.ml.mlRelativeScore.toFixed(2)}
               />
             )}
             {persona !== "operador" && (
               <ScoreMetric
-                label="Score regras operacionais"
+                 label="Score operacional"
                 value={result.operationalRules.operationalRulesScore}
               />
             )}
@@ -171,13 +171,13 @@ export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
             {mlDriver && (
               <DriverCard
                 label={mlDriver.label}
-                description={`Sinal do modelo que ${directionLabel(mlDriver.direction)}.`}
+                description={`Sinal climático que ${directionLabel(mlDriver.direction)}.`}
               />
             )}
             {operationalDriver && (
               <DriverCard
                 label={operationalDriver.label}
-                description="Fator identificado pelas regras operacionais."
+                 description="Fator identificado pelo componente operacional."
               />
             )}
           </div>
@@ -193,7 +193,7 @@ export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
       {persona !== "operador" && (
         <Card>
           <SectionTitle
-            title={persona === "gestor" ? "Decomposição resumida do ML" : "Como os fatores atuam"}
+             title={persona === "gestor" ? "Decomposição resumida do componente climático" : "Como os fatores atuam"}
             description="Contribuições locais no logit; não são percentuais e não precisam somar 100."
           />
           <div className="grid gap-2 sm:grid-cols-3">

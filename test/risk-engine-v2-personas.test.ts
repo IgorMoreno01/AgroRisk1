@@ -40,7 +40,7 @@ describe("Risk Engine V2 · propagação entre personas", () => {
 
   test("mantém semântica segura, drivers coerentes e identificação da demo", () => {
     const visibleSources = [componentSource, ...routeSources, adminSource].join("\n");
-    expect(componentSource).toContain("Score relativo de risco do ML");
+    expect(componentSource).toContain("Score climático");
     expect(componentSource).toContain('driver.source === "ml"');
     expect(componentSource).toContain('driver.source === "operational_rules"');
     expect(componentSource).toContain("Cenário demonstrativo do MVP");

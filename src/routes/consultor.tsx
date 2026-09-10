@@ -210,8 +210,8 @@ function ConsultorPage() {
           />
            {selected ? (
              <div className="space-y-3">
-               <CompositionRow label="Modelo ML" score={selected.composition.mlScore} contribution={selected.composition.mlContribution} weight={snapshot!.weights.ml} />
-               <CompositionRow label="Regras operacionais" score={selected.composition.operationalRulesScore} contribution={selected.composition.operationalRulesContribution} weight={snapshot!.weights.operationalRules} />
+               <CompositionRow label="Climático" score={selected.composition.climateScore} contribution={selected.composition.climateContribution} weight={snapshot!.weights.ml} />
+               <CompositionRow label="Operacional" score={selected.composition.operationalScore} contribution={selected.composition.operationalContribution} weight={snapshot!.weights.operationalRules} />
                <div className="text-xs text-muted-foreground">
                  Componente dominante: <span className="font-medium text-foreground">{componentLabel(selected.composition.dominantComponent)}</span>
                </div>
@@ -311,8 +311,8 @@ function ConsultorPage() {
   );
 }
 
-function componentLabel(component: "ml" | "operational_rules" | "balanced") {
-  return component === "ml" ? "Modelo ML" : component === "operational_rules" ? "Regras operacionais" : "Balanceado";
+function componentLabel(component: "climate" | "operational" | "balanced") {
+  return component === "climate" ? "Climático" : component === "operational" ? "Operacional" : "Balanceado";
 }
 
 function CompositionRow({ label, score, contribution, weight }: { label: string; score: number; contribution: number; weight: number }) {
