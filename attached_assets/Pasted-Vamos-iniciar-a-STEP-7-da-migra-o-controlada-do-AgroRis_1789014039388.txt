@@ -1,0 +1,696 @@
+Vamos iniciar a STEP 7 da migração controlada do AgroRisk.
+
+IMPORTANTE SOBRE GIT:
+
+EU realizo commits e atualizações Git manualmente.
+
+Portanto:
+
+NÃO execute git add.
+NÃO execute git commit.
+NÃO execute git push.
+NÃO execute git merge.
+NÃO execute git rebase.
+NÃO execute git reset.
+
+Checkpoints automáticos do ambiente podem ocorrer.
+Não tente reorganizar o histórico.
+
+==================================================
+ESTADO ATUAL VALIDADO
+==================================================
+
+STEP 1:
+auditoria arquitetural concluída.
+
+STEP 2:
+Risk Engine V1 caracterizado.
+
+STEP 3:
+contratos V2 criados em:
+
+src/lib/risk-engine-v2/types.ts
+
+STEP 4:
+modelo ML portátil implementado em:
+
+src/lib/ml-risk/
+
+Paridade TypeScript × Python:
+
+25 Golden Vectors
+25 PASS
+0 FAIL
+
+STEP 5:
+regras operacionais V2 implementadas em:
+
+src/lib/risk-engine-v2/operational-rules.ts
+
+STEP 6:
+combinador V2 implementado em:
+
+src/lib/risk-engine-v2/combine-scores.ts
+
+Estado atual:
+
+bun test:
+43 pass
+0 fail
+
+bun run build:
+PASS
+
+==================================================
+OBJETIVO DA STEP 7
+==================================================
+
+Criar SOMENTE um orquestrador isolado do Risk Engine V2.
+
+Esse orquestrador será responsável por:
+
+1. receber input ML bruto;
+2. receber input das regras operacionais;
+3. receber pesos;
+4. executar o modelo ML;
+5. executar as regras operacionais;
+6. adaptar a saída mínima do ML ao contrato MlRiskResult;
+7. chamar combineRiskEngineV2;
+8. devolver RiskEngineV2Result.
+
+IMPORTANTE:
+
+Ainda NÃO conectar esse orquestrador a:
+
+- UI;
+- Sompo/Admin;
+- Gestor;
+- Operador;
+- Consultor;
+- API pública;
+- feature flag;
+- adapter V1/V2;
+- banco;
+- recomendações.
+
+==================================================
+ARQUITETURA DESTA STEP
+==================================================
+
+MlRiskInput
+    ↓
+modelo ML portátil
+    ↓
+resultado ML mínimo
+    ↓
+adapter local para MlRiskResult
+    ↓
+
+OperationalRulesInput
+    ↓
+evaluateOperationalRules(...)
+    ↓
+OperationalRulesResult
+    ↓
+
+RiskEngineV2Weights
+    ↓
+
+combineRiskEngineV2(...)
+    ↓
+
+RiskEngineV2Result
+
+==================================================
+IMPORTANTE SOBRE MlRiskResult
+==================================================
+
+O executor ML atual retorna algo equivalente a:
+
+{
+  modelVersion,
+  logit,
+  sampleProbabilityInternal,
+  mlRelativeScore
+}
+
+Mas o contrato MlRiskResult existente exige também:
+
+components: MlRiskComponentContribution[]
+
+Nesta STEP:
+
+NÃO inventar decomposição por família.
+
+Não criar:
+
+climateScore
+structureScore
+historyScore
+
+Não transformar coeficientes em percentuais.
+
+Portanto, para o orquestrador inicial:
+
+components deve ser:
+
+[]
+
+Documente claramente que:
+
+- a previsão está válida;
+- a explicabilidade por famílias ainda não foi implementada;
+- o array vazio é deliberado nesta fase.
+
+NÃO alterar types.ts.
+
+==================================================
+INPUT DO ORQUESTRADOR
+==================================================
+
+Criar um contrato específico, preferencialmente dentro do próprio
+arquivo do orquestrador.
+
+Exemplo conceitual:
+
+interface RiskEngineV2EvaluationInput {
+  mlInput: MlRiskInput;
+  operationalRulesInput: OperationalRulesInput;
+  weights: RiskEngineV2Weights;
+}
+
+Use os tipos reais existentes.
+
+Não duplicar manualmente os campos dos inputs.
+
+==================================================
+SAÍDA
+==================================================
+
+A função deverá retornar:
+
+RiskEngineV2Result
+
+diretamente.
+
+==================================================
+NOME DA FUNÇÃO
+==================================================
+
+Preferir algo explícito como:
+
+evaluateRiskEngineV2
+
+==================================================
+VERSÕES
+==================================================
+
+O orquestrador NÃO deve alterar:
+
+modelVersion
+rulesVersion
+engineVersion
+
+Cada camada já possui sua própria versão.
+
+Esperado conceitualmente:
+
+modelVersion:
+"1.0"
+
+rulesVersion:
+"1.0"
+
+engineVersion:
+"2.0"
+
+==================================================
+ARQUIVO PERMITIDO
+==================================================
+
+Criar preferencialmente somente:
+
+src/lib/risk-engine-v2/evaluate.ts
+
+e:
+
+test/risk-engine-v2-evaluate.test.ts
+
+Se conseguir fazer tudo nesses dois arquivos, melhor.
+
+==================================================
+IMPORTS PERMITIDOS
+==================================================
+
+O orquestrador PODE importar:
+
+src/lib/ml-risk/model-v1.ts
+src/lib/ml-risk/types.ts
+
+src/lib/risk-engine-v2/operational-rules.ts
+src/lib/risk-engine-v2/combine-scores.ts
+src/lib/risk-engine-v2/types.ts
+
+Isso é esperado nesta STEP.
+
+==================================================
+NÃO ALTERAR IMPLEMENTAÇÕES EXISTENTES
+==================================================
+
+NÃO modificar:
+
+src/lib/ml-risk/model-v1.ts
+src/lib/ml-risk/model-v1.data.ts
+src/lib/ml-risk/types.ts
+
+src/lib/risk-engine-v2/operational-rules.ts
+src/lib/risk-engine-v2/combine-scores.ts
+src/lib/risk-engine-v2/types.ts
+
+Se achar que alguma alteração é necessária:
+
+PARE antes.
+
+Explique o motivo.
+
+==================================================
+TESTE PRINCIPAL END-TO-END ISOLADO
+==================================================
+
+Agora queremos um teste que percorra:
+
+input bruto ML
++
+input regras
++
+pesos
+→
+ML
+→
+regras
+→
+combine
+→
+RiskEngineV2Result
+
+Sem UI.
+
+Use pelo menos UM dos Golden Vectors existentes como input ML
+para termos um expected conhecido de:
+
+sampleProbabilityInternal
+mlRelativeScore
+
+Exemplo:
+
+primeiro Golden Vector.
+
+Confirme os valores reais no arquivo antes de fixar expected.
+
+==================================================
+CENÁRIO DE TESTE SUGERIDO
+==================================================
+
+Pode usar, por exemplo:
+
+Golden Vector 1 para ML.
+
+Regras:
+
+waterDistance:
+"50_100"
+
+operationType:
+"Trabalho no campo"
+
+terrain:
+"umido"
+
+Essas regras devem gerar:
+
+12 + 6 + 7 = 25
+
+operationalRulesScore:
+
+52
+
+Pesos:
+
+70 / 30
+
+Então o teste deve calcular usando o mlRelativeScore REAL
+do Golden Vector selecionado.
+
+NÃO inventar o resultado final.
+
+Calcule expected de forma independente no teste a partir
+dos valores conhecidos.
+
+==================================================
+TESTES OBRIGATÓRIOS
+==================================================
+
+Criar testes cobrindo pelo menos:
+
+1. orquestração completa com Golden Vector real;
+
+2. modelVersion preservada;
+
+3. rulesVersion preservada;
+
+4. engineVersion preservada;
+
+5. sampleProbabilityInternal igual à saída do executor ML;
+
+6. mlRelativeScore igual à saída do executor ML;
+
+7. operationalRulesScore igual à saída das regras;
+
+8. contribuições ML/regras corretas;
+
+9. finalScore correto;
+
+10. level correto;
+
+11. dominantComponent correto;
+
+12. components do ML vazio nesta fase;
+
+13. drivers de ML vazios quando components = [];
+
+14. drivers operacionais continuam presentes quando ativos;
+
+15. erro de pesos inválidos propagado pelo combinador.
+
+==================================================
+IMPORTANTE SOBRE O TESTE
+==================================================
+
+Evite simplesmente chamar os mesmos helpers para gerar
+todos os expected.
+
+Para o cenário principal:
+
+use valores esperados conhecidos e fórmulas simples independentes
+para confirmar o resultado.
+
+Queremos testar integração real, não apenas executar a mesma
+função duas vezes.
+
+==================================================
+SEM RECOMENDAÇÕES
+==================================================
+
+NÃO chamar:
+
+recommendations.ts
+
+NÃO gerar recommendation.
+
+Essa camada continua separada.
+
+==================================================
+SEM FEATURE FLAG
+==================================================
+
+NÃO criar:
+
+USE_ML_RISK_ENGINE
+
+ou qualquer outra flag ainda.
+
+==================================================
+SEM SERVER BOUNDARY
+==================================================
+
+NÃO criar ainda:
+
+server function
+API route
+createServerFn
+endpoint
+
+O orquestrador deve permanecer uma função TypeScript isolada.
+
+==================================================
+SEM UI
+==================================================
+
+NÃO modificar:
+
+admin.tsx
+gestor.tsx
+operador.tsx
+consultor.tsx
+
+Nem componentes compartilhados.
+
+==================================================
+ARQUIVOS PROIBIDOS
+==================================================
+
+NÃO modificar:
+
+src/lib/risk-score.ts
+src/lib/recommendations.ts
+src/lib/ranking.ts
+src/lib/mock-data.ts
+
+src/lib/risk-config.tsx
+src/lib/risk-config.server.ts
+src/lib/api/risk-config.functions.ts
+
+src/routes/admin.tsx
+src/routes/gestor.tsx
+src/routes/operador.tsx
+src/routes/consultor.tsx
+src/routes/__root.tsx
+
+package.json
+bun.lock
+
+Todos os testes existentes.
+
+==================================================
+VALIDAÇÃO
+==================================================
+
+Depois da implementação:
+
+execute:
+
+bun test
+
+Esperado:
+
+43 testes existentes
++
+novos testes do orquestrador
+
+todos PASS.
+
+Depois:
+
+bun run build
+
+Esperado:
+
+PASS.
+
+==================================================
+ISOLAMENTO
+==================================================
+
+Ao final confirme:
+
+quantos consumidores produtivos importam:
+
+src/lib/risk-engine-v2/evaluate.ts
+
+Esperado:
+
+0
+
+O único consumidor permitido nesta STEP:
+
+test/risk-engine-v2-evaluate.test.ts
+
+==================================================
+DOUBLE COUNTING
+==================================================
+
+O orquestrador NÃO deve criar lógica nova de risco.
+
+Ele apenas chama:
+
+ML existente
+regras existentes
+combinador existente
+
+Não duplicar:
+
+- cálculo climático;
+- histórico;
+- água;
+- terreno;
+- operação;
+- thresholds;
+- pesos;
+- normalização.
+
+==================================================
+GIT
+==================================================
+
+NÃO faça:
+
+git add
+git commit
+git push
+git reset
+git rebase
+git merge
+
+Eu farei o versionamento manualmente.
+
+Apenas reporte o estado.
+
+==================================================
+RELATÓRIO FINAL
+==================================================
+
+Responda com:
+
+A. ARQUIVOS CRIADOS
+
+B. CONTRATO DO ORQUESTRADOR
+
+Mostre o input criado.
+
+C. FLUXO IMPLEMENTADO
+
+Mostre:
+
+MlRiskInput
+→ ML
+→ MlRiskResult
+→ regras
+→ combinador
+→ RiskEngineV2Result
+
+D. ADAPTAÇÃO ML
+
+Confirme:
+
+components = []
+
+e explique por quê.
+
+E. TESTE END-TO-END
+
+Informe:
+
+Golden Vector utilizado;
+PROBA_ESPERADA;
+SCORE_RELATIVO_ESPERADO;
+operationalRulesScore;
+pesos;
+contribuição ML;
+contribuição regras;
+finalScore;
+level;
+dominantComponent.
+
+F. TESTES DO ORQUESTRADOR
+
+pass/fail.
+
+G. TESTES TOTAIS
+
+V1:
+ML parity:
+Operational Rules:
+Combine:
+Evaluate:
+TOTAL:
+
+H. BUILD
+
+bun run build:
+PASS/FAIL
+
+I. ISOLAMENTO
+
+Consumidores produtivos de evaluate.ts:
+quantidade
+
+UI conectada?
+SIM/NÃO
+
+API conectada?
+SIM/NÃO
+
+Feature flag criada?
+SIM/NÃO
+
+V1 alterado?
+SIM/NÃO
+
+J. IMPLEMENTAÇÕES EXISTENTES ALTERADAS
+
+Esperado:
+nenhuma.
+
+K. GIT
+
+branch
+HEAD
+working tree
+arquivos técnicos pendentes
+attached_assets/checkpoints automáticos
+
+L. DECISÃO
+
+ORQUESTRADOR V2 IMPLEMENTADO E TESTADO?
+SIM/NÃO
+
+BASE SEGURA PARA CRIAR ADAPTER/FEATURE FLAG SERVER-SIDE?
+SIM/NÃO
+
+==================================================
+CRITÉRIO DE PARADA
+==================================================
+
+Se precisar alterar types.ts:
+
+PARE.
+
+Se precisar alterar ML, regras ou combinador:
+
+PARE.
+
+Se qualquer teste existente falhar:
+
+PARE.
+
+Se build falhar:
+
+PARE.
+
+==================================================
+PARE AO FINAL
+==================================================
+
+NÃO crie adapter.
+
+NÃO crie feature flag.
+
+NÃO crie API.
+
+NÃO altere UI.
+
+NÃO altere Sompo.
+
+NÃO altere personas.
+
+NÃO avance automaticamente.
