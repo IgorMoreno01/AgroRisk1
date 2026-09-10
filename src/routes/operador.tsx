@@ -142,7 +142,7 @@ function OperadorPage() {
     sectionDescription: `Filtrados por ${operation.id} e ${machine.id}`,
     alerts: snapshot.alerts.map((alert) => ({
       id: alert.id,
-      title: alert.type,
+      title: `${alert.type}${alert.source === "demo" ? " · demonstração" : ""}`,
       context: `${machine.id} · Operação ${operation.id}`,
       detail: alert.message,
       criticality: alert.criticality,

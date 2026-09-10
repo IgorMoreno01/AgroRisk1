@@ -4,6 +4,7 @@ import { loadAdminDashboardSnapshot } from "../src/lib/admin-dashboard.server";
 import { mockRepository } from "../src/lib/data/mock-repository.server";
 import { closePostgresRepository } from "../src/lib/data/postgres-repository.server";
 import type { AgroRiskRepository } from "../src/lib/data/repository";
+import type { Alert, HistoryEntry } from "../src/lib/mock-data";
 import {
   DEMO_OPERATOR_ID,
   loadOperadorDashboardSnapshot,
@@ -25,6 +26,15 @@ const failingRepository: AgroRiskRepository = {
   getMachine: failure,
   getOperation: failure,
 };
+
+const repositoryWithRecords = (
+  alerts: Alert[],
+  history: HistoryEntry[],
+): AgroRiskRepository => ({
+  ...mockRepository,
+  listAlerts: async () => alerts,
+  listOperationHistory: async () => history,
+});
 
 describe("Migração do Operador para PostgreSQL", () => {
   test("carrega somente o contexto individual do operador determinístico", async () => {
@@ -69,6 +79,75 @@ describe("Migração do Operador para PostgreSQL", () => {
     expect(snapshot.operator.id).toBe("USR-OP-1");
     expect(snapshot.operation.operatorId).toBe(snapshot.operator.id);
     expect(snapshot.alertsSource).toBe("demo");
+    expect(snapshot.historySource).toBe("demo");
+  });
+
+  test("gera alertas e histórico demo determinísticos quando as consultas retornam vazias", async () => {
+    const repository = repositoryWithRecords([], []);
+    const first = await loadOperadorDashboardSnapshot(repository, mockRepository);
+    const second = await loadOperadorDashboardSnapshot(repository, mockRepository);
+
+    expect(first.alertsSource).toBe("demo");
+    expect(first.historySource).toBe("demo");
+    expect(first.alerts).toHaveLength(3);
+    expect(first.history).toHaveLength(4);
+    expect(first.alerts.every((item) =>
+      item.source === "demo" &&
+      item.operationId === first.operation.id &&
+      item.machineId === first.machine.id
+    )).toBe(true);
+    expect(first.history.every((item) =>
+      item.source === "demo" &&
+      item.operationId === first.operation.id &&
+      item.machineId === first.machine.id &&
+      item.score === 0
+    )).toBe(true);
+    expect(second.alerts).toEqual(first.alerts);
+    expect(second.history).toEqual(first.history);
+    expect(second.risk).toEqual(first.risk);
+  });
+
+  test("preserva registros reais sem misturar dados demo nem alterar o score", async () => {
+    const context = await loadOperadorDashboardSnapshot(repositoryWithRecords([], []), mockRepository);
+    const realAlert: Alert = {
+      id: "REAL-ALERT-1",
+      machineId: context.machine.id,
+      machine: context.machine.id,
+      operationId: context.operation.id,
+      type: "Alerta PostgreSQL",
+      criticality: "alta",
+      level: "alto",
+      message: "Registro real persistido.",
+      mainFactor: "Clima",
+      status: "aberto",
+      datetime: context.operation.scheduledAt,
+      time: "08:50",
+    };
+    const realHistory: HistoryEntry = {
+      id: "REAL-HISTORY-1",
+      date: context.operation.scheduledAt,
+      machineId: context.machine.id,
+      operationId: context.operation.id,
+      summary: "Histórico real persistido.",
+      score: 0,
+    };
+    const snapshot = await loadOperadorDashboardSnapshot(
+      repositoryWithRecords([realAlert], [realHistory]),
+      mockRepository,
+    );
+
+    expect(snapshot.alertsSource).toBe("postgres");
+    expect(snapshot.historySource).toBe("postgres");
+    expect(snapshot.alerts).toHaveLength(1);
+    expect(snapshot.history).toHaveLength(1);
+    expect(snapshot.alerts[0]).toMatchObject({ id: realAlert.id, source: "postgres" });
+    expect(snapshot.history[0]).toMatchObject({ id: realHistory.id, source: "postgres" });
+    expect(snapshot.alerts.some((item) => item.id.includes("demo"))).toBe(false);
+    expect(snapshot.history.some((item) => item.id.includes("demo"))).toBe(false);
+    expect(snapshot.risk).toEqual(context.risk);
+    expect(snapshot.mainFactor).toBe(context.mainFactor);
+    expect(snapshot.recommendation).toEqual(context.recommendation);
+    expect(snapshot.weights).toEqual(context.weights);
   });
 
   test("mantém igualdade com o Admin para a operação e máquina compartilhadas", async () => {

@@ -3,6 +3,7 @@ import { RiskBadge } from "@/components/risk-badge";
 import { cn } from "@/lib/utils";
 import { dominantFactorLabel, type RiskResult, type ScoreBreakdown } from "@/lib/risk-score";
 import type { Alert, Machine, Area, HistoryEntry, Operation } from "@/lib/mock-data";
+import type { OperatorAlert, OperatorHistoryEntry } from "@/lib/operador-dashboard-types";
 import type { GeneratedRecommendation, NextBestAction } from "@/lib/recommendations";
 import type { WaterGeoData, RouteData } from "@/lib/external-data.types";
 import {
@@ -299,8 +300,8 @@ export function RecentHistoryCard({
   result: RiskResult;
   area: Area;
   recommendation?: GeneratedRecommendation;
-  history?: HistoryEntry[];
-  alerts?: Alert[];
+  history?: Array<HistoryEntry | OperatorHistoryEntry>;
+  alerts?: Array<Alert | OperatorAlert>;
 }) {
   const events: Array<{ time: string; type: EventType; title: string; desc: string }> = [
     { time: operation.start, type: "start", title: "Operação iniciada", desc: `${operation.id} iniciada no ${area.name}` },
@@ -316,7 +317,7 @@ export function RecentHistoryCard({
       time: entry.date,
       type: "ack" as const,
       title: "Registro anterior",
-      desc: entry.summary,
+      desc: `${entry.summary}${"source" in entry && entry.source === "demo" ? " · demo" : ""}`,
     })),
   ];
 

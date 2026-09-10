@@ -2,8 +2,12 @@ import { cacheGet, cacheSet } from "./cache.server";
 import { getOperatorRelationalScope, postgresRepository } from "./data/postgres-repository.server";
 import { mockRepository } from "./data/mock-repository.server";
 import type { AgroRiskRepository } from "./data/repository";
-import { users, type Alert, type Client, type HistoryEntry, type Operation } from "./mock-data";
-import type { OperadorDashboardSnapshot } from "./operador-dashboard-types";
+import { users, type Client, type Operation } from "./mock-data";
+import type {
+  OperadorDashboardSnapshot,
+  OperatorAlert,
+  OperatorHistoryEntry,
+} from "./operador-dashboard-types";
 import type { GeneratedRecommendation } from "./recommendations";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { evaluateRiskEngineV2 } from "./risk-engine-v2/evaluate";
@@ -123,6 +127,116 @@ function syntheticCoordinates(client: Client) {
   return { ...(byState[client.state] ?? { lat: -15.6014, lon: -56.0979 }), source: "synthetic" as const };
 }
 
+function syntheticBaseTime(operation: Operation) {
+  const parsed = Date.parse(operation.scheduledAt);
+  return Number.isFinite(parsed)
+    ? parsed
+    : Date.UTC(2026, 0, 1, 12) + stableNumber(operation.id) * 60_000;
+}
+
+function syntheticAlerts(
+  operation: Operation,
+  machineId: string,
+  mainFactor: string,
+): OperatorAlert[] {
+  const baseTime = syntheticBaseTime(operation);
+  const at = (minutesBefore: number) => new Date(baseTime - minutesBefore * 60_000).toISOString();
+  return [
+    {
+      id: `${operation.operatorId}-${machineId}-demo-alert-climate`,
+      machineId,
+      machine: machineId,
+      operationId: operation.id,
+      type: "Aviso climático demonstrativo",
+      criticality: "baixa",
+      level: "baixo",
+      message: `Monitoramento preventivo de ${mainFactor.toLowerCase()} para a operação atual (demonstração).`,
+      mainFactor,
+      status: "resolvido",
+      datetime: at(75),
+      time: "há 1h15 · demo",
+      source: "demo",
+    },
+    {
+      id: `${operation.operatorId}-${machineId}-demo-alert-operational`,
+      machineId,
+      machine: machineId,
+      operationId: operation.id,
+      type: "Atenção operacional demonstrativa",
+      criticality: "média",
+      level: "medio",
+      message: "Verificação operacional recomendada antes de avançar para o próximo trecho (demonstração).",
+      mainFactor: "Operacional",
+      status: "em análise",
+      datetime: at(35),
+      time: "há 35 min · demo",
+      source: "demo",
+    },
+    {
+      id: `${operation.operatorId}-${machineId}-demo-alert-preventive`,
+      machineId,
+      machine: machineId,
+      operationId: operation.id,
+      type: "Aviso preventivo demonstrativo",
+      criticality: "baixa",
+      level: "baixo",
+      message: "Conferência preventiva da máquina registrada somente para contexto visual (demonstração).",
+      mainFactor: "Prevenção",
+      status: "aberto",
+      datetime: at(15),
+      time: "há 15 min · demo",
+      source: "demo",
+    },
+  ];
+}
+
+function syntheticHistory(operation: Operation, machineId: string): OperatorHistoryEntry[] {
+  const baseTime = syntheticBaseTime(operation);
+  const at = (hoursBefore: number) => new Date(baseTime - hoursBefore * 3_600_000).toISOString();
+  return [
+    {
+      id: `${operation.operatorId}-${machineId}-demo-history-inspection`,
+      date: at(8),
+      machineId,
+      operationId: operation.id,
+      summary: "Inspeção pré-operacional concluída (demonstração).",
+      score: 0,
+      status: "inspecionada",
+      source: "demo",
+    },
+    {
+      id: `${operation.operatorId}-${machineId}-demo-history-preventive`,
+      date: at(6),
+      machineId,
+      operationId: operation.id,
+      summary: "Ocorrência preventiva registrada sem impacto no score (demonstração).",
+      score: 0,
+      status: "preventiva",
+      source: "demo",
+    },
+    {
+      id: `${operation.operatorId}-${machineId}-demo-history-interruption`,
+      date: at(4),
+      machineId,
+      operationId: operation.id,
+      summary: "Pausa operacional temporária para verificação da máquina (demonstração).",
+      score: 0,
+      status: "interrompida",
+      source: "demo",
+    },
+    {
+      id: `${operation.operatorId}-${machineId}-demo-history-resolved`,
+      date: at(2),
+      machineId,
+      operationId: operation.id,
+      summary: "Alerta preventivo anterior resolvido (demonstração).",
+      score: 0,
+      status: "resolvida",
+      source: "demo",
+    },
+  ];
+}
+
 async function readFallback(repository: AgroRiskRepository) {
   const [clients, areas, machines, operations, alerts, history] = await Promise.all([
     repository.listClients(),
@@ -172,24 +286,18 @@ function buildSnapshot(
   const recommendation = centralRecommendation(operation, result);
   const telemetry = syntheticInclination(operation.id);
   const hour = Number(operation.start.slice(0, 2));
-  const scopedAlerts: Alert[] = relational.alerts.length
-    ? relational.alerts
-    : result.level === "baixo"
-      ? []
-      : [{
-          id: `${operation.id}-demo-alert`,
-          machineId: machine.id,
-          machine: machine.id,
-          operationId: operation.id,
-          type: `Atenção: ${recommendation.factor}`,
-          criticality: result.level === "alto" ? "alta" : "média",
-          level: result.level,
-          message: `Alerta demonstrativo coerente com o fator principal ${recommendation.factor.toLowerCase()}.`,
-          mainFactor: recommendation.factor,
-          status: "aberto",
-          datetime: operation.scheduledAt,
-          time: "demonstração",
-        }];
+  const recordsSource = source === "postgres" ? "postgres" as const : "demo" as const;
+  const scopedAlerts: OperatorAlert[] = relational.alerts.length
+    ? relational.alerts.map((alert) => ({ ...alert, source: recordsSource }))
+    : syntheticAlerts(operation, machine.id, recommendation.factor);
+  const scopedHistory: OperatorHistoryEntry[] = relational.history.length
+    ? relational.history.map((entry) => ({
+        ...entry,
+        score: 0,
+        status: "concluída" as const,
+        source: recordsSource,
+      }))
+    : syntheticHistory(operation, machine.id);
   return {
     source,
     degraded,
@@ -222,13 +330,9 @@ function buildSnapshot(
     },
     telemetryRecommendations: telemetryRecommendations(operation, telemetry),
     alerts: scopedAlerts,
-    alertsSource:
-      source === "postgres"
-        ? relational.alerts.length > 0 || scopedAlerts.length === 0
-          ? "postgres"
-          : "demo"
-        : "demo",
-    history: relational.history.map((entry: HistoryEntry) => ({ ...entry, score: 0 })),
+    alertsSource: source === "postgres" && relational.alerts.length ? "postgres" : "demo",
+    history: scopedHistory,
+    historySource: source === "postgres" && relational.history.length ? "postgres" : "demo",
   };
 }
 
@@ -258,7 +362,7 @@ export async function loadOperadorDashboardSnapshot(
   const config = getRiskEngineV2Configuration();
   const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
   if (primary !== postgresRepository || fallback !== mockRepository) return loadUncached(primary, fallback, weights);
-  const key = `operador-dashboard:v1:${DEMO_OPERATOR_ID}:${weights.ml}:${weights.operationalRules}`;
+  const key = `operador-dashboard:v2:${DEMO_OPERATOR_ID}:${weights.ml}:${weights.operationalRules}`;
   const cached = cacheGet<OperadorDashboardSnapshot>(key);
   if (cached) return cached;
   const pending = inFlight.get(key);

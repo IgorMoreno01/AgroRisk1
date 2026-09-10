@@ -21,6 +21,15 @@ export interface OperatorGeoContext {
   source: "synthetic";
 }
 
+export interface OperatorAlert extends Alert {
+  source: "postgres" | "demo";
+}
+
+export interface OperatorHistoryEntry extends HistoryEntry {
+  status: "concluída" | "interrompida" | "preventiva" | "inspecionada" | "resolvida";
+  source: "postgres" | "demo";
+}
+
 export interface OperadorDashboardSnapshot {
   source: "postgres" | "mock";
   degraded: boolean;
@@ -43,7 +52,8 @@ export interface OperadorDashboardSnapshot {
   recommendation: GeneratedRecommendation;
   nextAction: NextBestAction;
   telemetryRecommendations: GeneratedRecommendation[];
-  alerts: Alert[];
+  alerts: OperatorAlert[];
   alertsSource: "postgres" | "demo";
-  history: HistoryEntry[];
+  history: OperatorHistoryEntry[];
+  historySource: "postgres" | "demo";
 }
