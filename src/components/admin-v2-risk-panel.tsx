@@ -15,7 +15,9 @@ import { recommendationsForOperation } from "@/lib/recommendations";
 import { operations } from "@/lib/mock-data";
 import {
   DEFAULT_RISK_ENGINE_V2_ML_WEIGHT,
-  evaluateRiskEngineV2Demo,
+  evaluateRiskEngineV2DemoScenario,
+  RISK_ENGINE_V2_DEMO_SCENARIOS,
+  type RiskEngineV2DemoScenarioId,
 } from "@/lib/risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result } from "@/lib/risk-engine-v2/types";
 import { cn } from "@/lib/utils";
@@ -160,13 +162,18 @@ function ContributionTable({ result }: { result: RiskEngineV2Result }) {
 }
 
 export function AdminV2RiskPanel() {
+  const [scenarioId, setScenarioId] = useState<RiskEngineV2DemoScenarioId>("low");
   const [mlWeight, setMlWeight] = useState(DEFAULT_RISK_ENGINE_V2_ML_WEIGHT);
   const [savedMlWeight, setSavedMlWeight] = useState(DEFAULT_RISK_ENGINE_V2_ML_WEIGHT);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
-  const result = useMemo(() => evaluateRiskEngineV2Demo(mlWeight), [mlWeight]);
+  const result = useMemo(
+    () => evaluateRiskEngineV2DemoScenario(scenarioId, mlWeight),
+    [mlWeight, scenarioId],
+  );
+  const selectedScenario = RISK_ENGINE_V2_DEMO_SCENARIOS[scenarioId];
   const operationalRulesWeight = 100 - mlWeight;
   const savedOperationalRulesWeight = 100 - savedMlWeight;
   const hasUnsavedChanges = mlWeight !== savedMlWeight;
@@ -243,6 +250,41 @@ export function AdminV2RiskPanel() {
           <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
             Engine {result.engineVersion}
           </span>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold">Cenário demonstrativo</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Selecione uma faixa para revisar o comportamento do mesmo Risk Engine V2.
+            </p>
+          </div>
+          <div className="inline-flex w-full rounded-lg border border-border bg-muted/30 p-1 sm:w-auto">
+            {(Object.keys(RISK_ENGINE_V2_DEMO_SCENARIOS) as RiskEngineV2DemoScenarioId[]).map(
+              (id) => {
+                const scenarioOption = RISK_ENGINE_V2_DEMO_SCENARIOS[id];
+                const active = scenarioId === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setScenarioId(id)}
+                    className={cn(
+                      "min-w-0 flex-1 rounded-md px-4 py-2 text-sm font-semibold transition sm:flex-none",
+                      active
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:bg-background hover:text-foreground",
+                    )}
+                  >
+                    {scenarioOption.label}
+                  </button>
+                );
+              },
+            )}
+          </div>
         </div>
       </Card>
 
@@ -325,7 +367,7 @@ export function AdminV2RiskPanel() {
                 <Activity className="h-4 w-4 text-primary" /> Resultado para revisão
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Golden Vector 1 + entrada operacional validada
+                Golden Vector {selectedScenario.goldenVector} + entrada operacional validada
               </p>
             </div>
             <LevelBadge level={result.level} />
