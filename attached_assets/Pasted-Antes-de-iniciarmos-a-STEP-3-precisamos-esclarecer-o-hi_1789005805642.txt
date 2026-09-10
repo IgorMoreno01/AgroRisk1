@@ -1,0 +1,113 @@
+Antes de iniciarmos a STEP 3, precisamos esclarecer o histórico Git atual.
+
+NÃO altere nenhum arquivo.
+NÃO faça commit.
+NÃO faça reset.
+NÃO faça rebase.
+NÃO faça merge.
+NÃO faça checkout.
+NÃO faça push.
+NÃO remova arquivos.
+
+Faça SOMENTE uma inspeção de leitura.
+
+==================================================
+1. HISTÓRICO RECENTE
+==================================================
+
+Mostre o equivalente a:
+
+git log --oneline --decorate -6
+
+Quero ver a sequência exata dos commits recentes da branch
+risk-engine-v2.
+
+==================================================
+2. INSPECIONAR O HEAD ATUAL
+==================================================
+
+O HEAD atual foi informado como:
+
+f4646b0
+
+Mostre o equivalente a:
+
+git show --stat --name-status f4646b0
+
+Informe:
+
+- mensagem do commit;
+- parent do commit;
+- arquivos adicionados;
+- arquivos modificados;
+- arquivos removidos.
+
+Confirme especificamente:
+
+- algum arquivo de src/ entrou?
+- package.json entrou?
+- bun.lock entrou?
+- algum arquivo de produção entrou?
+- algum arquivo de test/ entrou?
+- algum attached_assets entrou?
+
+==================================================
+3. RELAÇÃO COM 3ad6b64
+==================================================
+
+O commit anterior inspecionado foi:
+
+3ad6b64
+
+Informe:
+
+- se 3ad6b64 é ancestral direto de f4646b0;
+- qual commit está imediatamente entre eles, se houver;
+- quais arquivos diferem entre:
+
+3ad6b64..f4646b0
+
+Use uma inspeção equivalente a:
+
+git diff --name-status 3ad6b64..f4646b0
+
+==================================================
+4. MAIN
+==================================================
+
+Confirme também o HEAD atual da main.
+
+Esperamos:
+
+3e00ba0
+Add AgroRisk MVP progress notes
+
+NÃO faça checkout da main para verificar se isso não for necessário;
+apenas leia a referência Git.
+
+==================================================
+5. STATUS ATUAL
+==================================================
+
+Confirme:
+
+- branch atual;
+- HEAD atual;
+- working tree;
+- arquivos modificados;
+- arquivos untracked.
+
+==================================================
+6. NÃO CORRIGIR AINDA
+==================================================
+
+Mesmo que identifique um commit automático desnecessário:
+
+NÃO corrija.
+NÃO remova.
+NÃO reorganize o histórico.
+
+Apenas me devolva a inspeção completa.
+
+Precisamos decidir manualmente o tratamento mais seguro
+antes de iniciar a STEP 3.
