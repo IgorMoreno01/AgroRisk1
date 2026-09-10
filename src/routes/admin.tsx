@@ -1,21 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout, Card } from "@/components/app-layout";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import {
-  machines, clients, areas, operations, alerts, users,
+  alerts,
   type MachineStatus, type AlertCriticality, type AlertStatus,
 } from "@/lib/mock-data";
-import {
-  riskResultForMachine, scoreClientWithWeights, scoreAreaWithWeights,
-  scoreByOperationTypeWithWeights, riskResultForOperation, dominantFactorLabel,
-} from "@/lib/risk-score";
-import { rankMachines, rankAreas, machineDistribution, areaDistribution } from "@/lib/ranking";
 import {
   allRecommendationsConsolidated, countByCategory, countByPriority,
   type RecCategory, type RecPriority,
 } from "@/lib/recommendations";
-import { Tractor, Building2, Map, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Tractor, Building2, Map as MapIcon, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
@@ -23,6 +18,9 @@ import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
 import { useRiskConfig } from "@/lib/risk-config";
 import { AdminV2RiskPanel } from "@/components/admin-v2-risk-panel";
+import { getStoredSessionToken } from "@/lib/auth";
+import { getAdminDashboard } from "@/lib/api/admin-dashboard.functions";
+import type { AdminDashboardSnapshot } from "@/lib/admin-dashboard-types";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "AgroRisk · Admin / Sompo" }] }),
@@ -33,26 +31,96 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-const tabs = [
-  { id: "visao-geral", label: "Visão geral",            icon: ShieldCheck, count: null as number | null },
-  { id: "rankings",    label: "Rankings de risco",      icon: Trophy,      count: 2 },
-  { id: "scores",      label: "Scores consolidados",    icon: Gauge,       count: 4 },
-  { id: "recs",        label: "Recomendações prioritárias", icon: Lightbulb, count: null as number | null },
-  { id: "clients",     label: "Clientes monitorados",   icon: Building2,   count: clients.length },
-  { id: "machines",    label: "Máquinas monitoradas",   icon: Tractor,     count: machines.length },
-  { id: "areas",       label: "Áreas e regiões",        icon: Map,         count: areas.length },
-  { id: "operations",  label: "Operações monitoradas", icon: ListChecks,   count: operations.length },
-  { id: "alerts",      label: "Central de alertas",     icon: Bell,        count: alerts.length },
-  { id: "motor-risco", label: "Configuração do motor de risco", icon: SlidersHorizontal, count: null as number | null },
-] as const;
+type TabId =
+  | "visao-geral"
+  | "rankings"
+  | "scores"
+  | "recs"
+  | "clients"
+  | "machines"
+  | "areas"
+  | "operations"
+  | "alerts"
+  | "motor-risco";
 
-type TabId = (typeof tabs)[number]["id"];
+const createTabs = (snapshot: AdminDashboardSnapshot) => [
+  { id: "visao-geral" as const, label: "Visão geral", icon: ShieldCheck, count: null as number | null },
+  { id: "rankings" as const, label: "Rankings de risco", icon: Trophy, count: 2 },
+  { id: "scores" as const, label: "Scores consolidados", icon: Gauge, count: 4 },
+  { id: "recs" as const, label: "Recomendações prioritárias", icon: Lightbulb, count: null as number | null },
+  { id: "clients" as const, label: "Clientes monitorados", icon: Building2, count: snapshot.clients.length },
+  { id: "machines" as const, label: "Máquinas monitoradas", icon: Tractor, count: snapshot.machines.length },
+  { id: "areas" as const, label: "Áreas e regiões", icon: MapIcon, count: snapshot.areas.length },
+  { id: "operations" as const, label: "Operações monitoradas", icon: ListChecks, count: snapshot.operations.length },
+  { id: "alerts" as const, label: "Central de alertas", icon: Bell, count: alerts.length },
+  { id: "motor-risco" as const, label: "Configuração do motor de risco", icon: SlidersHorizontal, count: null as number | null },
+];
+
+const AdminDashboardContext = createContext<AdminDashboardSnapshot | null>(null);
+
+function useAdminDashboardData() {
+  const snapshot = useContext(AdminDashboardContext);
+  if (!snapshot) throw new Error("AdminDashboardContext não foi inicializado.");
+  return snapshot;
+}
+
+function useAdminDashboardLoader() {
+  const [snapshot, setSnapshot] = useState<AdminDashboardSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (document.visibilityState !== "visible" || inFlight.current) return;
+      const token = getStoredSessionToken();
+      if (!token) {
+        if (!cancelled) setError("Sessão Admin/Sompo não encontrada.");
+        return;
+      }
+      inFlight.current = true;
+      try {
+        const result = await getAdminDashboard({ data: { token } });
+        if (cancelled) return;
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setSnapshot(result.snapshot);
+        setError(null);
+      } catch {
+        if (!cancelled) setError("Não foi possível carregar os dados do Admin/Sompo.");
+      } finally {
+        inFlight.current = false;
+      }
+    };
+
+    void load();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const interval = window.setInterval(load, 10_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, []);
+
+  return { snapshot, error };
+}
 
 function AdminPage() {
   const { weights } = useRiskConfig();
+  const { snapshot, error } = useAdminDashboardLoader();
   const [tab, setTab] = useState<TabId>("visao-geral");
+  const tabs = useMemo(() => (snapshot ? createTabs(snapshot) : []), [snapshot]);
 
   useEffect(() => {
+    if (!snapshot) return;
     const applyHash = () => {
       const h = window.location.hash.replace(/^#/, "");
       if (!h || h === "topo") { setTab("visao-geral"); return; }
@@ -63,7 +131,22 @@ function AdminPage() {
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, []);
+  }, [snapshot, tabs]);
+
+  if (!snapshot) {
+    return (
+      <AppLayout
+        title="Dashboard da Sompo"
+        subtitle="Visão consolidada dos clientes, frota, áreas, riscos e recomendações do MVP"
+      >
+        <Card>
+          <div className="text-sm font-medium text-foreground">
+            {error ?? "Carregando dados relacionais do Admin/Sompo..."}
+          </div>
+        </Card>
+      </AppLayout>
+    );
+  }
 
   const current = tabs.find((t) => t.id === tab)!;
   const currentCount = tab === "recs"
@@ -72,11 +155,25 @@ function AdminPage() {
   const Icon = current.icon;
 
   return (
-    <AppLayout
+    <AdminDashboardContext.Provider value={snapshot}>
+      <AppLayout
       title="Dashboard da Sompo"
       subtitle="Visão consolidada dos clientes, frota, áreas, riscos e recomendações do MVP"
     >
       <div id="topo" className="scroll-mt-20" />
+
+      <div
+        className={cn(
+          "mb-4 rounded-lg border px-3 py-2 text-xs",
+          snapshot.degraded
+            ? "border-warning/40 bg-warning/10 text-warning-foreground"
+            : "border-success/30 bg-success/5 text-success",
+        )}
+      >
+        {snapshot.degraded
+          ? "PostgreSQL indisponível para clientes, máquinas, áreas e operações — exibindo fallback seguro com dados demonstrativos."
+          : `Clientes, máquinas, áreas e operações: PostgreSQL · scores calculados pelo Risk Engine V2 com pesos ${snapshot.weights.ml}/${snapshot.weights.operationalRules}; sinais ainda não persistidos usam os vetores de referência homologados.`}
+      </div>
 
       <div className="mb-5 flex items-center gap-3 border-b border-border pb-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -110,7 +207,8 @@ function AdminPage() {
         )}
         {tab === "motor-risco" && <RiskEngineConfigurationPanel />}
       </div>
-    </AppLayout>
+      </AppLayout>
+    </AdminDashboardContext.Provider>
   );
 }
 
@@ -120,13 +218,16 @@ function RiskEngineConfigurationPanel() {
 
 function OverviewPanel() {
   const { weights } = useRiskConfig();
-  const mDist = machineDistribution({}, weights);
-  const aDist = areaDistribution({}, weights);
-  const avgScore = Math.round(
-    machines.reduce((acc, m) => acc + riskResultForMachine(m.id, weights).finalScore, 0) / machines.length,
-  );
+  const data = useAdminDashboardData();
+  const mDist = data.machineDistribution;
+  const aDist = data.areaDistribution;
+  const avgScore = data.machineRows.length
+    ? Math.round(
+        data.machineRows.reduce((total, row) => total + row.score, 0) / data.machineRows.length,
+      )
+    : 0;
   const criticalAlerts = alerts.filter((a) => a.criticality === "alta").length;
-  const opsAtRisk = operations.filter((o) => riskResultForOperation(o, weights).finalScore >= 71).length;
+  const opsAtRisk = data.operationRows.filter((row) => row.level === "alto").length;
   const topRecs = allRecommendationsConsolidated(weights)
     .filter((r) => r.rec.priority === "alta")
     .slice(0, 4);
@@ -134,7 +235,7 @@ function OverviewPanel() {
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Máquinas monitoradas" value={String(machines.length)} tone="info" />
+        <SummaryCard label="Máquinas monitoradas" value={String(data.machines.length)} tone="info" />
         <SummaryCard label="Operações em risco" value={String(opsAtRisk)} tone="warning" />
         <SummaryCard label="Score médio da frota" value={String(avgScore)} tone={avgScore >= 71 ? "danger" : avgScore >= 41 ? "warning" : "success"} />
         <SummaryCard label="Alertas críticos" value={String(criticalAlerts)} tone="danger" />
@@ -190,11 +291,11 @@ function DistRow({ label, mq, ar, tone }: { label: string; mq: number; ar: numbe
 }
 
 function RankingsPanel() {
-  const { weights } = useRiskConfig();
-  const mRows = rankMachines({}, weights);
-  const aRows = rankAreas({}, weights);
-  const mDist = machineDistribution({}, weights);
-  const aDist = areaDistribution({}, weights);
+  const data = useAdminDashboardData();
+  const mRows = data.machineRows;
+  const aRows = data.areaRows;
+  const mDist = data.machineDistribution;
+  const aDist = data.areaDistribution;
 
   return (
     <div className="space-y-6">
@@ -410,11 +511,7 @@ const machineStatusTone: Record<MachineStatus, "green" | "blue" | "gray" | "red"
 
 // ---------- Painel de Scores ----------
 function ScoresPanel() {
-  const { weights } = useRiskConfig();
-  const machineRows = machines.map((m) => ({ m, b: riskResultForMachine(m.id, weights) }));
-  const clientRows  = clients.map((c) => scoreClientWithWeights(c.id, weights));
-  const areaRows    = areas.map((a) => scoreAreaWithWeights(a.id, weights));
-  const opTypeRows  = scoreByOperationTypeWithWeights(weights);
+  const data = useAdminDashboardData();
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
@@ -423,13 +520,13 @@ function ScoresPanel() {
           Scores por máquina
         </div>
         <TableShell headers={["Equipamento", "Cliente", "Score", "Principal fator", "Risco"]}>
-          {machineRows.map(({ m, b }) => (
-            <tr key={m.id} className="hover:bg-muted/40">
-              <TD><div className="font-medium text-foreground">{m.name}</div><div className="text-xs text-muted-foreground">{m.id}</div></TD>
-              <TD className="text-xs text-muted-foreground">{m.client}</TD>
-               <TD><ScoreBar score={b.finalScore} /></TD>
-               <TD className="text-xs text-muted-foreground">{dominantFactorLabel(b.dominantFactor)}</TD>
-               <TD><RiskBadge score={b.finalScore} /></TD>
+          {data.machineRows.map((row) => (
+            <tr key={row.machine.id} className="hover:bg-muted/40">
+              <TD><div className="font-medium text-foreground">{row.machine.name}</div><div className="text-xs text-muted-foreground">{row.machine.id}</div></TD>
+              <TD className="text-xs text-muted-foreground">{row.machine.client}</TD>
+               <TD><ScoreBar score={row.score} /></TD>
+               <TD className="text-xs text-muted-foreground">{row.mainFactor}</TD>
+               <TD><RiskBadge score={row.score} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -440,13 +537,13 @@ function ScoresPanel() {
           Scores por cliente / fazenda
         </div>
         <TableShell headers={["Cliente", "Score médio", "Máq. risco alto", "Área crítica", "Risco"]}>
-          {clientRows.map((c) => (
-            <tr key={c.clientId} className="hover:bg-muted/40">
-              <TD className="font-medium text-foreground">{c.name}</TD>
-              <TD><ScoreBar score={c.score} /></TD>
-              <TD className="tabular-nums">{c.machinesHigh}</TD>
-              <TD className="text-xs text-muted-foreground">{c.topAreaName}</TD>
-              <TD><RiskBadge score={c.score} /></TD>
+          {data.clientRows.map((row) => (
+            <tr key={row.client.id} className="hover:bg-muted/40">
+              <TD className="font-medium text-foreground">{row.client.name}</TD>
+              <TD><ScoreBar score={row.score} /></TD>
+              <TD className="tabular-nums">{row.machinesHigh}</TD>
+              <TD className="text-xs text-muted-foreground">{row.topAreaName}</TD>
+              <TD><RiskBadge score={row.score} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -457,14 +554,14 @@ function ScoresPanel() {
           Scores por área / região
         </div>
         <TableShell headers={["Área", "Cliente", "Condição", "Score", "Principal fator", "Risco"]}>
-          {areaRows.map((a) => (
-            <tr key={a.areaId} className="hover:bg-muted/40">
-              <TD className="font-medium text-foreground">{a.name}</TD>
-              <TD className="text-xs text-muted-foreground">{a.clientName}</TD>
-              <TD className="text-xs text-muted-foreground">{a.condition}</TD>
-              <TD><ScoreBar score={a.score} /></TD>
-              <TD className="text-xs text-muted-foreground">{a.topFactor}</TD>
-              <TD><RiskBadge score={a.score} /></TD>
+          {data.areaRows.map((row) => (
+            <tr key={row.area.id} className="hover:bg-muted/40">
+              <TD className="font-medium text-foreground">{row.area.name}</TD>
+              <TD className="text-xs text-muted-foreground">{row.area.client}</TD>
+              <TD className="text-xs text-muted-foreground">{row.area.condition || "Não informada"}</TD>
+              <TD><ScoreBar score={row.score} /></TD>
+              <TD className="text-xs text-muted-foreground">{row.mainFactor}</TD>
+              <TD><RiskBadge score={row.score} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -475,12 +572,12 @@ function ScoresPanel() {
           Scores por tipo de operação
         </div>
         <TableShell headers={["Tipo", "Operações", "Score médio", "Risco"]}>
-          {opTypeRows.map((s) => (
-            <tr key={s.type} className="hover:bg-muted/40">
-              <TD className="font-medium text-foreground">{s.type}</TD>
-              <TD className="tabular-nums">{s.count}</TD>
-              <TD><ScoreBar score={s.score} /></TD>
-              <TD><RiskBadge score={s.score} /></TD>
+          {data.operationTypeRows.map((row) => (
+            <tr key={row.type} className="hover:bg-muted/40">
+              <TD className="font-medium text-foreground">{row.type}</TD>
+              <TD className="tabular-nums">{row.count}</TD>
+              <TD><ScoreBar score={row.score} /></TD>
+              <TD><RiskBadge score={row.score} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -490,11 +587,12 @@ function ScoresPanel() {
 }
 
 function MachinesTable() {
-  const { weights } = useRiskConfig();
+  const data = useAdminDashboardData();
+  const riskByMachine = new Map(data.machineRows.map((row) => [row.machine.id, row]));
   return (
     <TableShell headers={["ID", "Equipamento", "Tipo", "Cliente", "Área", "Operador", "Status", "Score", "Risco"]}>
-      {machines.map((m) => {
-        const b = riskResultForMachine(m.id, weights);
+      {data.machines.map((m) => {
+        const risk = riskByMachine.get(m.id)!;
         return (
           <tr key={m.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{m.id}</TD>
@@ -504,8 +602,8 @@ function MachinesTable() {
             <TD>{m.area}</TD>
             <TD>{m.operator}</TD>
             <TD><StatusPill label={m.status} tone={machineStatusTone[m.status]} /></TD>
-            <TD><ScoreBar score={b.finalScore} /></TD>
-            <TD><RiskBadge score={b.finalScore} /></TD>
+            <TD><ScoreBar score={risk.score} /></TD>
+            <TD><RiskBadge score={risk.score} /></TD>
           </tr>
         );
       })}
@@ -514,11 +612,12 @@ function MachinesTable() {
 }
 
 function ClientsTable() {
-  const { weights } = useRiskConfig();
+  const data = useAdminDashboardData();
+  const riskByClient = new Map(data.clientRows.map((row) => [row.client.id, row]));
   return (
     <TableShell headers={["ID", "Cliente", "Localização", "Operação", "Máquinas", "Score médio", "Risco"]}>
-      {clients.map((c) => {
-        const s = scoreClientWithWeights(c.id, weights);
+      {data.clients.map((c) => {
+        const risk = riskByClient.get(c.id)!;
         return (
           <tr key={c.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{c.id}</TD>
@@ -526,8 +625,8 @@ function ClientsTable() {
             <TD>{c.location}</TD>
             <TD>{c.mainOperation}</TD>
             <TD className="tabular-nums">{c.machineCount}</TD>
-            <TD><ScoreBar score={s.score} /></TD>
-            <TD><RiskBadge score={s.score} /></TD>
+            <TD><ScoreBar score={risk.score} /></TD>
+            <TD><RiskBadge score={risk.score} /></TD>
           </tr>
         );
       })}
@@ -536,21 +635,22 @@ function ClientsTable() {
 }
 
 function AreasTable() {
-  const { weights } = useRiskConfig();
+  const data = useAdminDashboardData();
+  const riskByArea = new Map(data.areaRows.map((row) => [row.area.id, row]));
   return (
     <TableShell headers={["ID", "Área", "Cliente", "Tipo", "Condição", "Água", "Score", "Risco"]}>
-      {areas.map((a) => {
-        const s = scoreAreaWithWeights(a.id, weights);
+      {data.areas.map((a) => {
+        const risk = riskByArea.get(a.id)!;
         return (
           <tr key={a.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
             <TD className="font-medium text-foreground">{a.name}</TD>
             <TD>{a.client}</TD>
             <TD>{a.type}</TD>
-            <TD>{a.condition}</TD>
+            <TD>{a.condition || "Não informada"}</TD>
             <TD className="capitalize">{a.nearWater}</TD>
-            <TD><ScoreBar score={s.score} /></TD>
-            <TD><RiskBadge score={s.score} /></TD>
+            <TD><ScoreBar score={risk.score} /></TD>
+            <TD><RiskBadge score={risk.score} /></TD>
           </tr>
         );
       })}
@@ -559,11 +659,12 @@ function AreasTable() {
 }
 
 function OperationsTable() {
-  const { weights } = useRiskConfig();
+  const data = useAdminDashboardData();
+  const riskByOperation = new Map(data.operationRows.map((row) => [row.operation.id, row]));
   return (
     <TableShell headers={["ID", "Máquina", "Tipo", "Área", "Início", "Duração", "Status", "Score", "Risco"]}>
-      {operations.map((o) => {
-        const b = riskResultForOperation(o, weights);
+      {data.operations.map((o) => {
+        const risk = riskByOperation.get(o.id)!;
         return (
           <tr key={o.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{o.id}</TD>
@@ -578,8 +679,8 @@ function OperationsTable() {
                 tone={o.status === "Em andamento" ? "green" : o.status === "Concluída" ? "blue" : o.status === "Agendada" ? "yellow" : "red"}
               />
             </TD>
-            <TD><ScoreBar score={b.finalScore} /></TD>
-            <TD><RiskBadge score={b.finalScore} /></TD>
+            <TD><ScoreBar score={risk.score} /></TD>
+            <TD><RiskBadge score={risk.score} /></TD>
           </tr>
         );
       })}
@@ -611,22 +712,6 @@ function AlertsTable() {
           <TD><StatusPill label={a.criticality} tone={alertCritTone[a.criticality]} /></TD>
           <TD><StatusPill label={a.status} tone={alertStatusTone[a.status]} /></TD>
           <TD className="text-xs text-muted-foreground">{a.time}</TD>
-        </tr>
-      ))}
-    </TableShell>
-  );
-}
-
-function UsersTable() {
-  return (
-    <TableShell headers={["ID", "Nome", "Perfil", "Cliente associado", "Permissões"]}>
-      {users.map((u) => (
-        <tr key={u.id} className="hover:bg-muted/40">
-          <TD className="font-mono text-xs text-muted-foreground">{u.id}</TD>
-          <TD className="font-medium text-foreground">{u.name}</TD>
-          <TD className="capitalize">{u.profile}</TD>
-          <TD>{u.clientId ?? "—"}</TD>
-          <TD className="text-xs text-muted-foreground">{u.permissions.join(", ")}</TD>
         </tr>
       ))}
     </TableShell>
