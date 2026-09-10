@@ -10,28 +10,42 @@ import { scoreAreaWithWeights, riskResultForArea, riskResultForMachine, riskResu
 import { recommendationsForArea } from "@/lib/recommendations";
 import { AlertTriangle, MapPin, Tractor, Activity, History, Flame } from "lucide-react";
 import { useRiskConfig } from "@/lib/risk-config";
+import type { AdminMachineRow, AdminOperationRow } from "@/lib/admin-dashboard-types";
+import type { Alert, RiskLevel } from "@/lib/mock-data";
 
 export function AreaDetailDialog({
   area,
   open,
   onOpenChange,
+  relationalDetail,
 }: {
   area: Area | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  relationalDetail?: {
+    score: number;
+    level: RiskLevel;
+    mainFactor: string;
+    machines: AdminMachineRow[];
+    operations: AdminOperationRow[];
+    alerts: Alert[];
+    alertsSource: "postgres" | "demo";
+    weights: { ml: number; operationalRules: number };
+  };
 }) {
   const { weights } = useRiskConfig();
   if (!area) return null;
-  const s = scoreAreaWithWeights(area.id, weights);
-  const result = riskResultForArea(area.id, weights);
-  const areaMachines = machines.filter((m) => m.areaId === area.id);
-  const areaOps = operations.filter((o) => o.areaId === area.id);
+  const s = relationalDetail ? null : scoreAreaWithWeights(area.id, weights);
+  const result = relationalDetail ? null : riskResultForArea(area.id, weights);
+  const areaMachines = relationalDetail?.machines.map((row) => row.machine) ?? machines.filter((m) => m.areaId === area.id);
+  const areaOps = relationalDetail?.operations.map((row) => row.operation) ?? operations.filter((o) => o.areaId === area.id);
   const activeOps = areaOps.filter((o) => o.status === "Em andamento");
   const concluded = areaOps.filter((o) => o.status === "Concluída" || o.status === "Interrompida").slice(0, 4);
-  const areaAlerts = alerts.filter((a) => areaOps.some((o) => o.id === a.operationId));
+  const areaAlerts = relationalDetail?.alerts ?? alerts.filter((a) => areaOps.some((o) => o.id === a.operationId));
 
-  const recs = recommendationsForArea(area.id, "gestor", { weights });
-  const isPriority = s.score >= 80;
+  const recs = relationalDetail ? [] : recommendationsForArea(area.id, "gestor", { weights });
+  const areaScore = relationalDetail?.score ?? s!.score;
+  const isPriority = areaScore >= 80;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -48,7 +62,7 @@ export function AreaDetailDialog({
               </DialogDescription>
             </div>
             <div className="flex flex-col items-end gap-2">
-              <RiskBadge score={s.score} />
+              <RiskBadge score={areaScore} />
               {isPriority && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-danger px-2.5 py-0.5 text-[11px] font-semibold text-danger-foreground">
                   <Flame className="h-3 w-3" /> Prioridade Alta
@@ -66,7 +80,13 @@ export function AreaDetailDialog({
         </div>
 
         <div className="rounded-xl border border-border bg-muted/30 p-4">
-          {result ? (
+          {relationalDetail ? (
+            <div className="space-y-2 text-sm">
+              <div className="font-semibold">Score {relationalDetail.score}/100 · risco {relationalDetail.level}</div>
+              <p className="text-muted-foreground">Fator prioritário: <span className="font-medium text-foreground">{relationalDetail.mainFactor}</span>.</p>
+              <p className="text-muted-foreground">Pesos Sompo: ML {relationalDetail.weights.ml}% · regras operacionais {relationalDetail.weights.operationalRules}%.</p>
+            </div>
+          ) : result ? (
             <RiskExplanation result={result} weights={weights} recommendation={recs[0]} audience="gestor" />
           ) : (
             <p className="text-sm text-muted-foreground">Sem operações suficientes para explicar o score desta área.</p>
@@ -81,15 +101,16 @@ export function AreaDetailDialog({
             <ul className="space-y-2">
               {areaMachines.length === 0 && <li className="text-xs text-muted-foreground">Nenhuma máquina nesta área.</li>}
               {areaMachines.map((m) => {
-                 const mb = riskResultForMachine(m.id, weights);
+                 const relationalMachine = relationalDetail?.machines.find((row) => row.machine.id === m.id);
+                 const mb = relationalMachine ? null : riskResultForMachine(m.id, weights);
                 return (
                   <li key={m.id} className="flex items-center gap-3 rounded-lg border border-border p-2.5 text-xs">
                     <div className="flex-1">
                       <div className="font-medium text-foreground">{m.name}</div>
                       <div className="text-muted-foreground">{m.id} · {m.status}</div>
                     </div>
-                     <ScoreBar score={mb.finalScore} />
-                     <RiskBadge score={mb.finalScore} />
+                      <ScoreBar score={relationalMachine?.score ?? mb!.finalScore} />
+                      <RiskBadge score={relationalMachine?.score ?? mb!.finalScore} />
                   </li>
                 );
               })}
@@ -103,14 +124,15 @@ export function AreaDetailDialog({
             <ul className="space-y-2">
               {activeOps.length === 0 && <li className="text-xs text-muted-foreground">Sem operações em andamento.</li>}
               {activeOps.map((o) => {
-                 const b = riskResultForOperation(o, weights);
+                 const relationalOperation = relationalDetail?.operations.find((row) => row.operation.id === o.id);
+                 const b = relationalOperation ? null : riskResultForOperation(o, weights);
                 return (
                   <li key={o.id} className="flex items-center gap-3 rounded-lg border border-border p-2.5 text-xs">
                     <div className="flex-1">
                       <div className="font-medium text-foreground">{o.type}</div>
                       <div className="text-muted-foreground">{o.machineId} · {o.start}</div>
                     </div>
-                     <ScoreBar score={b.finalScore} />
+                      <ScoreBar score={relationalOperation?.score ?? b!.finalScore} />
                   </li>
                 );
               })}
@@ -121,7 +143,7 @@ export function AreaDetailDialog({
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
-              <AlertTriangle className="h-3.5 w-3.5 text-warning" /> Alertas da área ({areaAlerts.length})
+               <AlertTriangle className="h-3.5 w-3.5 text-warning" /> Alertas da área ({areaAlerts.length}){relationalDetail?.alertsSource === "demo" ? " · demonstração" : ""}
             </h3>
             <ul className="space-y-2">
               {areaAlerts.length === 0 && <li className="text-xs text-muted-foreground">Sem alertas associados.</li>}
@@ -144,14 +166,15 @@ export function AreaDetailDialog({
             <ul className="space-y-2">
               {concluded.length === 0 && <li className="text-xs text-muted-foreground">Sem registros recentes.</li>}
               {concluded.map((o) => {
-                 const b = riskResultForOperation(o, weights);
+                 const relationalOperation = relationalDetail?.operations.find((row) => row.operation.id === o.id);
+                 const b = relationalOperation ? null : riskResultForOperation(o, weights);
                 return (
                   <li key={o.id} className="flex items-center gap-3 rounded-lg border border-border p-2.5 text-xs">
                     <div className="flex-1">
                       <div className="font-medium text-foreground">{o.type}</div>
                       <div className="text-muted-foreground">{o.machineId} · {o.status}</div>
                     </div>
-                     <ScoreBar score={b.finalScore} />
+                      <ScoreBar score={relationalOperation?.score ?? b!.finalScore} />
                   </li>
                 );
               })}

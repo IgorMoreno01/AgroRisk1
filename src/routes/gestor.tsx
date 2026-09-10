@@ -5,35 +5,21 @@ import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { MachineDetailDialog } from "@/components/machine-detail-dialog";
 import { AreaDetailDialog } from "@/components/area-detail-dialog";
-import { machines, areas, alerts, riskTrend, type Machine, type Area, type OperationType, type RiskLevel } from "@/lib/mock-data";
-import {
-  rankMachines, rankAreas, rankOperationTypes,
-  machineDistribution, priorityHeadline,
-  clientOptions, areaOptions, opTypeOptions, levelOptions,
-  type RankingFilters,
-} from "@/lib/ranking";
-import {
-  fleetMachinesAtRisk,
-  deriveWeatherFromReal,
-  currentOperationFor,
-  riskResultForOperation,
-  type RiskWeights,
-} from "@/lib/risk-score";
-import { recommendationsForMachine } from "@/lib/recommendations";
+import { riskTrend, type Machine, type Area, type OperationType, type RiskLevel } from "@/lib/mock-data";
+import { opTypeOptions, levelOptions } from "@/lib/ranking";
 import { RecommendationCard } from "@/components/recommendation-card";
 import {
   Tractor, AlertTriangle, Activity, Gauge,
   TrendingUp, TrendingDown, Flame, Filter as FilterIcon, ArrowUpDown, MapPin,
-  Cloud, CloudRain,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
-import { getWeather } from "@/lib/api/weather.functions";
-import { CLIENT_COORDS } from "@/lib/area-coordinates";
-import type { WeatherData } from "@/lib/external-data.types";
-import { useRiskConfig } from "@/lib/risk-config";
+import { getStoredSessionToken } from "@/lib/auth";
+import { getGestorDashboard } from "@/lib/api/gestor-dashboard.functions";
+import type { GestorDashboardSnapshot } from "@/lib/gestor-dashboard-types";
 import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
 
 export const Route = createFileRoute("/gestor")({
@@ -177,27 +163,7 @@ function FilterSelect<T extends string>({
   );
 }
 
-// Computes fleet average score overriding weather with real data where available.
-function fleetAvgWithWeather(
-  clientWeather: Record<string, WeatherData>,
-  weights: RiskWeights,
-): number {
-  const scores = machines.map((m) => {
-    const op = currentOperationFor(m.id);
-    if (!op) return 0;
-    const wd = clientWeather[m.clientId];
-    return riskResultForOperation(op, weights, wd
-      ? { weather: deriveWeatherFromReal(wd) }
-      : undefined,
-    ).finalScore;
-  });
-  return scores.length
-    ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length)
-    : 0;
-}
-
 function GestorPage() {
-  const { weights } = useRiskConfig();
   const [clientId,     setClientId]     = useState<string>("all");
   const [level,        setLevel]        = useState<RiskLevel | "all">("all");
   const [operationType, setOperationType] = useState<OperationType | "all">("all");
@@ -206,87 +172,100 @@ function GestorPage() {
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [selectedArea, setSelectedArea] = useState<Area | null>(null);
 
-  // Real weather per client, fetched in parallel on mount
-  const [clientWeather, setClientWeather] = useState<Record<string, WeatherData>>({});
-  const [weatherLoading, setWeatherLoading] = useState(true);
+  const [snapshot, setSnapshot] = useState<GestorDashboardSnapshot | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    const CLIENT_IDS = ["CL-01", "CL-02", "CL-03"] as const;
-    setWeatherLoading(true);
-    Promise.all(
-      CLIENT_IDS.map(async (cid) => {
-        const coords = CLIENT_COORDS[cid];
-        try {
-          const data = await getWeather({ data: { lat: coords.lat, lon: coords.lon } });
-          return [cid, data] as const;
-        } catch {
-          return null;
-        }
-      }),
-    ).then((results) => {
-      const map: Record<string, WeatherData> = {};
-      for (const r of results) {
-        if (r) map[r[0]] = r[1];
-      }
-      setClientWeather(map);
-      setWeatherLoading(false);
-    });
+    let cancelled = false;
+    const token = getStoredSessionToken();
+    if (!token) return;
+    void getGestorDashboard({ data: { token } })
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) setLoadError(result.error);
+        else setSnapshot(result.snapshot);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError("Não foi possível carregar o dashboard.");
+      });
+    return () => { cancelled = true; };
   }, []);
 
-  const filters: RankingFilters = { clientId, level, operationType, areaId };
-
-  const monitored = machines.length;
-  // Fleet average: uses real weather when available, falls back to mock
-  const avg = fleetAvgWithWeather(clientWeather, weights);
-  const dataSource = Object.values(clientWeather)[0]?.source ?? "mock";
-  const isRealData = !weatherLoading && dataSource === "open-meteo";
-  // Trend: historical mock days + today's score with real data
+  const machineRows = useMemo(() => (snapshot?.machineRows ?? []).filter((row) =>
+    (clientId === "all" || row.machine.clientId === clientId) &&
+    (level === "all" || row.level === level) &&
+    (areaId === "all" || row.machine.areaId === areaId) &&
+    (operationType === "all" || row.operation?.type === operationType)
+  ), [snapshot, clientId, level, areaId, operationType]);
+  const areaRows = useMemo(() => (snapshot?.areaRows ?? []).filter((row) =>
+    (clientId === "all" || row.area.clientId === clientId) &&
+    (level === "all" || row.level === level) &&
+    (areaId === "all" || row.area.id === areaId) &&
+    (operationType === "all" || (snapshot?.operationRows ?? []).some((op) =>
+      op.operation.areaId === row.area.id && op.operation.type === operationType))
+  ), [snapshot, clientId, level, areaId, operationType]);
+  const opTypeRows = useMemo(() => {
+    const rows = (snapshot?.operationRows ?? []).filter((row) =>
+      (clientId === "all" || row.operation.clientId === clientId) &&
+      (areaId === "all" || row.operation.areaId === areaId) &&
+      (operationType === "all" || row.operation.type === operationType)
+    );
+    return [...new Set(rows.map((row) => row.operation.type))].map((type) => {
+      const matching = rows.filter((row) => row.operation.type === type);
+      const score = Math.round(matching.reduce((total, row) => total + row.score, 0) / matching.length);
+      const factors = matching.reduce<Record<string, number>>((counts, row) => {
+        counts[row.mainFactor] = (counts[row.mainFactor] ?? 0) + 1;
+        return counts;
+      }, {});
+      return {
+        type,
+        count: matching.length,
+        score,
+        level: score >= 71 ? "alto" as const : score >= 41 ? "medio" as const : "baixo" as const,
+        mainFactor: Object.entries(factors).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? "Sem fator dominante",
+      };
+    })
+      .filter((row) => level === "all" || row.level === level)
+      .sort((left, right) => right.score - left.score || left.type.localeCompare(right.type));
+  }, [snapshot, clientId, level, areaId, operationType]);
+  const distrib = useMemo(() => ({
+    alto: machineRows.filter((row) => row.level === "alto").length,
+    medio: machineRows.filter((row) => row.level === "medio").length,
+    baixo: machineRows.filter((row) => row.level === "baixo").length,
+  }), [machineRows]);
+  const headline = machineRows[0]
+    ? `Priorize ${machineRows[0].machine.code}, com score ${machineRows[0].score} e atenção principal em ${machineRows[0].mainFactor.toLowerCase()}.`
+    : "Nenhum equipamento atende aos filtros atuais.";
+  const monitored = snapshot?.machineRows.length ?? 0;
+  const avg = snapshot?.averageScore ?? 0;
   const trendData = useMemo(() => {
     const history = riskTrend.slice(0, 6);
-    const today = weatherLoading ? riskTrend[riskTrend.length - 1] : avg;
-    return [...history, today];
-  }, [avg, weatherLoading]);
-
-  const atRisk = fleetMachinesAtRisk(weights);
-  const critical = alerts.filter((a) => a.level === "alto" && a.status !== "resolvido").length;
-
-  const machineRows = useMemo(() => rankMachines(filters, weights), [clientId, level, operationType, areaId, weights]);
-  const areaRows = useMemo(() => rankAreas(filters, weights), [clientId, level, operationType, areaId, weights]);
-  const opTypeRows = useMemo(() => rankOperationTypes(filters, weights), [clientId, level, operationType, areaId, weights]);
-  const distrib = useMemo(() => machineDistribution(filters, weights), [clientId, level, operationType, areaId, weights]);
-  const headline = useMemo(() => priorityHeadline(filters, weights), [clientId, level, operationType, areaId, weights]);
+    return [...history, snapshot ? avg : riskTrend[riskTrend.length - 1]];
+  }, [avg, snapshot]);
+  const clientOptions = useMemo(() => [
+    { id: "all", name: "Todos os clientes" },
+    ...(snapshot?.clients ?? []).map((client) => ({ id: client.id, name: client.name })),
+  ], [snapshot]);
+  const areaOptions = useMemo(() => [
+    { id: "all", name: "Todas as áreas" },
+    ...(snapshot?.areaRows ?? []).map((row) => ({ id: row.area.id, name: row.area.name })),
+  ], [snapshot]);
+  const selectedMachineRow = snapshot?.machineRows.find((row) => row.machine.id === selectedMachine?.id);
+  const selectedAreaRow = snapshot?.areaRows.find((row) => row.area.id === selectedArea?.id);
 
   return (
     <AppLayout title="Dashboard do Gestor" subtitle="Visão consolidada da frota e risco operacional">
       <div id="topo" className="grid scroll-mt-20 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Kpi label="Máquinas monitoradas" value={String(monitored)} hint="Frota ativa hoje" icon={Tractor} tone="default" />
-        <Kpi label="Operações em risco" value={String(atRisk)} hint="Score ≥ 70" icon={Activity} tone="warning" trend={{ dir: "up", value: "+12%" }} />
-        <div className="relative">
-          <Kpi
-            label="Score médio da frota"
-            value={weatherLoading ? "…" : String(avg)}
-            hint="Escala 0–100 (calculado)"
-            icon={Gauge}
-            tone="success"
-            trend={{ dir: "down", value: "-3%" }}
-          />
-          <div className="absolute bottom-3 left-4">
-            {weatherLoading ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                <Cloud className="h-2.5 w-2.5 animate-pulse" /> Buscando clima…
-              </span>
-            ) : isRealData ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-info/40 bg-info/10 px-2 py-0.5 text-[10px] font-medium text-info">
-                <CloudRain className="h-2.5 w-2.5" /> Open-Meteo · tempo real
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                <Cloud className="h-2.5 w-2.5" /> Dados simulados
-              </span>
-            )}
-          </div>
-        </div>
-        <Kpi label="Alertas críticos" value={String(critical)} hint="Em aberto" icon={AlertTriangle} tone="danger" />
+        <Kpi label="Operações em risco" value={snapshot ? String(snapshot.machinesAtRisk) : "…"} hint="Score ≥ 70" icon={Activity} tone="warning" trend={{ dir: "up", value: "+12%" }} />
+        <Kpi label="Score médio da frota" value={snapshot ? String(avg) : "…"} hint="Escala 0–100 (Risk Engine V2)" icon={Gauge} tone="success" trend={{ dir: "down", value: "-3%" }} />
+        <Kpi label="Alertas críticos" value={snapshot ? String(snapshot.criticalAlerts) : "…"} hint="Em aberto" icon={AlertTriangle} tone="danger" />
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <Database className="h-3.5 w-3.5" />
+        {loadError ?? (snapshot
+          ? `${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas demonstrativos`
+          : "Carregando carteira do Gestor…")}
       </div>
 
       <PersonaV2RiskPanel persona="gestor" />
@@ -295,7 +274,7 @@ function GestorPage() {
         <Card className="xl:col-span-2">
           <SectionTitle
             title="Evolução do risco — últimos 7 dias"
-            description={isRealData ? "Score médio diário · hoje com dados Open-Meteo em tempo real" : "Score médio diário da frota monitorada"}
+            description="Histórico demonstrativo · hoje com score V2 da frota PostgreSQL"
           />
           <TrendChart data={trendData} />
         </Card>
@@ -331,7 +310,7 @@ function GestorPage() {
           return (
             <div className="grid gap-3 lg:grid-cols-3">
               {top.map((r) => {
-                 const rec = recommendationsForMachine(r.machine.id, "gestor", { weights })[0];
+                 const rec = r.recommendation;
                 return (
                   <div key={r.machine.id} className="space-y-2">
                     <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
@@ -358,10 +337,10 @@ function GestorPage() {
           Filtros
         </div>
         <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-          <FilterSelect label="Cliente / Fazenda" value={clientId} options={clientOptions() as { id: string; name: string }[]} onChange={setClientId} />
+          <FilterSelect label="Cliente / Fazenda" value={clientId} options={clientOptions as { id: string; name: string }[]} onChange={setClientId} />
           <FilterSelect label="Nível de risco"    value={level}    options={levelOptions} onChange={setLevel} />
           <FilterSelect label="Tipo de operação"  value={operationType} options={opTypeOptions} onChange={setOperationType} />
-          <FilterSelect label="Área / Região"     value={areaId}   options={areaOptions() as { id: string; name: string }[]} onChange={setAreaId} />
+          <FilterSelect label="Área / Região"     value={areaId}   options={areaOptions as { id: string; name: string }[]} onChange={setAreaId} />
         </div>
       </Card>
 
@@ -440,9 +419,8 @@ function GestorPage() {
                         <td className="px-3 py-2.5">
                           <span className={cn(
                             "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums",
-                            r.criticalAlerts > 0 ? "bg-danger/15 text-danger" : r.alertsCount > 0 ? "bg-warning/15 text-warning-foreground" : "bg-muted text-muted-foreground",
+                            r.alertsCount > 0 ? "bg-warning/15 text-warning-foreground" : "bg-muted text-muted-foreground",
                           )}>
-                            {r.criticalAlerts > 0 && <AlertTriangle className="h-3 w-3" />}
                             {r.alertsCount}
                           </span>
                         </td>
@@ -561,11 +539,35 @@ function GestorPage() {
 
       <MachineDetailDialog
         machine={selectedMachine}
+        relationalDetail={selectedMachineRow ? {
+          score: selectedMachineRow.score,
+          level: selectedMachineRow.level,
+          mainFactor: selectedMachineRow.mainFactor,
+          operation: selectedMachineRow.operation,
+          recommendation: selectedMachineRow.recommendation,
+          weights: snapshot!.weights,
+          alerts: snapshot!.alerts.filter((alert) => alert.machineId === selectedMachineRow.machine.id),
+          alertsSource: snapshot!.alertsSource,
+        } : undefined}
         open={!!selectedMachine}
         onOpenChange={(o) => !o && setSelectedMachine(null)}
       />
       <AreaDetailDialog
         area={selectedArea}
+        relationalDetail={selectedAreaRow ? {
+          score: selectedAreaRow.score,
+          level: selectedAreaRow.level,
+          mainFactor: selectedAreaRow.mainFactor,
+          machines: snapshot!.machineRows.filter((row) => row.machine.areaId === selectedAreaRow.area.id),
+          operations: snapshot!.operationRows.filter((row) => row.operation.areaId === selectedAreaRow.area.id),
+          alerts: snapshot!.alerts.filter((alert) => (
+            snapshot!.operationRows.some((row) =>
+              row.operation.areaId === selectedAreaRow.area.id &&
+              row.operation.id === alert.operationId)
+          )),
+          alertsSource: snapshot!.alertsSource,
+          weights: snapshot!.weights,
+        } : undefined}
         open={!!selectedArea}
         onOpenChange={(o) => !o && setSelectedArea(null)}
       />

@@ -12,28 +12,51 @@ import { riskResultForMachine, currentOperationFor } from "@/lib/risk-score";
 import { recommendationsForMachine, nextBestActionForMachine } from "@/lib/recommendations";
 import { AlertTriangle, MapPin, Tractor, User, Activity, History, Flame } from "lucide-react";
 import { useRiskConfig } from "@/lib/risk-config";
+import type { Alert, Operation, RiskLevel } from "@/lib/mock-data";
+import type { GeneratedRecommendation } from "@/lib/recommendations";
 
 export function MachineDetailDialog({
   machine,
   open,
   onOpenChange,
+  relationalDetail,
 }: {
   machine: Machine | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  relationalDetail?: {
+    score: number;
+    level: RiskLevel;
+    mainFactor: string;
+    operation?: Operation;
+    recommendation: GeneratedRecommendation;
+    weights: { ml: number; operationalRules: number };
+    alerts: Alert[];
+    alertsSource: "postgres" | "demo";
+  };
 }) {
   const { weights } = useRiskConfig();
   if (!machine) return null;
-  const op = currentOperationFor(machine.id);
-  const b = riskResultForMachine(machine.id, weights);
-  const area = getArea(machine.areaId);
-  const operator = getOperator(machine.operatorId);
-  const machineAlerts = alerts.filter((a) => a.machineId === machine.id);
-  const history = operationHistory.filter((h) => h.machineId === machine.id).slice(0, 5);
-  const recs = recommendationsForMachine(machine.id, "gestor", { weights, result: b });
-  const nextAction = nextBestActionForMachine(machine.id, { weights, result: b });
-  const isHigh = b.level === "alto";
-  const isPriority = b.finalScore >= 80;
+  const op = relationalDetail?.operation ?? currentOperationFor(machine.id);
+  const b = relationalDetail ? null : riskResultForMachine(machine.id, weights);
+  const area = relationalDetail ? undefined : getArea(machine.areaId);
+  const operator = relationalDetail ? undefined : getOperator(machine.operatorId);
+  const machineAlerts = relationalDetail?.alerts ?? alerts.filter((a) => a.machineId === machine.id);
+  const history = relationalDetail ? [] : operationHistory.filter((h) => h.machineId === machine.id).slice(0, 5);
+  const recs = relationalDetail
+    ? [relationalDetail.recommendation]
+    : recommendationsForMachine(machine.id, "gestor", { weights, result: b! });
+  const nextAction = relationalDetail
+    ? {
+        title: relationalDetail.recommendation.title,
+        description: relationalDetail.recommendation.description,
+        factor: relationalDetail.recommendation.factor,
+        priority: relationalDetail.recommendation.priority,
+        category: relationalDetail.recommendation.category,
+      }
+    : nextBestActionForMachine(machine.id, { weights, result: b! });
+  const score = relationalDetail?.score ?? b!.finalScore;
+  const isPriority = score >= 80;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -50,7 +73,7 @@ export function MachineDetailDialog({
               </DialogDescription>
             </div>
             <div className="flex flex-col items-end gap-2">
-              <RiskBadge score={b.finalScore} />
+              <RiskBadge score={score} />
               {isPriority && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-danger px-2.5 py-0.5 text-[11px] font-semibold text-danger-foreground">
                   <Flame className="h-3 w-3" /> Prioridade Alta
@@ -62,7 +85,7 @@ export function MachineDetailDialog({
 
         <div className="grid gap-4 md:grid-cols-3">
           <Info label="Cliente / Fazenda" value={machine.client} />
-          <Info label="Área atual" value={area?.name ?? "—"} icon={MapPin} />
+          <Info label="Área atual" value={area?.name ?? machine.area ?? "—"} icon={MapPin} />
           <Info label="Operador responsável" value={operator?.name ?? machine.operator} icon={User} />
           <Info label="Operação atual" value={op?.type ?? "—"} icon={Activity} />
           <Info label="Status" value={machine.status} />
@@ -70,12 +93,21 @@ export function MachineDetailDialog({
         </div>
 
         <div className="mt-2 rounded-xl border border-border bg-muted/30 p-4">
-          <RiskExplanation result={b} weights={weights} recommendation={recs[0]} audience="gestor" />
+          {relationalDetail ? (
+            <div className="space-y-2 text-sm">
+              <div className="font-semibold">Score {relationalDetail.score}/100 · risco {relationalDetail.level}</div>
+              <p className="text-muted-foreground">Fator prioritário: <span className="font-medium text-foreground">{relationalDetail.mainFactor}</span>.</p>
+              <p className="text-muted-foreground">Pesos Sompo: ML {relationalDetail.weights.ml}% · regras operacionais {relationalDetail.weights.operationalRules}%.</p>
+              <p>Ação recomendada: <span className="font-medium">{relationalDetail.recommendation.title}</span>. {relationalDetail.recommendation.rationale}</p>
+            </div>
+          ) : <RiskExplanation result={b!} weights={weights} recommendation={recs[0]} audience="gestor" />}
         </div>
 
         <div>
           <h3 className="mb-3 text-sm font-semibold text-foreground">Composição do score</h3>
-           <RiskComposition breakdown={b.breakdown} compact />
+           {b ? <RiskComposition breakdown={b.breakdown} compact /> : (
+             <p className="text-sm text-muted-foreground">Composição calculada no servidor pelo Risk Engine V2.</p>
+           )}
         </div>
 
         <NextBestActionCard action={nextAction} />
@@ -84,7 +116,7 @@ export function MachineDetailDialog({
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
-              <AlertTriangle className="h-3.5 w-3.5 text-warning" /> Alertas associados ({machineAlerts.length})
+               <AlertTriangle className="h-3.5 w-3.5 text-warning" /> Alertas associados ({machineAlerts.length}){relationalDetail?.alertsSource === "demo" ? " · demonstração" : ""}
             </h3>
             <ul className="space-y-2">
               {machineAlerts.length === 0 && (
