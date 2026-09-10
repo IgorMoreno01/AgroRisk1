@@ -52,7 +52,7 @@ describe("Risk Engine V2 · propagação entre personas", () => {
 
   test("Sompo permanece funcional com o mesmo cenário V2", () => {
     expect(adminSource).toContain("evaluateRiskEngineV2Demo");
-    expect(adminSource).toContain("Score final do Risk Engine");
+    expect(adminSource).toContain("Score final de risco");
     expect(evaluateRiskEngineV2Demo().finalScore).toBe(getRiskEngineV2DemoResult().finalScore);
   });
 

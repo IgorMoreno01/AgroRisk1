@@ -64,25 +64,6 @@ function LevelBadge({ level }: { level: RiskEngineV2Result["level"] }) {
   );
 }
 
-function Metric({
-  label,
-  value,
-  tone = "text-foreground",
-}: {
-  label: string;
-  value: string;
-  tone?: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-background/70 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
-      <div className={cn("mt-1 text-2xl font-semibold tabular-nums", tone)}>{value}</div>
-    </div>
-  );
-}
-
 function MlComponents({ result }: { result: RiskEngineV2Result }) {
   const maxAbs = Math.max(
     ...result.ml.components.map((item) => Math.abs(item.contribution)),
@@ -126,6 +107,44 @@ function MlComponents({ result }: { result: RiskEngineV2Result }) {
         Barras mostram apenas magnitude relativa entre componentes; não são percentuais e não
         precisam somar 100.
       </p>
+    </div>
+  );
+}
+
+function OperationalFactors({ result }: { result: RiskEngineV2Result }) {
+  const rawTotal = result.operationalRules.factors.reduce(
+    (total, factor) => total + factor.points,
+    0,
+  );
+  const maxTotal = result.operationalRules.factors.reduce(
+    (total, factor) => total + factor.maxPoints,
+    0,
+  );
+
+  return (
+    <div className="space-y-3">
+      {result.operationalRules.factors.map((factor) => (
+        <div key={factor.id}>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-medium text-foreground">{factor.label}</span>
+            <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
+              {factor.points} / {factor.maxPoints}
+            </span>
+          </div>
+          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-warning transition-[width] duration-200"
+              style={{ width: `${(factor.points / factor.maxPoints) * 100}%` }}
+            />
+          </div>
+        </div>
+      ))}
+      <div className="flex items-center justify-between border-t border-border pt-3 text-sm">
+        <span className="font-medium text-muted-foreground">Total bruto</span>
+        <strong className="tabular-nums text-foreground">
+          {rawTotal} / {maxTotal}
+        </strong>
+      </div>
     </div>
   );
 }
@@ -288,10 +307,11 @@ export function AdminV2RiskPanel() {
         </div>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.6fr)]">
-        <Card>
+      <Card className="border-primary/20">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.75fr)]">
+          <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <SlidersHorizontal className="h-4 w-4 text-primary" /> Composição do motor
+            <SlidersHorizontal className="h-4 w-4 text-primary" /> Pesos definidos pela Sompo
           </div>
           <div className="mt-5 flex items-end justify-between">
             <div>
@@ -325,9 +345,26 @@ export function AdminV2RiskPanel() {
             </p>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-            Os pesos atuam somente na composição do Risk Engine. Não alteram o treinamento. O clima
-            já está dentro do ML para evitar dupla contagem.
+            Os pesos definem quanto cada componente participa do Score Final. Eles não alteram o
+            treinamento do ML.
           </p>
+          </div>
+          <div className="rounded-xl border border-border bg-muted/20 p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Composição atual
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs text-muted-foreground">ML</div>
+                <div className="text-3xl font-semibold tabular-nums text-info">{mlWeight}%</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Operacional</div>
+                <div className="text-3xl font-semibold tabular-nums text-warning-foreground">
+                  {operationalRulesWeight}%
+                </div>
+              </div>
+            </div>
           <div className="mt-4 border-t border-border pt-4">
             <p className="text-xs font-medium text-foreground">
               Configuração ativa: ML {savedMlWeight}% / Regras {savedOperationalRulesWeight}%
@@ -358,68 +395,111 @@ export function AdminV2RiskPanel() {
               </p>
             )}
           </div>
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card className="border-info/30 bg-info/5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.15em] text-info">
+                Score ML
+              </div>
+              <div className="mt-2 text-5xl font-semibold tabular-nums text-foreground">
+                {fmt(result.ml.mlRelativeScore)}
+                <span className="ml-2 text-xl font-medium text-muted-foreground">/ 100</span>
+              </div>
+            </div>
+            <span className="rounded-full border border-info/30 bg-background px-2.5 py-1 text-xs font-medium text-info">
+              Peso {mlWeight}%
+            </span>
+          </div>
+          <p className="mt-3 text-sm font-medium text-foreground">
+            Score relativo de risco do ML
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Baseado em clima, histórico e estrutura do risco.
+          </p>
+          <div className="mt-5 border-t border-info/20 pt-4">
+            <h3 className="mb-4 text-sm font-semibold text-foreground">Componentes do ML</h3>
+            <MlComponents result={result} />
+          </div>
         </Card>
 
-        <Card>
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <Card className="border-warning/30 bg-warning/5">
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Activity className="h-4 w-4 text-primary" /> Resultado para revisão
+              <div className="text-xs font-semibold uppercase tracking-[0.15em] text-warning-foreground">
+                Score operacional
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Golden Vector {selectedScenario.goldenVector} + entrada operacional validada
-              </p>
+              <div className="mt-2 text-5xl font-semibold tabular-nums text-foreground">
+                {result.operationalRules.operationalRulesScore}
+                <span className="ml-2 text-xl font-medium text-muted-foreground">/ 100</span>
+              </div>
             </div>
-            <LevelBadge level={result.level} />
+            <span className="rounded-full border border-warning/30 bg-background px-2.5 py-1 text-xs font-medium text-warning-foreground">
+              Peso {operationalRulesWeight}%
+            </span>
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-4">
-            <Metric
-              label="Score ML global"
-              value={fmt(result.ml.mlRelativeScore)}
-              tone="text-info"
-            />
-            <Metric
-              label="Regras operacionais"
-              value={String(result.operationalRules.operationalRulesScore)}
-              tone="text-warning-foreground"
-            />
-            <Metric
-              label="Score final do Risk Engine"
-              value={String(result.finalScore)}
-              tone="text-primary"
-            />
-            <Metric label="Nível" value={result.level} />
-          </div>
-          <div className="mt-3 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-            <span>Score relativo de risco do ML</span>
-            <span>Score externo ao ML</span>
-          </div>
-          <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-            <Scale className="h-3.5 w-3.5" /> Componente dominante:{" "}
-            <strong className="text-foreground">{dominantLabels[result.dominantComponent]}</strong>
+          <p className="mt-3 text-sm font-medium text-foreground">
+            Risco operacional atual fora do ML
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Baseado nas condições atuais da operação demonstrativa.
+          </p>
+          <div className="mt-5 border-t border-warning/20 pt-4">
+            <h3 className="mb-4 text-sm font-semibold text-foreground">
+              Fatores operacionais
+            </h3>
+            <OperationalFactors result={result} />
           </div>
         </Card>
       </div>
+
+      <Card className="border-2 border-primary/40 bg-primary/5">
+        <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-primary">
+              <Activity className="h-4 w-4" /> Score final de risco
+            </div>
+            <div className="mt-3 text-6xl font-semibold tabular-nums text-foreground">
+              {result.finalScore}
+              <span className="ml-2 text-2xl font-medium text-muted-foreground">/ 100</span>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Golden Vector {selectedScenario.goldenVector} + entrada operacional validada
+            </p>
+          </div>
+          <div className="min-w-0 rounded-xl border border-border bg-background/80 p-4 md:min-w-64">
+            <LevelBadge level={result.level} />
+            <div className="mt-3 flex items-start gap-2 text-sm">
+              <Scale className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div>
+                <div className="text-xs text-muted-foreground">Componente dominante</div>
+                <strong className="text-foreground">
+                  {dominantLabels[result.dominantComponent]}
+                </strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
-          <h2 className="text-sm font-semibold">Decomposição do sinal ML</h2>
-          <p className="mt-1 mb-4 text-xs text-muted-foreground">
-            Contribuições assinadas do modelo, em unidades internas.
-          </p>
-          <MlComponents result={result} />
-        </Card>
-        <Card>
           <h2 className="text-sm font-semibold">Composição ponderada</h2>
           <p className="mt-1 mb-4 text-xs text-muted-foreground">
-            Como cada score entra no resultado final.
+            Como os dois scores participam do resultado final.
           </p>
           <ContributionTable result={result} />
+          <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-sm">
+            <span className="font-semibold text-foreground">Score Final</span>
+            <strong className="tabular-nums text-primary">{result.finalScore}</strong>
+          </div>
         </Card>
-      </div>
-
-      <Card>
-        <h2 className="text-sm font-semibold">Sinais que orientam a revisão</h2>
+        <Card>
+        <h2 className="text-sm font-semibold">Principais drivers</h2>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {mlDriver && (
             <div className="rounded-lg border border-border bg-muted/20 p-3">
@@ -445,7 +525,8 @@ export function AdminV2RiskPanel() {
             </div>
           )}
         </div>
-      </Card>
+        </Card>
+      </div>
 
       <Card>
         <h2 className="text-sm font-semibold">Recomendação administrativa</h2>
