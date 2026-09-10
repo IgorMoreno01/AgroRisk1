@@ -1,0 +1,945 @@
+Estamos iniciando oficialmente a STEP 3 da migração controlada do AgroRisk.
+
+==================================================
+ESTADO ATUAL DE SEGURANÇA
+==================================================
+
+Branch atual:
+
+risk-engine-v2
+
+HEAD atual:
+
+f9f3294 — Remove obsolete asset file
+
+Baseline funcional preservada na main:
+
+3e00ba0 — Add AgroRisk MVP progress notes
+
+A STEP 2 foi concluída com:
+
+- 23 testes de caracterização;
+- 23 PASS;
+- 0 FAIL;
+- bun run build PASS;
+- nenhum código produtivo do V1 alterado;
+- nenhum ML integrado;
+- nenhum Risk Engine V2 implementado;
+- working tree limpo.
+
+Os testes V1 existentes devem continuar passando durante toda esta etapa.
+
+==================================================
+OBJETIVO DA STEP 3
+==================================================
+
+Criar SOMENTE os tipos e contratos isolados do futuro Risk Engine V2.
+
+Nesta etapa queremos definir formalmente a linguagem entre:
+
+1. modelo de Machine Learning;
+2. regras operacionais;
+3. pesos configuráveis pela Sompo;
+4. composição do score;
+5. explicabilidade;
+6. saída do Risk Engine V2.
+
+IMPORTANTE:
+
+NESTA STEP NÃO EXISTE AINDA IMPLEMENTAÇÃO DO MOTOR.
+
+Não calcular score.
+Não carregar modelo ML.
+Não criar fórmula.
+Não alterar tela.
+Não integrar com nenhuma persona.
+Não criar feature flag.
+
+Apenas definir CONTRATOS/TIPOS novos e isolados.
+
+==================================================
+PRINCÍPIO DE ARQUITETURA
+==================================================
+
+O futuro fluxo será:
+
+Dados
+  ↓
+
+┌─────────────────────────┐
+│ ML AgroRisk V1          │
+│                         │
+│ clima                   │
+│ estrutura               │
+│ histórico de sinistros  │
+└────────────┬────────────┘
+             ↓
+      Score ML relativo
+           0–100
+
+                +
+
+┌─────────────────────────┐
+│ Regras Operacionais     │
+│                         │
+│ proximidade de água     │
+│ tipo de operação        │
+│ terreno                 │
+│ regras Sompo            │
+└────────────┬────────────┘
+             ↓
+     Score Regras 0–100
+
+                ↓
+
+        Pesos da Sompo
+
+        ML       X%
+        Regras   Y%
+
+        X + Y = 100
+
+                ↓
+
+         Risk Engine V2
+
+                ↓
+
+          Score Final
+             0–100
+
+                ↓
+
+       nível de risco
+       drivers
+       explicação
+
+                ↓
+
+       recomendações
+
+==================================================
+DECISÕES JÁ CONGELADAS
+==================================================
+
+1. O modelo de ML NÃO será alterado pelos pesos da Sompo.
+
+2. Os pesos da Sompo atuam somente na composição do Risk Engine.
+
+3. O Score ML será um SCORE RELATIVO 0–100.
+
+4. O Score ML NÃO deve ser chamado de probabilidade real.
+
+5. Internamente existe uma probabilidade amostral da regressão,
+mas ela deriva de dataset case-control 1:5.
+
+Portanto NÃO usar nomes ambíguos como:
+
+mlProbability
+
+para representar o score exibido na aplicação.
+
+Preferir:
+
+mlRelativeScore
+
+6. O clima já está dentro do ML.
+
+Portanto NÃO haverá:
+
+climateWeight
+
+como peso externo do Risk Engine V2.
+
+Isso causaria double counting.
+
+7. Os pesos externos serão conceitualmente:
+
+ML
++
+REGRAS OPERACIONAIS
+
+8. COBERTURA foi excluída do modelo final de ML.
+
+9. N_ESTADOS_ATIVOS foi identificado como proxy de target/origem
+e está proibido no ML.
+
+10. Inclinação NÃO fará parte do Risk Engine V2 nesta primeira
+versão.
+
+Ela não possui histórico real suficiente e deve permanecer fora
+até uma decisão futura explícita.
+
+11. O historyAlertCount do V1 NÃO deve ser automaticamente
+transportado para o V2.
+
+O ML já possui histórico de sinistros.
+
+Precisamos evitar double counting entre:
+
+histórico do ML
+e
+histórico operacional legado.
+
+Nesta STEP apenas deixe isso documentado nos contratos/comentários.
+Não implemente regra.
+
+==================================================
+REGRA DE SEGURANÇA ABSOLUTA
+==================================================
+
+NÃO MODIFICAR arquivos existentes.
+
+Especialmente NÃO tocar em:
+
+src/lib/risk-score.ts
+src/lib/recommendations.ts
+src/lib/ranking.ts
+src/lib/mock-data.ts
+
+src/routes/admin.tsx
+src/routes/gestor.tsx
+src/routes/operador.tsx
+src/routes/consultor.tsx
+
+src/lib/risk-config.tsx
+src/lib/risk-config.server.ts
+src/lib/api/risk-config.functions.ts
+src/routes/__root.tsx
+
+src/lib/api/*
+src/lib/adapters/*
+
+test/risk-score-v1.characterization.test.ts
+test/risk-aggregation-v1.characterization.test.ts
+test/recommendations-v1.characterization.test.ts
+
+NÃO alterar:
+
+package.json
+bun.lock
+tsconfig
+vite config
+TanStack Router
+Tailwind
+componentes existentes
+mocks
+APIs
+
+==================================================
+ARQUIVOS PERMITIDOS NESTA STEP
+==================================================
+
+Crie SOMENTE esta nova pasta:
+
+src/lib/risk-engine-v2/
+
+E, preferencialmente, somente:
+
+src/lib/risk-engine-v2/types.ts
+
+Se houver uma justificativa técnica MUITO forte para separar
+contratos em mais de um arquivo, explique antes de fazê-lo.
+
+O objetivo é manter esta STEP mínima.
+
+NÃO criar ainda:
+
+index.ts
+engine.ts
+evaluate.ts
+combine-scores.ts
+operational-rules.ts
+recommendations.ts
+ml-risk.ts
+server functions
+API routes
+feature flags
+
+==================================================
+ANTES DE ESCREVER
+==================================================
+
+Faça primeiro uma inspeção SOMENTE LEITURA dos tipos existentes em:
+
+src/lib/risk-score.ts
+src/lib/mock-data.ts
+src/lib/recommendations.ts
+
+Objetivo:
+
+- entender convenções de naming;
+- entender RiskLevel atual;
+- evitar colisões de nomes;
+- não duplicar tipos existentes desnecessariamente.
+
+IMPORTANTE:
+
+A inspeção não autoriza modificar esses arquivos.
+
+Depois da inspeção, crie os novos tipos V2.
+
+==================================================
+TIPOS MÍNIMOS ESPERADOS
+==================================================
+
+Os nomes finais podem ser ajustados se houver conflito real,
+mas a semântica deve permanecer esta.
+
+--------------------------------------------------
+1. RiskLevelV2
+--------------------------------------------------
+
+Representa somente:
+
+"baixo"
+"medio"
+"alto"
+
+NÃO alterar RiskLevel existente.
+
+Criar um tipo novo ou alias isolado no V2.
+
+--------------------------------------------------
+2. RiskEngineV2Weights
+--------------------------------------------------
+
+Representa:
+
+{
+  ml: number;
+  operationalRules: number;
+}
+
+Semântica:
+
+ml + operationalRules = 100
+
+IMPORTANTE:
+
+TypeScript não consegue garantir a soma em compile-time.
+
+Então documentar que essa invariância será validada posteriormente
+em runtime.
+
+NÃO implementar validação ainda.
+
+NÃO definir default 70/30 como lógica nesta STEP.
+
+--------------------------------------------------
+3. MlRiskComponent
+--------------------------------------------------
+
+Representa as três famílias internas do ML:
+
+"climate"
+"structure"
+"history"
+
+Essas três famílias NÃO são pesos configuráveis pela Sompo.
+
+--------------------------------------------------
+4. MlRiskComponentContribution
+--------------------------------------------------
+
+Criar um contrato capaz de futuramente explicar:
+
+- qual família do ML;
+- contribuição numérica;
+- direção do efeito;
+- label amigável.
+
+Exemplo conceitual:
+
+{
+  component: "climate";
+  contribution: number;
+  direction: "increase" | "decrease" | "neutral";
+  label: string;
+}
+
+IMPORTANTE:
+
+Não chame contribution de "percentage".
+
+Não pressupor que as contribuições somam 100.
+
+Não inventar ainda uma normalização 0–100 por família.
+
+A contribuição real virá posteriormente da decomposição matemática
+do logit da regressão.
+
+--------------------------------------------------
+5. MlRiskResult
+--------------------------------------------------
+
+Deve representar a saída futura do módulo ML.
+
+Precisa conter pelo menos:
+
+{
+  modelVersion: string;
+
+  mlRelativeScore: number;
+
+  sampleProbabilityInternal?: number;
+
+  components: MlRiskComponentContribution[];
+}
+
+Adicionar comentários claros:
+
+mlRelativeScore:
+- escala 0–100;
+- percentil relativo à população de referência;
+- NÃO é probabilidade absoluta.
+
+sampleProbabilityInternal:
+- uso técnico interno;
+- proveniente da regressão treinada em amostra case-control;
+- NÃO deve ser apresentada ao usuário como incidência real.
+
+Pode incluir warnings/metadata se isso fizer sentido,
+mas mantenha o contrato mínimo.
+
+NÃO incluir campos simulados de performance como ROC,
+PR-AUC etc. no resultado de cada previsão.
+
+Essas são métricas do modelo, não da operação.
+
+--------------------------------------------------
+6. OperationalRuleCategory
+--------------------------------------------------
+
+Para a primeira versão do V2, considerar categorias conceituais
+externas ao ML:
+
+"water_proximity"
+"operation_type"
+"terrain"
+"sompo_policy"
+
+NÃO incluir:
+
+climate
+
+porque já está no ML.
+
+NÃO incluir nesta primeira versão:
+
+history
+
+porque precisamos evitar double counting com histórico do ML.
+
+NÃO incluir:
+
+inclination
+
+nesta primeira versão.
+
+--------------------------------------------------
+7. OperationalRuleFactor
+--------------------------------------------------
+
+Contrato para uma regra operacional individual.
+
+Exemplo conceitual:
+
+{
+  id: string;
+  category: OperationalRuleCategory;
+  label: string;
+  detail?: string;
+  points: number;
+  maxPoints: number;
+  active: boolean;
+}
+
+Não implementar cálculo.
+
+Apenas contrato.
+
+--------------------------------------------------
+8. OperationalRulesResult
+--------------------------------------------------
+
+Saída futura do motor determinístico de regras.
+
+Deve conter pelo menos:
+
+{
+  rulesVersion: string;
+
+  operationalRulesScore: number;
+
+  factors: OperationalRuleFactor[];
+
+  dominantFactor?: string;
+}
+
+operationalRulesScore:
+
+escala 0–100.
+
+Não utilizar o nome operationalScore antigo para evitar confusão
+com RiskResult V1.
+
+--------------------------------------------------
+9. RiskEngineV2ComponentContribution
+--------------------------------------------------
+
+Representa a contribuição APÓS os pesos Sompo.
+
+Componentes possíveis:
+
+"ml"
+"operational_rules"
+
+Contrato conceitual:
+
+{
+  component: ...;
+  sourceScore: number;
+  weight: number;
+  weightedContribution: number;
+}
+
+Exemplo futuro:
+
+ML:
+37 × 70% = 25.9
+
+Regras:
+48 × 30% = 14.4
+
+NÃO implementar essa conta nesta STEP.
+
+--------------------------------------------------
+10. RiskDriver
+--------------------------------------------------
+
+Contrato comum para fatores explicativos.
+
+Precisamos conseguir representar futuramente algo como:
+
+Maior driver do ML:
+Estrutura do risco
+
+Fator operacional crítico:
+Proximidade de água
+
+Sugestão conceitual:
+
+{
+  source: "ml" | "operational_rules";
+  code: string;
+  label: string;
+  contribution?: number;
+  direction?: "increase" | "decrease" | "neutral";
+}
+
+Não obrigue contribution em todos os casos.
+
+--------------------------------------------------
+11. RiskEngineV2Result
+--------------------------------------------------
+
+Contrato principal de saída futura do motor.
+
+Deve conter pelo menos:
+
+{
+  engineVersion: string;
+
+  ml: MlRiskResult;
+
+  operationalRules: OperationalRulesResult;
+
+  weights: RiskEngineV2Weights;
+
+  contributions: RiskEngineV2ComponentContribution[];
+
+  finalScore: number;
+
+  level: RiskLevelV2;
+
+  dominantComponent:
+    "ml"
+    | "operational_rules"
+    | "balanced";
+
+  drivers: RiskDriver[];
+}
+
+IMPORTANTE:
+
+Não colocar recommendation diretamente aqui apenas por conveniência.
+
+No V1 recomendações possuem domínio separado.
+
+Vamos preservar separação entre:
+
+avaliação de risco
+e
+geração de recomendação
+
+até decidirmos a arquitetura da etapa correspondente.
+
+--------------------------------------------------
+12. RiskEngineV2Input
+--------------------------------------------------
+
+NÃO invente nesta etapa todo o input bruto do modelo ML.
+
+O ML portátil ainda será integrado em uma STEP posterior.
+
+Crie um contrato de orquestração simples que aceite resultados
+já calculados:
+
+{
+  ml: MlRiskResult;
+  operationalRules: OperationalRulesResult;
+  weights: RiskEngineV2Weights;
+}
+
+Isso permite futuramente testar o combinador de forma isolada.
+
+Se considerar outro nome melhor, explique.
+
+==================================================
+TIPOS QUE NÃO DEVEM SER CRIADOS AINDA
+==================================================
+
+NÃO criar ainda:
+
+MlRawInput
+
+ou contratos com todas as 17 entradas do modelo.
+
+Isso será feito quando integrarmos o artefato ML portátil,
+para manter a fonte da verdade alinhada ao JSON exportado
+pelo Google Colab.
+
+NÃO criar tipos para EV_GER ainda.
+
+EV_GER será usado posteriormente como explicabilidade histórica,
+não como segunda previsão ML.
+
+NÃO criar contratos de banco.
+
+NÃO criar contratos de API server-side.
+
+NÃO criar tipos específicos das quatro personas.
+
+==================================================
+COMENTÁRIOS IMPORTANTES NO CÓDIGO
+==================================================
+
+O arquivo types.ts deve conter comentários concisos explicando
+pelo menos:
+
+1. mlRelativeScore não é probabilidade real;
+
+2. sampleProbabilityInternal não deve ser exibida como
+probabilidade populacional;
+
+3. pesos ML/regras pertencem ao Risk Engine,
+não ao treinamento do ML;
+
+4. clima não possui peso externo separado para evitar double counting;
+
+5. componentes internos do ML não são percentuais nem pesos Sompo;
+
+6. histórico operacional legado não entra automaticamente
+no V2 porque o ML já utiliza histórico de sinistros;
+
+7. inclinação está deliberadamente fora da primeira versão V2.
+
+Evite comentários excessivos em cada linha.
+Documente apenas decisões arquiteturais importantes.
+
+==================================================
+NÃO EXPORTAR GLOBALMENTE AINDA
+==================================================
+
+Não modifique nenhum barrel existente.
+
+Não adicione o novo módulo a:
+
+src/lib/index.ts
+
+ou qualquer arquivo equivalente.
+
+Os tipos devem existir de maneira isolada e ainda sem consumidores.
+
+Isso reduz a superfície de impacto desta STEP.
+
+==================================================
+VALIDAÇÃO DE COMPILAÇÃO
+==================================================
+
+Depois da criação do arquivo:
+
+execute:
+
+bun test
+
+Resultado esperado:
+
+23 pass
+0 fail
+
+Depois:
+
+bun run build
+
+Resultado esperado:
+
+PASS
+
+Se os testes V1 falharem:
+
+PARE.
+
+NÃO altere V1.
+
+Se o build falhar por causa do novo types.ts:
+
+corrija SOMENTE:
+
+src/lib/risk-engine-v2/types.ts
+
+Não modifique outro arquivo.
+
+==================================================
+AUDITORIA DE IMPORTS
+==================================================
+
+Depois verifique se algum arquivo fora de:
+
+src/lib/risk-engine-v2/
+
+passou a importar o novo módulo.
+
+Resultado esperado:
+
+ZERO consumidores.
+
+Os tipos V2 devem estar completamente desconectados.
+
+==================================================
+GIT DIFF
+==================================================
+
+Ao finalizar, faça inspeção equivalente a:
+
+git status
+git diff --name-only
+git diff --stat
+
+Ignore eventuais attached_assets automáticos do ambiente no relatório,
+mas NÃO os adicione manualmente a commits técnicos.
+
+Quero confirmação explícita:
+
+arquivos produtivos V1 modificados:
+0
+
+rotas modificadas:
+0
+
+testes V1 modificados:
+0
+
+package.json:
+intacto
+
+bun.lock:
+intacto
+
+novos arquivos funcionais desta STEP:
+somente src/lib/risk-engine-v2/types.ts
+
+==================================================
+NÃO FAZER COMMIT MANUAL
+==================================================
+
+NÃO execute manualmente:
+
+git add
+git commit
+git push
+git merge
+git rebase
+git reset
+
+O ambiente pode gerar checkpoints automáticos próprios.
+
+Não tente reorganizá-los.
+
+Apenas reporte o estado real do Git ao final.
+
+==================================================
+CRITÉRIOS DE SUCESSO
+==================================================
+
+A STEP 3 só está concluída se:
+
+1. Risk Engine V1 continuar intocado;
+
+2. as 23 caracterizações V1 continuarem passando;
+
+3. build continuar passando;
+
+4. nenhum consumidor utilizar os novos tipos;
+
+5. nenhuma fórmula V2 existir;
+
+6. nenhum modelo ML estiver carregado;
+
+7. nenhuma API nova existir;
+
+8. nenhuma UI tiver sido alterada;
+
+9. nenhuma persona tiver sido alterada;
+
+10. nenhuma feature flag tiver sido criada;
+
+11. somente os contratos V2 existirem;
+
+12. não houver double counting embutido nos contratos.
+
+==================================================
+RELATÓRIO FINAL
+==================================================
+
+Ao terminar, responda com estas seções:
+
+A. INSPEÇÃO PRÉVIA
+
+Informe quais tipos/contratos V1 foram analisados e se encontrou
+algum conflito de nomes.
+
+B. ARQUIVOS CRIADOS
+
+Liste exatamente os novos arquivos funcionais.
+
+C. TIPOS CRIADOS
+
+Liste todos os tipos/interfaces criados em types.ts e explique
+em uma frase a responsabilidade de cada um.
+
+D. CONTRATO FINAL
+
+Mostre o conteúdo estrutural, sem precisar repetir comentários
+longos, de:
+
+RiskEngineV2Weights
+
+MlRiskResult
+
+OperationalRulesResult
+
+RiskEngineV2Input
+
+RiskEngineV2Result
+
+RiskDriver
+
+E. DECISÕES DE DOUBLE COUNTING
+
+Confirme:
+
+- clima está somente dentro do ML;
+- não existe climateWeight V2;
+- histórico operacional legado não foi introduzido nas regras;
+- inclinação não foi introduzida;
+- pesos externos são somente ML + regras.
+
+F. TESTES
+
+Informe:
+
+bun test
+
+PASS/FAIL
+quantidade.
+
+G. BUILD
+
+Informe:
+
+bun run build
+
+PASS/FAIL.
+
+H. IMPACTO SOBRE V1
+
+Confirme individualmente:
+
+risk-score.ts alterado?
+recommendations.ts alterado?
+ranking.ts alterado?
+mock-data.ts alterado?
+risk-config alterado?
+Admin alterado?
+Gestor alterado?
+Operador alterado?
+Consultor alterado?
+testes V1 alterados?
+
+Esperado:
+NÃO para todos.
+
+I. CONSUMIDORES DO V2
+
+Informe quantos arquivos existentes importam types.ts.
+
+Esperado:
+
+0
+
+J. STATUS DO GIT
+
+Informe:
+
+- branch;
+- HEAD;
+- working tree;
+- novos arquivos;
+- arquivos modificados;
+- arquivos deletados.
+
+Separar explicitamente eventuais attached_assets automáticos
+dos arquivos técnicos da STEP.
+
+K. CONFIRMAÇÃO FINAL
+
+Responda SIM/NÃO:
+
+Risk Engine V2 já calcula score?
+ML já foi integrado?
+Modelo foi carregado?
+Pesos já alteram comportamento?
+UI Sompo mudou?
+Alguma persona mudou?
+Feature flag existe?
+Comportamento produtivo mudou?
+
+Esperado:
+NÃO em todos.
+
+L. PRÓXIMA STEP
+
+NÃO implemente.
+
+Apenas confirme se a base está segura para posteriormente iniciar:
+
+STEP 4 — integração isolada do modelo ML portátil e validação
+de paridade TypeScript × Golden Vectors.
+
+==================================================
+PARE AO FINAL DA STEP 3
+==================================================
+
+Não avance automaticamente para STEP 4.
