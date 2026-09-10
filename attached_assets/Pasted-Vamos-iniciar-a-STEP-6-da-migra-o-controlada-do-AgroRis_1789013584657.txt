@@ -1,0 +1,882 @@
+Vamos iniciar a STEP 6 da migração controlada do AgroRisk.
+
+IMPORTANTE SOBRE GIT:
+
+EU realizo commits e atualizações Git manualmente.
+
+Portanto:
+
+NÃO execute git add.
+NÃO execute git commit.
+NÃO execute git push.
+NÃO execute git merge.
+NÃO execute git rebase.
+NÃO execute git reset.
+
+Checkpoints automáticos do ambiente podem ocorrer.
+Não tente reorganizar o histórico.
+
+==================================================
+ESTADO ATUAL VALIDADO
+==================================================
+
+STEP 1:
+auditoria arquitetural concluída.
+
+STEP 2:
+Risk Engine V1 caracterizado.
+
+STEP 3:
+contratos do Risk Engine V2 criados em:
+
+src/lib/risk-engine-v2/types.ts
+
+STEP 4:
+modelo ML portátil implementado em:
+
+src/lib/ml-risk/
+
+Paridade TypeScript × Python:
+
+25 Golden Vectors
+25 PASS
+0 FAIL
+
+STEP 5:
+regras operacionais V2 implementadas em:
+
+src/lib/risk-engine-v2/operational-rules.ts
+
+Testes V2:
+
+6 pass
+0 fail
+
+Estado total atual:
+
+bun test:
+30 pass
+0 fail
+
+bun run build:
+PASS
+
+==================================================
+OBJETIVO DA STEP 6
+==================================================
+
+Implementar SOMENTE a composição matemática entre:
+
+ML
++
+REGRAS OPERACIONAIS
+
+utilizando:
+
+RiskEngineV2Input
+RiskEngineV2Weights
+RiskEngineV2ComponentContribution
+RiskEngineV2Result
+
+já definidos em:
+
+src/lib/risk-engine-v2/types.ts
+
+IMPORTANTE:
+
+Nesta STEP ainda NÃO conectar:
+
+- executor ML real;
+- operational-rules.ts real;
+- UI;
+- Sompo/Admin;
+- Gestor;
+- Operador;
+- Consultor;
+- APIs;
+- banco;
+- recomendações;
+- feature flag;
+- adapter V1/V2.
+
+O combinador deverá receber:
+
+MlRiskResult
++
+OperationalRulesResult
++
+RiskEngineV2Weights
+
+já calculados.
+
+==================================================
+ARQUITETURA DESTA STEP
+==================================================
+
+MlRiskResult
+    ↓
+
+OperationalRulesResult
+    ↓
+
+RiskEngineV2Weights
+    ↓
+
+combineRiskEngineV2(...)
+    ↓
+
+RiskEngineV2Result
+
+O combinador NÃO deve saber:
+
+- como o ML foi calculado;
+- como as regras foram calculadas;
+- como os dados chegaram;
+- qual persona está utilizando;
+- como recomendações são geradas.
+
+==================================================
+FÓRMULA CONGELADA
+==================================================
+
+Pesos externos:
+
+ml
+operationalRules
+
+Invariância:
+
+ml + operationalRules = 100
+
+A composição deve ser:
+
+mlContribution =
+  ml.mlRelativeScore * weights.ml / 100
+
+operationalContribution =
+  operationalRules.operationalRulesScore
+  * weights.operationalRules / 100
+
+finalRaw =
+  mlContribution + operationalContribution
+
+finalScore =
+  Math.round(finalRaw)
+
+IMPORTANTE:
+
+Aplicar Math.round SOMENTE ao finalScore.
+
+NÃO arredondar:
+
+- mlContribution;
+- operationalContribution;
+- scores de origem;
+- pesos.
+
+==================================================
+VALIDAÇÃO DOS PESOS
+==================================================
+
+Agora SIM implementar validação runtime.
+
+Os pesos devem:
+
+1. ser números finitos;
+2. estar entre 0 e 100;
+3. somar exatamente 100 dentro de tolerância numérica pequena.
+
+Sugestão:
+
+Math.abs(
+  weights.ml + weights.operationalRules - 100
+) <= 1e-9
+
+Se inválidos:
+
+lançar erro claro.
+
+NÃO normalizar silenciosamente.
+
+Exemplo proibido:
+
+70 + 40 = 110
+
+NÃO converter automaticamente para proporções.
+
+Deve falhar.
+
+==================================================
+VALIDAÇÃO DOS SCORES DE ORIGEM
+==================================================
+
+Validar:
+
+ml.mlRelativeScore
+
+e:
+
+operationalRules.operationalRulesScore
+
+como números finitos no intervalo:
+
+0–100
+
+Se fora do intervalo:
+
+lançar erro.
+
+NÃO fazer clamp silencioso.
+
+==================================================
+PESOS DEFAULT
+==================================================
+
+NÃO criar default global ainda.
+
+NÃO congelar 70/30 em código de produção nesta STEP.
+
+Os pesos devem ser sempre fornecidos via:
+
+RiskEngineV2Input
+
+Nos testes pode usar:
+
+70/30
+50/50
+100/0
+0/100
+
+==================================================
+CONTRIBUIÇÕES
+==================================================
+
+RiskEngineV2Result.contributions deve conter exatamente dois itens:
+
+1. ML
+2. operational_rules
+
+Cada item:
+
+{
+  component,
+  sourceScore,
+  weight,
+  weightedContribution
+}
+
+Exemplo:
+
+ML score:
+37
+
+peso ML:
+70
+
+contribution:
+25.9
+
+Regras:
+48
+
+peso:
+30
+
+contribution:
+14.4
+
+==================================================
+NÍVEL DE RISCO
+==================================================
+
+Para o V2 usar inicialmente os mesmos thresholds centrais
+já existentes no produto:
+
+0–40:
+baixo
+
+41–70:
+medio
+
+71–100:
+alto
+
+IMPORTANTE:
+
+Implementar a lógica dentro do módulo V2.
+
+NÃO importar:
+
+riskFromScore
+
+do V1.
+
+Queremos independência.
+
+Casos obrigatórios:
+
+0 → baixo
+40 → baixo
+41 → medio
+70 → medio
+71 → alto
+100 → alto
+
+==================================================
+DOMINANT COMPONENT
+==================================================
+
+Calcular usando as contribuições ponderadas:
+
+se:
+
+mlContribution > operationalContribution
+
+resultado:
+
+"ml"
+
+se:
+
+operationalContribution > mlContribution
+
+resultado:
+
+"operational_rules"
+
+Se forem iguais dentro de uma tolerância pequena:
+
+"balanced"
+
+Use tolerância, por exemplo:
+
+1e-9
+
+NÃO comparar scores brutos.
+
+Comparar:
+
+weightedContribution
+
+==================================================
+DRIVERS
+==================================================
+
+Nesta STEP, drivers devem ser compostos SOMENTE a partir dos
+dados já presentes nos resultados de entrada.
+
+NÃO inventar novos fatores.
+
+Para ML:
+
+usar:
+
+ml.components
+
+Transformar componentes disponíveis em RiskDriver com:
+
+source: "ml"
+
+code:
+component
+
+label:
+label
+
+contribution:
+contribution
+
+direction:
+direction
+
+Para regras:
+
+usar fatores de:
+
+operationalRules.factors
+
+preferencialmente somente fatores:
+
+active === true
+
+Transformar em RiskDriver com:
+
+source: "operational_rules"
+
+code:
+factor.id
+
+label:
+factor.label
+
+contribution:
+factor.points
+
+Não inventar direction para regras se não existir.
+
+==================================================
+ORDEM DOS DRIVERS
+==================================================
+
+Ordenar de forma determinística.
+
+Preferência:
+
+1. drivers da componente dominante;
+2. depois outra componente.
+
+Dentro de ML:
+
+maior valor absoluto de contribution primeiro.
+
+Dentro de regras:
+
+maior points primeiro.
+
+Empates:
+
+preservar ordem original.
+
+Se dominantComponent = "balanced":
+
+manter:
+
+ML primeiro
+depois regras
+
+NÃO tentar criar ranking sofisticado.
+
+==================================================
+ENGINE VERSION
+==================================================
+
+Use:
+
+"2.0"
+
+para:
+
+engineVersion
+
+Isso representa a nova arquitetura do Risk Engine,
+não a versão do modelo ML.
+
+==================================================
+ARQUIVOS PERMITIDOS
+==================================================
+
+Preferencialmente criar somente:
+
+src/lib/risk-engine-v2/combine-scores.ts
+
+e:
+
+test/risk-engine-v2-combine.test.ts
+
+NÃO modificar:
+
+src/lib/risk-engine-v2/types.ts
+
+Se considerar necessário alterar types.ts:
+
+PARE antes.
+
+Explique o motivo.
+
+==================================================
+NÃO IMPORTAR IMPLEMENTAÇÕES REAIS
+==================================================
+
+combine-scores.ts NÃO deve importar:
+
+src/lib/ml-risk/model-v1.ts
+
+nem:
+
+src/lib/risk-engine-v2/operational-rules.ts
+
+O combinador deve trabalhar somente com:
+
+TIPOS
++
+RESULTADOS JÁ CALCULADOS
+
+Pode importar tipos de:
+
+src/lib/risk-engine-v2/types.ts
+
+==================================================
+TESTES OBRIGATÓRIOS
+==================================================
+
+Criar testes isolados cobrindo pelo menos:
+
+1. composição 70/30;
+
+Exemplo:
+
+mlRelativeScore:
+37
+
+operationalRulesScore:
+48
+
+esperado:
+
+mlContribution:
+25.9
+
+operationalContribution:
+14.4
+
+finalScore:
+40
+
+level:
+baixo
+
+dominantComponent:
+ml
+
+--------------------------------------------------
+
+2. composição 50/50;
+
+--------------------------------------------------
+
+3. ML 100 / regras 0;
+
+--------------------------------------------------
+
+4. ML 0 / regras 100;
+
+--------------------------------------------------
+
+5. contribuição balanceada;
+
+Exemplo:
+
+scores e pesos que gerem contribuições iguais.
+
+Esperado:
+
+balanced
+
+--------------------------------------------------
+
+6. thresholds:
+
+40 baixo
+41 medio
+70 medio
+71 alto
+
+--------------------------------------------------
+
+7. pesos inválidos:
+
+70/40 → erro
+
+--------------------------------------------------
+
+8. peso negativo → erro
+
+--------------------------------------------------
+
+9. peso acima de 100 → erro
+
+--------------------------------------------------
+
+10. score ML abaixo de 0 → erro
+
+--------------------------------------------------
+
+11. score ML acima de 100 → erro
+
+--------------------------------------------------
+
+12. score regras abaixo de 0 → erro
+
+--------------------------------------------------
+
+13. score regras acima de 100 → erro
+
+--------------------------------------------------
+
+14. NaN / Infinity → erro
+
+--------------------------------------------------
+
+15. drivers ML convertidos corretamente;
+
+--------------------------------------------------
+
+16. drivers operacionais ativos convertidos corretamente;
+
+--------------------------------------------------
+
+17. fatores operacionais inactive NÃO viram driver;
+
+--------------------------------------------------
+
+18. ordenação determinística dos drivers.
+
+==================================================
+DOUBLE COUNTING
+==================================================
+
+O combinador NÃO deve:
+
+- recalcular clima;
+- recalcular histórico;
+- recalcular água;
+- recalcular terreno;
+- recalcular operação;
+- acessar UF;
+- acessar COD_MOD;
+- executar ML;
+- executar regras.
+
+Ele somente combina resultados.
+
+==================================================
+RECOMENDAÇÕES
+==================================================
+
+NÃO gerar recomendações nesta STEP.
+
+RiskEngineV2Result continua sem recommendations.
+
+==================================================
+ARQUIVOS PROIBIDOS
+==================================================
+
+NÃO modificar:
+
+src/lib/risk-score.ts
+src/lib/recommendations.ts
+src/lib/ranking.ts
+src/lib/mock-data.ts
+
+src/lib/risk-engine-v2/types.ts
+src/lib/risk-engine-v2/operational-rules.ts
+
+src/lib/ml-risk/*
+
+src/routes/admin.tsx
+src/routes/gestor.tsx
+src/routes/operador.tsx
+src/routes/consultor.tsx
+src/routes/__root.tsx
+
+src/lib/risk-config.tsx
+src/lib/risk-config.server.ts
+src/lib/api/risk-config.functions.ts
+
+package.json
+bun.lock
+
+Todos os testes existentes.
+
+==================================================
+VALIDAÇÃO
+==================================================
+
+Depois da implementação:
+
+execute:
+
+bun test
+
+Esperado:
+
+23 testes V1
+1 teste ML
+6 testes operational rules
++
+novos testes do combinador
+
+todos PASS.
+
+Depois:
+
+bun run build
+
+Esperado:
+
+PASS.
+
+==================================================
+ISOLAMENTO
+==================================================
+
+Confirme:
+
+consumidores produtivos de combine-scores.ts:
+
+0
+
+Nenhuma UI utilizando.
+
+Nenhuma API utilizando.
+
+Nenhuma persona utilizando.
+
+Nenhum adapter utilizando.
+
+==================================================
+GIT
+==================================================
+
+NÃO faça:
+
+git add
+git commit
+git push
+git reset
+git rebase
+git merge
+
+Eu farei o versionamento manualmente.
+
+Apenas reporte o estado.
+
+==================================================
+RELATÓRIO FINAL
+==================================================
+
+Responda com:
+
+A. ARQUIVOS CRIADOS
+
+B. FÓRMULA IMPLEMENTADA
+
+Mostre exatamente:
+
+mlContribution
+operationalContribution
+finalScore
+
+C. VALIDAÇÕES
+
+Explique:
+
+- pesos;
+- soma 100;
+- scores 0–100;
+- finite numbers.
+
+D. THRESHOLDS
+
+Mostre:
+
+0–40
+41–70
+71–100
+
+E. DOMINANT COMPONENT
+
+Explique comparação e tolerância.
+
+F. DRIVERS
+
+Explique:
+
+- origem ML;
+- origem regras;
+- filtros;
+- ordenação.
+
+G. TESTES DO COMBINADOR
+
+Quantidade pass/fail.
+
+H. TESTES TOTAIS
+
+V1:
+ML:
+Operational Rules:
+Combine:
+TOTAL:
+
+I. BUILD
+
+bun run build:
+PASS/FAIL
+
+J. ISOLAMENTO
+
+Consumidores produtivos:
+quantidade
+
+ML executor conectado?
+SIM/NÃO
+
+OperationalRules executor conectado?
+SIM/NÃO
+
+UI conectada?
+SIM/NÃO
+
+V1 alterado?
+SIM/NÃO
+
+K. ARQUIVOS EXISTENTES MODIFICADOS
+
+Esperado:
+nenhum.
+
+L. GIT
+
+branch
+HEAD
+working tree
+arquivos técnicos pendentes
+attached_assets/checkpoints automáticos
+
+M. DECISÃO
+
+COMBINADOR V2 IMPLEMENTADO E TESTADO?
+SIM/NÃO
+
+BASE SEGURA PARA CRIAR ORQUESTRADOR V2?
+SIM/NÃO
+
+==================================================
+CRITÉRIO DE PARADA
+==================================================
+
+Se precisar modificar types.ts:
+
+PARE.
+
+Se qualquer teste existente falhar:
+
+PARE.
+
+Se build falhar:
+
+PARE.
+
+Se houver necessidade de importar implementações reais
+de ML ou regras para fazer o combinador funcionar:
+
+PARE.
+
+==================================================
+PARE AO FINAL
+==================================================
+
+NÃO crie orquestrador.
+
+NÃO crie adapter.
+
+NÃO crie feature flag.
+
+NÃO altere UI.
+
+NÃO altere Sompo.
+
+NÃO altere personas.
+
+NÃO avance automaticamente.
