@@ -13,19 +13,16 @@ import {
 import { rankMachines, rankAreas, machineDistribution, areaDistribution } from "@/lib/ranking";
 import {
   allRecommendationsConsolidated, countByCategory, countByPriority,
-  recommendationsForOperation, type RecCategory, type RecPriority,
+  type RecCategory, type RecPriority,
 } from "@/lib/recommendations";
-import { Tractor, Building2, Map, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal, Save, CheckCircle2, Loader2, CloudSun, Wrench } from "lucide-react";
+import { Tractor, Building2, Map, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
 import { useRiskConfig } from "@/lib/risk-config";
-import { Slider } from "@/components/ui/slider";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { RecommendationCard } from "@/components/recommendation-card";
-import { RiskExplanation } from "@/components/risk-explanation";
+import { AdminV2RiskPanel } from "@/components/admin-v2-risk-panel";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "AgroRisk · Admin / Sompo" }] }),
@@ -118,168 +115,7 @@ function AdminPage() {
 }
 
 function RiskEngineConfigurationPanel() {
-  const { configuration, status, error, isSaving, saveWeights } = useRiskConfig();
-  const [climateWeight, setClimateWeight] = useState(configuration.climate);
-  const [savedMessage, setSavedMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    setClimateWeight(configuration.climate);
-  }, [configuration.climate]);
-
-  const operationalWeight = 100 - climateWeight;
-  const scenario = operations.find((operation) => operation.status === "Em andamento") ?? operations[0];
-  const result = riskResultForOperation(scenario, {
-    climate: climateWeight,
-    operational: operationalWeight,
-  });
-  const scenarioRecommendations = recommendationsForOperation(scenario, "admin", {
-    weights: { climate: climateWeight, operational: operationalWeight },
-    result,
-  });
-  const updatedLabel = configuration.updatedAt
-    ? new Intl.DateTimeFormat("pt-BR", {
-      dateStyle: "short",
-      timeStyle: "short",
-      timeZone: "America/Sao_Paulo",
-    }).format(new Date(configuration.updatedAt))
-    : "Padrão inicial 50/50";
-
-  const handleSave = async () => {
-    const save = await saveWeights(climateWeight);
-    if (save.ok) {
-      setSavedMessage("Pesos atualizados para toda a demonstração.");
-    } else {
-      setSavedMessage(null);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <Card className="border-primary/30 bg-primary/5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <SlidersHorizontal className="h-4 w-4 text-primary" />
-              Configuração do Motor de Risco
-            </div>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Ajuste apenas a combinação dos componentes existentes. Esta configuração é
-              exclusiva de Admin/Sompo e não aciona treinamento ou modelo de ML.
-            </p>
-          </div>
-          <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
-            Atualizado: {updatedLabel}
-          </span>
-        </div>
-      </Card>
-
-      {status === "loading" && (
-        <Alert className="border-info/30 bg-info/5">
-          <Loader2 className="h-4 w-4 animate-spin text-info" />
-          <AlertTitle>Carregando configuração</AlertTitle>
-          <AlertDescription>O padrão 50/50 continua visível até a leitura ser concluída.</AlertDescription>
-        </Alert>
-      )}
-      {error && (
-        <Alert variant="destructive">
-          <AlertTitle>Não foi possível concluir a última ação</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      {savedMessage && (
-        <Alert className="border-success/40 bg-success/5">
-          <CheckCircle2 className="h-4 w-4 text-success" />
-          <AlertTitle>Configuração salva</AlertTitle>
-          <AlertDescription>{savedMessage}</AlertDescription>
-        </Alert>
-      )}
-
-      <div className="grid gap-4 xl:grid-cols-5">
-        <Card className="xl:col-span-2">
-          <div className="flex items-center gap-2">
-            <CloudSun className="h-4 w-4 text-info" />
-            <h2 className="text-sm font-semibold text-foreground">Pesos do cenário</h2>
-          </div>
-          <div className="mt-6">
-            <div className="mb-3 flex items-end justify-between">
-              <div>
-                <div className="text-sm font-medium text-foreground">Peso climático</div>
-                <div className="text-xs text-muted-foreground">Chuva e condição climática disponível</div>
-              </div>
-              <span className="text-3xl font-semibold tabular-nums text-primary">{climateWeight}%</span>
-            </div>
-            <Slider
-              min={0}
-              max={100}
-              step={1}
-              value={[climateWeight]}
-              onValueChange={([value]) => {
-                setClimateWeight(value);
-                setSavedMessage(null);
-              }}
-              aria-label="Peso climático"
-            />
-            <div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>0%</span><span>100%</span></div>
-          </div>
-
-          <div className="mt-6 rounded-lg border border-border bg-muted/30 p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Wrench className="h-4 w-4 text-warning" /> Peso operacional
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Água, tipo de operação, histórico e terreno.
-                </div>
-              </div>
-              <span className="text-2xl font-semibold tabular-nums text-foreground">{operationalWeight}%</span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving || climateWeight === configuration.climate}
-            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {isSaving ? "Salvando…" : "Salvar pesos"}
-          </button>
-          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-            Os pesos ficam em memória no servidor durante esta demonstração e voltam ao padrão após reinício do workflow.
-          </p>
-        </Card>
-
-        <Card className="xl:col-span-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">Simulação explicável</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Cenário demonstrativo baseado na operação {scenario.id}; os dados do MVP podem conter fallback simulado.
-              </p>
-            </div>
-            <RiskBadge score={result.finalScore} />
-          </div>
-          <div className="mt-5">
-            <RiskExplanation
-              result={result}
-              weights={{ climate: climateWeight, operational: operationalWeight }}
-              recommendation={scenarioRecommendations[0]}
-              audience="admin"
-            />
-          </div>
-          <div className="mt-5">
-            <div className="mb-2 text-sm font-semibold text-foreground">Recomendações do cenário</div>
-            <div className="space-y-2">
-              {scenarioRecommendations.map((recommendation) => (
-                <RecommendationCard key={recommendation.id} rec={recommendation} />
-              ))}
-            </div>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
+  return <AdminV2RiskPanel />;
 }
 
 function OverviewPanel() {
