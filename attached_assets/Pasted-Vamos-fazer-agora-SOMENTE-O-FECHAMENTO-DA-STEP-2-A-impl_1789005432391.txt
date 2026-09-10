@@ -1,0 +1,231 @@
+Vamos fazer agora SOMENTE O FECHAMENTO DA STEP 2.
+
+A implementação dos testes de caracterização foi revisada e aprovada.
+
+NÃO iniciar STEP 3.
+NÃO criar Risk Engine V2.
+NÃO integrar ML.
+NÃO alterar código produtivo.
+NÃO alterar UI.
+NÃO fazer push.
+NÃO fazer merge.
+NÃO fazer rebase.
+
+==================================================
+1. VERIFICAR O COMMIT 7d7a153
+==================================================
+
+A branch risk-engine-v2 foi originalmente criada em:
+
+3e00ba0 — Add AgroRisk MVP progress notes
+
+Porém o HEAD agora aparece em:
+
+7d7a153 — Add migration documentation asset
+
+Antes de fazer qualquer novo commit, faça uma inspeção SOMENTE LEITURA desse commit.
+
+Use os equivalentes de:
+
+git show --stat --name-status 7d7a153
+
+git diff --name-status 3e00ba0..7d7a153
+
+Informe exatamente:
+
+- quais arquivos entraram nesse commit;
+- se algum arquivo de src/ foi alterado;
+- se package.json foi alterado;
+- se bun.lock foi alterado;
+- se qualquer código produtivo foi alterado.
+
+CRITÉRIO:
+
+Se 7d7a153 contiver SOMENTE documentação/attached_assets
+e ZERO código produtivo:
+
+não altere o histórico Git;
+não faça reset;
+não faça rebase;
+mantenha o commit como está.
+
+Se houver qualquer código produtivo nesse commit:
+
+PARE e me informe.
+Não continue.
+
+==================================================
+2. ARQUIVO UNTRACKED attached_assets
+==================================================
+
+Existe atualmente:
+
+attached_assets/Pasted-Vamos-continuar-a-ETAPA-2-da-migra-o-controlada-do-Agro_1789005060364.txt
+
+Inspecione esse arquivo.
+
+Verifique também se ele é importado, referenciado ou necessário
+pela aplicação.
+
+Se ele for somente uma cópia textual do prompt/documentação
+fornecida durante a conversa e não for utilizado pelo projeto:
+
+remova SOMENTE esse arquivo untracked.
+
+NÃO execute git clean.
+NÃO remova o diretório attached_assets inteiro.
+NÃO remova nenhum outro arquivo.
+
+Se existir qualquer dúvida sobre sua função:
+
+NÃO delete.
+Pare e me informe.
+
+==================================================
+3. CONFIRMAR OS TRÊS TESTES
+==================================================
+
+Os únicos arquivos da baseline que queremos versionar são:
+
+test/risk-score-v1.characterization.test.ts
+
+test/risk-aggregation-v1.characterization.test.ts
+
+test/recommendations-v1.characterization.test.ts
+
+Confirme que esses três arquivos existem.
+
+Não altere seu conteúdo nesta etapa, exceto se descobrir
+algum problema que impeça sua execução.
+
+==================================================
+4. RODAR NOVAMENTE A BASELINE
+==================================================
+
+Execute:
+
+bun test
+
+Resultado esperado:
+
+23 pass
+0 fail
+
+Depois execute:
+
+bun run build
+
+Resultado esperado:
+
+PASS
+
+Se qualquer um falhar:
+
+NÃO altere produção.
+NÃO faça commit.
+Pare e me informe.
+
+==================================================
+5. INSPEÇÃO GIT ANTES DO COMMIT
+==================================================
+
+Antes de adicionar qualquer arquivo, confirme:
+
+- nenhum arquivo tracked produtivo modificado;
+- nenhum arquivo produtivo deletado;
+- package.json intacto;
+- bun.lock intacto;
+- somente os 3 arquivos test/ que queremos versionar
+  permanecem como alterações da STEP 2.
+
+Mostre o resultado dessa verificação no relatório.
+
+==================================================
+6. STAGE EXPLÍCITO
+==================================================
+
+Se TODAS as verificações anteriores passarem:
+
+adicione SOMENTE estes arquivos:
+
+test/risk-score-v1.characterization.test.ts
+
+test/risk-aggregation-v1.characterization.test.ts
+
+test/recommendations-v1.characterization.test.ts
+
+IMPORTANTE:
+
+NÃO use:
+
+git add .
+git add -A
+git add --all
+
+Use somente os três paths explicitamente.
+
+==================================================
+7. COMMIT DA STEP 2
+==================================================
+
+Depois faça UM commit com a mensagem exatamente:
+
+test: characterize Risk Engine V1 baseline
+
+Esse commit deve conter SOMENTE os três arquivos de teste.
+
+NÃO faça push.
+
+==================================================
+8. VERIFICAÇÃO PÓS-COMMIT
+==================================================
+
+Depois do commit, informe:
+
+1. branch atual;
+2. hash curto do HEAD;
+3. mensagem do HEAD;
+4. arquivos incluídos no novo commit;
+5. resultado de bun test;
+6. resultado de bun run build;
+7. git status final;
+8. se o working tree está limpo;
+9. hash atual da main;
+10. confirmação de que main continua em:
+
+3e00ba0
+
+==================================================
+9. CONFIRMAÇÃO DE SEGURANÇA
+==================================================
+
+Responda SIM/NÃO:
+
+- código produtivo foi alterado?
+- Risk Engine V1 foi alterado?
+- UI foi alterada?
+- mocks foram alterados?
+- recommendations.ts foi alterado?
+- ranking.ts foi alterado?
+- risk-config foi alterado?
+- package.json foi alterado?
+- bun.lock foi alterado?
+- dependências foram instaladas?
+- ML foi integrado?
+- Risk Engine V2 foi criado?
+- feature flag foi criada?
+- houve push?
+- houve merge?
+- houve rebase?
+
+A resposta esperada para todos é NÃO.
+
+==================================================
+10. PARE AO FINAL
+==================================================
+
+NÃO comece STEP 3.
+
+Apenas finalize informando que a STEP 2 está congelada
+em um commit próprio e se o projeto está pronto para
+iniciarmos posteriormente a STEP 3.
