@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowDownRight,
@@ -19,6 +19,11 @@ import {
 } from "@/lib/risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result } from "@/lib/risk-engine-v2/types";
 import { cn } from "@/lib/utils";
+import { getStoredSessionToken } from "@/lib/auth";
+import {
+  getRiskEngineV2Configuration,
+  saveRiskEngineV2Configuration,
+} from "@/lib/api/risk-config.functions";
 
 const componentLabels: Record<string, string> = {
   climate: "Clima",
@@ -156,12 +161,71 @@ function ContributionTable({ result }: { result: RiskEngineV2Result }) {
 
 export function AdminV2RiskPanel() {
   const [mlWeight, setMlWeight] = useState(DEFAULT_RISK_ENGINE_V2_ML_WEIGHT);
+  const [savedMlWeight, setSavedMlWeight] = useState(DEFAULT_RISK_ENGINE_V2_ML_WEIGHT);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">(
+    "idle",
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
   const result = useMemo(() => evaluateRiskEngineV2Demo(mlWeight), [mlWeight]);
+  const operationalRulesWeight = 100 - mlWeight;
+  const savedOperationalRulesWeight = 100 - savedMlWeight;
+  const hasUnsavedChanges = mlWeight !== savedMlWeight;
+  const isValidDraft =
+    Number.isInteger(mlWeight) &&
+    mlWeight >= 0 &&
+    mlWeight <= 100 &&
+    operationalRulesWeight >= 0 &&
+    operationalRulesWeight <= 100 &&
+    mlWeight + operationalRulesWeight === 100;
   const scenario =
     operations.find((operation) => operation.status === "Em andamento") ?? operations[0];
   const recommendations = recommendationsForOperation(scenario, "admin");
   const mlDriver = result.drivers.find((driver) => driver.source === "ml");
   const operationalDriver = result.drivers.find((driver) => driver.source === "operational_rules");
+
+  useEffect(() => {
+    const token = getStoredSessionToken();
+    if (!token) return;
+    void getRiskEngineV2Configuration({ data: { token } }).then((response) => {
+      if (!response.ok) return;
+      setSavedMlWeight(response.configuration.mlWeight);
+      setMlWeight(response.configuration.mlWeight);
+    });
+  }, []);
+
+  const handleDraftChange = (value: number) => {
+    setMlWeight(value);
+    setSaveStatus("idle");
+    setSaveError(null);
+  };
+
+  const handleSave = async () => {
+    if (!hasUnsavedChanges || !isValidDraft || saveStatus === "saving") return;
+    const token = getStoredSessionToken();
+    if (!token) {
+      setSaveStatus("error");
+      setSaveError("Sessão não autorizada.");
+      return;
+    }
+
+    setSaveStatus("saving");
+    setSaveError(null);
+    try {
+      const response = await saveRiskEngineV2Configuration({
+        data: { token, mlWeight, operationalRulesWeight },
+      });
+      if (!response.ok) {
+        setSaveStatus("error");
+        setSaveError(response.error);
+        return;
+      }
+      setSavedMlWeight(response.configuration.mlWeight);
+      setSaveStatus("success");
+    } catch {
+      setSaveStatus("error");
+      setSaveError("Não foi possível salvar os pesos.");
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -199,7 +263,7 @@ export function AdminV2RiskPanel() {
             max={100}
             step={1}
             value={[mlWeight]}
-            onValueChange={([value]) => setMlWeight(value)}
+            onValueChange={([value]) => handleDraftChange(value)}
             aria-label="Peso ML no Risk Engine V2"
             className="mt-4"
           />
@@ -212,7 +276,7 @@ export function AdminV2RiskPanel() {
               <span className="flex items-center gap-2 text-sm font-medium">
                 <Wrench className="h-4 w-4 text-warning" /> Regras operacionais
               </span>
-              <span className="text-xl font-semibold tabular-nums">{100 - mlWeight}%</span>
+              <span className="text-xl font-semibold tabular-nums">{operationalRulesWeight}%</span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Peso das regras operacionais
@@ -222,6 +286,36 @@ export function AdminV2RiskPanel() {
             Os pesos atuam somente na composição do Risk Engine. Não alteram o treinamento. O clima
             já está dentro do ML para evitar dupla contagem.
           </p>
+          <div className="mt-4 border-t border-border pt-4">
+            <p className="text-xs font-medium text-foreground">
+              Configuração ativa: ML {savedMlWeight}% / Regras {savedOperationalRulesWeight}%
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!hasUnsavedChanges || !isValidDraft || saveStatus === "saving"}
+                className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saveStatus === "saving" ? "Salvando…" : "Salvar pesos"}
+              </button>
+              {hasUnsavedChanges && (
+                <span className="text-xs font-medium text-warning-foreground">
+                  Alterações não salvas
+                </span>
+              )}
+              {!hasUnsavedChanges && saveStatus === "success" && (
+                <span role="status" className="text-xs font-medium text-success">
+                  Pesos salvos com sucesso
+                </span>
+              )}
+            </div>
+            {saveStatus === "error" && saveError && (
+              <p role="alert" className="mt-2 text-xs font-medium text-danger">
+                {saveError}
+              </p>
+            )}
+          </div>
         </Card>
 
         <Card>
