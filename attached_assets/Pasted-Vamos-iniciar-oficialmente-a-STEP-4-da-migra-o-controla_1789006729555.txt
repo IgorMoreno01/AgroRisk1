@@ -1,0 +1,1004 @@
+Vamos iniciar oficialmente a STEP 4 da migração controlada do AgroRisk.
+
+IMPORTANTE SOBRE GIT:
+
+EU faço commits e atualizações Git manualmente.
+
+Portanto:
+
+NÃO execute git add.
+NÃO execute git commit.
+NÃO execute git push.
+NÃO execute git merge.
+NÃO execute git rebase.
+NÃO execute git reset.
+
+O ambiente Replit pode criar checkpoints automáticos por conta própria.
+Não tente reorganizá-los nem limpá-los.
+
+==================================================
+ESTADO ATUAL
+==================================================
+
+Branch de desenvolvimento:
+
+risk-engine-v2
+
+Último HEAD observado:
+
+572eedb
+Add risk engine types and asset documentation
+
+A STEP 3 criou apenas:
+
+src/lib/risk-engine-v2/types.ts
+
+Validações:
+
+bun test:
+23 pass
+0 fail
+
+bun run build:
+PASS
+
+Risk Engine V1 permanece intacto.
+
+==================================================
+OBJETIVO DA STEP 4
+==================================================
+
+Integrar de forma TOTALMENTE ISOLADA o modelo portátil de
+Machine Learning exportado pelo Google Colab.
+
+Objetivos técnicos:
+
+1. armazenar o artefato portátil do modelo;
+2. definir os inputs exatos exigidos pelo modelo;
+3. reproduzir em TypeScript:
+   - transformações;
+   - padronização;
+   - one-hot encoding;
+   - regressão logística;
+   - probabilidade amostral;
+   - score relativo 0–100;
+4. validar a implementação TypeScript utilizando Golden Vectors
+exportados do Python/Colab;
+5. provar paridade numérica antes de permitir qualquer integração
+com o Risk Engine V2.
+
+==================================================
+REGRA MAIS IMPORTANTE DA STEP 4
+==================================================
+
+O modelo TypeScript NÃO pode ser considerado válido apenas porque:
+
+- compila;
+- gera números;
+- gera valores entre 0 e 1;
+- parece coerente.
+
+Ele somente será considerado válido se reproduzir os resultados
+de referência exportados pelo Python dentro de tolerância numérica
+explicitamente definida.
+
+A fonte da verdade nesta etapa é:
+
+Python / scikit-learn exportado pelo Colab.
+
+==================================================
+ARQUITETURA DE SEGURANÇA
+==================================================
+
+A arquitetura nesta etapa deverá permanecer:
+
+Risk Engine V1
+        │
+        └──────── completamente intacto
+
+
+Risk Engine V2
+        │
+        └── types.ts
+             │
+             └──────── ainda sem consumidor
+
+
+ML portátil
+        │
+        ├── artefato JSON
+        ├── tipos
+        ├── executor TypeScript
+        └── teste de paridade
+
+SEM conexão com:
+
+- Risk Engine V1;
+- Risk Engine V2;
+- Sompo/Admin;
+- Gestor;
+- Operador;
+- Consultor;
+- recomendações;
+- API pública;
+- banco;
+- mocks atuais.
+
+==================================================
+ARTEFATOS DO COLAB
+==================================================
+
+O modelo final foi exportado a partir da regressão logística
+selecionada:
+
+G_COMBINADO_SEM_COBERTURA
+
+Arquitetura do modelo:
+
+Logistic Regression
+L2
+C = 1
+
+Split temporal:
+
+TRAIN:
+2005–2018
+
+VALID:
+2019
+
+TEST:
+2020
+
+O benchmark final congelado apresentou:
+
+VALID 2019
+ROC-AUC: 0.688570
+PR-AUC: 0.335734
+
+TEST 2020
+ROC-AUC: 0.705260
+PR-AUC: 0.332961
+
+Essas métricas são apenas contexto do modelo.
+
+NÃO devem entrar em cada previsão.
+
+==================================================
+SEMÂNTICA DO MODELO
+==================================================
+
+O modelo foi treinado sobre dataset case-control aproximadamente:
+
+1 positivo : 5 controles
+
+Portanto:
+
+PROBA_AMOSTRAL
+
+NÃO representa incidência populacional real de sinistro.
+
+A aplicação usa:
+
+mlRelativeScore
+
+que representa um percentil empírico contra a distribuição
+de referência da validação de 2019.
+
+Conceitualmente:
+
+score =
+100 *
+quantidade de probabilidades de referência <= probabilidade atual
+/
+quantidade total de probabilidades de referência
+
+Exemplo:
+
+Score relativo 80
+
+significa:
+
+o score atual está acima de aproximadamente 80% da população
+de referência.
+
+NÃO significa:
+
+80% de chance de sinistro.
+
+==================================================
+FEATURES DO MODELO FINAL
+==================================================
+
+O modelo final usa:
+
+18 features numéricas/engenheiradas
++
+2 categóricas
+
+Categóricas:
+
+COD_MOD
+UF
+
+Após one-hot encoding existem aproximadamente 50 coeficientes
+efetivos no pipeline exportado.
+
+Features numéricas conhecidas:
+
+LOG1P_PRECIP_D1
+LOG1P_CHUVA_7D
+LOG1P_CHUVA_30D
+
+TEMP_MEDIA_D1_C
+TEMP_MEDIA_D1_C_SQ
+
+TEMP_AMPLITUDE_D1_C
+TEMP_AMPLITUDE_D1_C_SQ
+
+UMIDADE_D1_PCT
+UMIDADE_D1_PCT_SQ
+
+VENTO_D1_MS
+
+ALTITUDE_ML_M
+
+DOY_SIN
+DOY_COS
+
+HIST_TEM_ANT
+
+LOG1P_HIST_N_TOTAL
+LOG1P_HIST_N_90D
+LOG1P_HIST_N_365D
+LOG1P_HIST_DIAS_DESDE_ULT
+
+IMPORTANTE:
+
+A fonte da verdade não é esta lista textual.
+
+A fonte da verdade é o JSON portátil exportado do Colab.
+
+Se houver qualquer diferença:
+
+PARE e reporte.
+
+NÃO tente corrigir o modelo baseado apenas neste prompt.
+
+==================================================
+FEATURES PROIBIDAS
+==================================================
+
+NÃO introduzir no modelo:
+
+N_ESTADOS_ATIVOS
+
+Foi identificado como proxy de target/origem.
+
+NÃO introduzir:
+
+COBERTURA
+
+Foi deliberadamente excluída do modelo final.
+
+NÃO introduzir:
+
+CULTURA
+
+NÃO introduzir:
+
+N_LOCALIZACOES_R
+
+NÃO introduzir histórico por apólice agregado que possa reproduzir
+o problema das mega/group policies.
+
+NÃO adicionar novas features por conta própria.
+
+==================================================
+HISTÓRICO SEGURO
+==================================================
+
+O modelo final utiliza histórico por item seguro baseado
+conceitualmente na chave:
+
+COD_APO
++
+COD_ITEM
++
+COD_MOD
++
+UF
+
+sempre utilizando apenas eventos anteriores.
+
+Nesta STEP, entretanto:
+
+NÃO recriar pipeline histórico bruto.
+
+O executor TypeScript receberá as features finais já calculadas
+conforme o contrato do modelo portátil.
+
+==================================================
+ARQUIVOS ESPERADOS
+==================================================
+
+Antes de escrever código, localize no projeto ou nos arquivos
+disponibilizados os artefatos exportados do Colab.
+
+Esperamos algo equivalente a:
+
+agrorisk_modelo_portatil_v1.json
+
+agrorisk_golden_vectors_v1.csv
+
+agrorisk_teste_paridade_v1.csv
+
+Pode também existir:
+
+agrorisk_coeficientes_v1.csv
+
+agrorisk_referencia_score_valid_2019.parquet
+
+agrorisk_distribuicao_score_v1.csv
+
+Os três primeiros são os mais importantes para esta etapa.
+
+==================================================
+PASSO 1 — SOMENTE INSPEÇÃO
+==================================================
+
+ANTES DE ALTERAR QUALQUER ARQUIVO:
+
+localize os artefatos realmente disponíveis.
+
+Informe:
+
+1. caminhos completos;
+2. nomes;
+3. formato;
+4. tamanho;
+5. colunas dos CSVs;
+6. estrutura principal do JSON portátil.
+
+Para o JSON portátil, identifique explicitamente:
+
+- versão do modelo;
+- intercept;
+- features numéricas;
+- médias/scaler center;
+- escalas/scaler scale;
+- categorias COD_MOD;
+- categorias UF;
+- coeficientes;
+- ordem exata das features;
+- tratamento de categorias desconhecidas;
+- distribuição/referência usada para score relativo;
+- qualquer metadata adicional.
+
+==================================================
+TRAVA DE SEGURANÇA
+==================================================
+
+Se QUALQUER um destes itens essenciais não estiver disponível:
+
+- modelo portátil JSON;
+- Golden Vectors;
+- informações necessárias para calcular o score relativo;
+
+PARE.
+
+NÃO tente reconstruir manualmente o artefato usando os coeficientes
+descritos no prompt.
+
+NÃO estime valores faltantes.
+
+NÃO invente scaler.
+
+NÃO invente categorias.
+
+NÃO implemente aproximação.
+
+Informe exatamente o que está faltando.
+
+==================================================
+SE TODOS OS ARTEFATOS NECESSÁRIOS EXISTIREM
+==================================================
+
+Somente então prossiga.
+
+==================================================
+PASTA ISOLADA
+==================================================
+
+Crie somente:
+
+src/lib/ml-risk/
+
+Arquivos permitidos nesta STEP, se necessários:
+
+src/lib/ml-risk/types.ts
+src/lib/ml-risk/model-v1.ts
+src/lib/ml-risk/model-v1.data.ts
+
+e testes isolados em:
+
+test/ml-risk-v1.parity.test.ts
+
+A organização pode ser ajustada minimamente se o formato real
+dos artefatos exigir.
+
+NÃO criar:
+
+server function
+API route
+React hook
+component
+context
+feature flag
+adapter para Risk Engine
+recommendation
+database repository
+
+==================================================
+ARTEFATO PORTÁTIL
+==================================================
+
+Preferencialmente não duplicar manualmente dezenas de valores
+do JSON se for possível incorporá-lo de forma segura e tipada.
+
+Porém:
+
+NÃO alterar configuração de build para isso.
+
+NÃO adicionar dependências.
+
+NÃO alterar package.json.
+
+NÃO alterar bun.lock.
+
+Se importar JSON diretamente exigir mudança de configuração,
+prefira transformar o conteúdo em um arquivo TypeScript gerado
+estaticamente dentro de:
+
+src/lib/ml-risk/
+
+mantendo fidelidade exata ao JSON.
+
+NÃO redigitar valores à mão se puder evitar.
+
+==================================================
+TIPOS DE INPUT
+==================================================
+
+Agora sim poderá ser criado o contrato exato das features ML.
+
+O tipo deverá refletir exatamente as entradas exigidas
+pelo artefato portátil.
+
+Não adicionar campos que o modelo não utiliza.
+
+Não remover campos que o modelo utiliza.
+
+Para categóricas:
+
+COD_MOD
+UF
+
+preservar exatamente a semântica esperada pelo encoder.
+
+==================================================
+TRANSFORMAÇÕES
+==================================================
+
+Implemente SOMENTE as transformações que estiverem explicitamente
+representadas pelo artefato portátil ou necessárias para reproduzir
+o pipeline Python.
+
+A ordem matemática deve corresponder ao Python.
+
+Exemplo conceitual:
+
+raw engineered features
+        ↓
+seleção/ordenação
+        ↓
+StandardScaler nas numéricas
+        ↓
+OneHotEncoder nas categóricas
+        ↓
+vetor final
+        ↓
+coeficientes
+        ↓
+intercept + dot product
+        ↓
+sigmoid
+        ↓
+PROBA_AMOSTRAL
+        ↓
+percentil contra referência VALID2019
+        ↓
+mlRelativeScore 0–100
+
+MAS:
+
+use a ordem REAL encontrada no JSON.
+
+Não presuma que este desenho é suficiente se o artefato indicar
+algo diferente.
+
+==================================================
+SIGMOID
+==================================================
+
+A regressão logística deverá calcular conceitualmente:
+
+logit =
+intercept
++
+soma(feature_i * coefficient_i)
+
+sampleProbability =
+1 / (1 + exp(-logit))
+
+Implemente de forma numericamente estável se necessário.
+
+Não arredondar valores intermediários sem necessidade.
+
+==================================================
+SCORE RELATIVO
+==================================================
+
+O mlRelativeScore deverá reproduzir exatamente o critério usado
+pelo Colab.
+
+Esperado conceitualmente:
+
+100 * count(reference <= probability) / N
+
+Mas confirme a implementação real nos artefatos/golden vectors.
+
+NÃO substituir por:
+
+probability * 100
+
+NÃO usar threshold 0.145476 para gerar o score.
+
+O threshold congelado da validação era apenas diagnóstico técnico.
+
+==================================================
+CATEGORIAS DESCONHECIDAS
+==================================================
+
+O pipeline original utiliza comportamento equivalente a categorias
+desconhecidas contribuindo com zero no one-hot, quando aplicável.
+
+Confirme isso no artefato.
+
+NÃO inventar categoria "__UNKNOWN__" sem evidência.
+
+NÃO lançar erro automaticamente para UF/COD_MOD desconhecido
+se o pipeline Python utilizava ignore.
+
+A implementação TypeScript deve reproduzir o Python.
+
+==================================================
+DECOMPOSIÇÃO POR FAMÍLIA
+==================================================
+
+Ainda NÃO implementar decomposição ML para UI nesta STEP,
+a menos que ela seja absolutamente necessária para testar
+o modelo básico.
+
+Ou seja:
+
+NÃO criar agora:
+
+climateScore 0–100
+structureScore 0–100
+historyScore 0–100
+
+NÃO transformar coeficientes absolutos em percentuais.
+
+NÃO assumir que as três famílias somam 100.
+
+A decomposição de logit será tratada posteriormente.
+
+Nesta STEP queremos primeiro provar que:
+
+TypeScript == Python.
+
+==================================================
+SAÍDA DO EXECUTOR
+==================================================
+
+O executor isolado poderá produzir algo mínimo como:
+
+{
+  modelVersion,
+  sampleProbabilityInternal,
+  mlRelativeScore
+}
+
+Não precisa ainda retornar MlRiskResult completo se os componentes
+de explicabilidade ainda não forem calculados.
+
+Não force integração prematura com:
+
+src/lib/risk-engine-v2/types.ts
+
+Nenhum consumidor externo deve existir nesta etapa.
+
+==================================================
+GOLDEN VECTORS
+==================================================
+
+O teste de paridade deve usar os Golden Vectors exportados
+pelo Python.
+
+Para cada vetor disponível, comparar pelo menos:
+
+1. probabilidade amostral Python;
+2. probabilidade amostral TypeScript;
+3. score relativo Python;
+4. score relativo TypeScript.
+
+Se os Golden Vectors também contiverem:
+
+- logit;
+- features transformadas;
+- categorias;
+- outros resultados intermediários;
+
+utilize-os para diagnóstico quando útil.
+
+==================================================
+TOLERÂNCIA NUMÉRICA
+==================================================
+
+Antes de definir uma tolerância, inspecione a precisão dos valores
+exportados nos Golden Vectors.
+
+Use tolerância pequena e tecnicamente justificável.
+
+Preferência inicial:
+
+probabilidade absoluta:
+<= 1e-10
+
+Se a serialização dos dados não permitir isso, explique e utilize
+a menor tolerância que reproduza corretamente o Python.
+
+Para score relativo:
+
+se o cálculo for determinístico contra a mesma referência,
+esperamos correspondência extremamente próxima ou exata,
+dependendo da serialização.
+
+NÃO definir tolerância ampla apenas para fazer o teste passar.
+
+==================================================
+TESTES DE PARIDADE
+==================================================
+
+Crie:
+
+test/ml-risk-v1.parity.test.ts
+
+Esse teste deve ser independente dos testes V1.
+
+Ele deve:
+
+- carregar/utilizar Golden Vectors;
+- executar o modelo portátil TypeScript;
+- comparar com os resultados Python;
+- falhar com mensagem útil quando houver divergência.
+
+Não modificar os três testes V1 existentes.
+
+==================================================
+NÃO MASCARE DIVERGÊNCIAS
+==================================================
+
+Se a paridade falhar:
+
+NÃO arredonde resultados apenas para passar.
+
+NÃO aumente tolerância arbitrariamente.
+
+NÃO altere Golden Vectors.
+
+NÃO altere coeficientes.
+
+NÃO altere scaler.
+
+NÃO remova casos difíceis.
+
+NÃO substitua expected pelos resultados TypeScript.
+
+Investigue e reporte a origem da diferença.
+
+==================================================
+VALIDAÇÃO COMPLETA
+==================================================
+
+Depois da implementação:
+
+execute:
+
+bun test
+
+Esperamos:
+
+23 testes V1 existentes
++
+novos testes de ML
+
+todos PASS.
+
+Depois:
+
+bun run build
+
+Esperado:
+
+PASS
+
+==================================================
+ISOLAMENTO
+==================================================
+
+Confirme que nenhum arquivo existente fora de testes importa:
+
+src/lib/ml-risk/
+
+Esperado:
+
+ZERO consumidores produtivos.
+
+Também confirme que:
+
+src/lib/risk-engine-v2/types.ts
+
+não foi modificado nesta STEP,
+salvo se houver necessidade absolutamente inevitável.
+
+Se achar necessário modificá-lo:
+
+PARE antes.
+
+Explique o motivo.
+
+Não altere automaticamente.
+
+==================================================
+ARQUIVOS PROIBIDOS
+==================================================
+
+NÃO modificar:
+
+src/lib/risk-score.ts
+src/lib/recommendations.ts
+src/lib/ranking.ts
+src/lib/mock-data.ts
+
+src/routes/admin.tsx
+src/routes/gestor.tsx
+src/routes/operador.tsx
+src/routes/consultor.tsx
+
+src/lib/risk-config.tsx
+src/lib/risk-config.server.ts
+src/lib/api/risk-config.functions.ts
+src/routes/__root.tsx
+
+src/lib/risk-engine-v2/types.ts
+
+test/risk-score-v1.characterization.test.ts
+test/risk-aggregation-v1.characterization.test.ts
+test/recommendations-v1.characterization.test.ts
+
+package.json
+bun.lock
+
+==================================================
+SEM REDE / SEM API
+==================================================
+
+O modelo deve funcionar localmente.
+
+NÃO chamar OpenAI.
+
+NÃO chamar API externa.
+
+NÃO adicionar Secret.
+
+NÃO adicionar OPENAI_API_KEY.
+
+NÃO usar serviço de ML remoto.
+
+NÃO usar Python em runtime.
+
+O resultado final precisa ser TypeScript local.
+
+==================================================
+GIT
+==================================================
+
+No final apenas INSPECIONE o estado Git.
+
+NÃO faça stage.
+
+NÃO faça commit.
+
+NÃO faça push.
+
+Separe no relatório:
+
+1. arquivos técnicos criados/modificados pela STEP 4;
+2. attached_assets automáticos do Replit;
+3. qualquer checkpoint automático criado pelo ambiente.
+
+==================================================
+RELATÓRIO FINAL
+==================================================
+
+Ao terminar, responda exatamente com as seguintes seções:
+
+A. ARTEFATOS ENCONTRADOS
+
+Liste os artefatos encontrados e seus caminhos.
+
+B. MODELO PORTÁTIL
+
+Informe:
+
+- modelVersion;
+- intercept;
+- quantidade de features numéricas;
+- quantidade de categóricas;
+- quantidade final de coeficientes;
+- categorias de COD_MOD;
+- categorias de UF;
+- comportamento para categorias desconhecidas;
+- estrutura do scaler;
+- tamanho da referência de score.
+
+Não precisa imprimir todos os coeficientes se forem muitos.
+
+C. ARQUIVOS CRIADOS
+
+Liste todos os arquivos técnicos novos.
+
+D. ARQUIVOS EXISTENTES MODIFICADOS
+
+Esperado:
+
+nenhum arquivo produtivo existente.
+
+E. IMPLEMENTAÇÃO
+
+Explique resumidamente a ordem matemática realmente utilizada.
+
+F. PARIDADE
+
+Informe:
+
+- quantidade de Golden Vectors;
+- maior erro absoluto de probabilidade;
+- maior erro absoluto de score relativo;
+- tolerância adotada;
+- quantidade de casos aprovados;
+- quantidade de casos reprovados.
+
+G. TESTES
+
+Informe:
+
+bun test
+
+Total pass:
+Total fail:
+
+Separar:
+
+testes V1
+testes ML
+
+H. BUILD
+
+bun run build:
+
+PASS/FAIL
+
+I. ISOLAMENTO
+
+Informe:
+
+quantos consumidores produtivos importam src/lib/ml-risk/
+
+Esperado:
+
+0
+
+Risk Engine V1 alterado?
+NÃO
+
+Risk Engine V2 conectado ao ML?
+NÃO
+
+UI conectada ao ML?
+NÃO
+
+J. SEMÂNTICA
+
+Confirme:
+
+mlRelativeScore é percentil relativo?
+SIM
+
+É probabilidade absoluta de sinistro?
+NÃO
+
+sampleProbabilityInternal é probabilidade da amostra case-control?
+SIM
+
+Pode ser apresentada ao usuário como incidência real?
+NÃO
+
+K. FEATURES PROIBIDAS
+
+Confirme se estão ausentes:
+
+N_ESTADOS_ATIVOS
+COBERTURA
+CULTURA
+N_LOCALIZACOES_R
+
+L. GIT
+
+Informe:
+
+- branch;
+- HEAD;
+- arquivos técnicos pendentes;
+- attached_assets;
+- working tree;
+- checkpoints automáticos observados.
+
+NÃO tente corrigir checkpoints automáticos.
+
+M. PRÓXIMA ETAPA
+
+NÃO IMPLEMENTE.
+
+Apenas diga se a paridade está comprovada e se a base está pronta
+para a próxima etapa.
+
+==================================================
+CRITÉRIO DE PARADA
+==================================================
+
+Se os artefatos necessários não existirem:
+
+PARE NA SEÇÃO A.
+
+Se houver divergência de paridade:
+
+PARE NA SEÇÃO F.
+
+Não prossiga para integração.
+
+==================================================
+PARE AO FINAL
+==================================================
+
+NÃO conecte o ML ao Risk Engine V2.
+
+NÃO altere a UI.
+
+NÃO altere Sompo.
+
+NÃO altere nenhuma persona.
+
+NÃO implemente STEP 5 automaticamente.
