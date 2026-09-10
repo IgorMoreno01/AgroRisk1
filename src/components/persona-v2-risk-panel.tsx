@@ -3,8 +3,7 @@ import { Activity, ArrowDownRight, ArrowUpRight, ShieldCheck, Target } from "luc
 import { Card, SectionTitle } from "@/components/app-layout";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { RiskBadge } from "@/components/risk-badge";
-import { operations } from "@/lib/mock-data";
-import { recommendationsForOperation } from "@/lib/recommendations";
+import type { GeneratedRecommendation } from "@/lib/recommendations";
 import { evaluateRiskEngineV2Demo } from "@/lib/risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result } from "@/lib/risk-engine-v2/types";
 import { getStoredSessionToken } from "@/lib/auth";
@@ -80,25 +79,53 @@ function DriverCard({
   );
 }
 
-export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
+export function PersonaV2RiskPanel({
+  persona,
+  result: providedResult,
+  recommendation: providedRecommendation,
+}: {
+  persona: RiskPersona;
+  result?: RiskEngineV2Result;
+  recommendation?: GeneratedRecommendation;
+}) {
   const [mlWeight, setMlWeight] = useState(70);
-  const result = useMemo(() => getRiskEngineV2DemoResult(mlWeight), [mlWeight]);
+  const result = useMemo(
+    () => providedResult ?? getRiskEngineV2DemoResult(mlWeight),
+    [mlWeight, providedResult],
+  );
+  const [demoRecommendation, setDemoRecommendation] = useState<GeneratedRecommendation>();
   const copy = personaCopy[persona];
-  const scenario =
-    operations.find((operation) => operation.status === "Em andamento") ?? operations[0];
-  const recommendation = recommendationsForOperation(scenario, persona)[0];
+  const recommendation = providedRecommendation ?? demoRecommendation;
   const mlDriver = result.drivers.find((driver) => driver.source === "ml");
   const operationalDriver = result.drivers.find(
     (driver) => driver.source === "operational_rules",
   );
 
   useEffect(() => {
+    if (providedResult) return;
     const token = getStoredSessionToken();
     if (!token) return;
     void getRiskEngineV2Configuration({ data: { token } }).then((response) => {
       if (response.ok) setMlWeight(response.configuration.mlWeight);
     });
-  }, []);
+  }, [providedResult]);
+
+  useEffect(() => {
+    if (providedRecommendation) return;
+    let cancelled = false;
+    void Promise.all([import("@/lib/mock-data"), import("@/lib/recommendations")]).then(
+      ([mockData, recommendationModule]) => {
+        if (cancelled) return;
+        const scenario =
+          mockData.operations.find((operation) => operation.status === "Em andamento") ??
+          mockData.operations[0];
+        setDemoRecommendation(
+          recommendationModule.recommendationsForOperation(scenario, persona)[0],
+        );
+      },
+    );
+    return () => { cancelled = true; };
+  }, [persona, providedRecommendation]);
 
   return (
     <section
@@ -114,8 +141,9 @@ export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
             </div>
             <p className="mt-1 text-sm text-muted-foreground">{copy.description}</p>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Cenário demonstrativo do MVP; não representa uma operação produtiva real e algumas
-              fontes podem utilizar dados simulados/fallback.
+              {providedResult
+                ? "Resultado da operação atual; complementos sintéticos são identificados separadamente."
+                : "Cenário demonstrativo do MVP; não representa uma operação produtiva real e algumas fontes podem utilizar dados simulados/fallback."}
             </p>
           </div>
           <span className="w-fit shrink-0 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">

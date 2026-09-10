@@ -2,7 +2,7 @@ import { Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge } from "@/components/risk-badge";
 import { cn } from "@/lib/utils";
 import { dominantFactorLabel, type RiskResult, type ScoreBreakdown } from "@/lib/risk-score";
-import type { Machine, Area, Operation } from "@/lib/mock-data";
+import type { Alert, Machine, Area, HistoryEntry, Operation } from "@/lib/mock-data";
 import type { GeneratedRecommendation, NextBestAction } from "@/lib/recommendations";
 import type { WaterGeoData, RouteData } from "@/lib/external-data.types";
 import {
@@ -293,20 +293,31 @@ const eventStyle: Record<EventType, { icon: React.ElementType; color: string; bg
 };
 
 export function RecentHistoryCard({
-  operation, result, area, recommendation,
+  operation, result, area, recommendation, history = [], alerts = [],
 }: {
   operation: Operation;
   result: RiskResult;
   area: Area;
   recommendation?: GeneratedRecommendation;
+  history?: HistoryEntry[];
+  alerts?: Alert[];
 }) {
   const events: Array<{ time: string; type: EventType; title: string; desc: string }> = [
-    { time: "07:12", type: "start", title: "Operação iniciada", desc: `${operation.id} iniciada no ${area.name}` },
-    { time: "07:14", type: "score", title: "Score atualizado",  desc: `Risco ${result.level} calculado em ${result.finalScore}/100` },
-    { time: "07:15", type: "rec",   title: "Recomendação gerada", desc: recommendation?.title ?? "Nenhuma ação adicional recomendada" },
-    { time: "07:16", type: "alert", title: "Alerta registrado",   desc: `Fator responsável: ${recommendation?.factor ?? result.breakdown.mainFactor}` },
-    { time: "07:17", type: "ack",   title: "Ação confirmada",     desc: "Operador confirmou ciência da recomendação" },
-    { time: "07:19", type: "score", title: "Score recalculado",   desc: recommendation ? `Aguardando confirmação: ${recommendation.title}` : "Operação mantida sob monitoramento" },
+    { time: operation.start, type: "start", title: "Operação iniciada", desc: `${operation.id} iniciada no ${area.name}` },
+    { time: "atual", type: "score", title: "Score calculado", desc: `Risco ${result.level} calculado em ${result.finalScore}/100` },
+    { time: "atual", type: "rec", title: "Recomendação gerada", desc: recommendation?.title ?? "Nenhuma ação adicional recomendada" },
+    ...alerts.map((alert) => ({
+      time: alert.time,
+      type: "alert" as const,
+      title: alert.type,
+      desc: alert.message,
+    })),
+    ...history.map((entry) => ({
+      time: entry.date,
+      type: "ack" as const,
+      title: "Registro anterior",
+      desc: entry.summary,
+    })),
   ];
 
   return (

@@ -83,6 +83,97 @@ export async function listGestorRelationalScope(limit = 5) {
   };
 }
 
+export async function getOperatorRelationalScope(operatorId: string) {
+  const sql = db();
+  const currentOperation = sql`
+    SELECT o.*
+    FROM agrorisk.operations o
+    WHERE o.operator_id = ${operatorId}
+    ORDER BY (o.status = 'Em andamento') DESC, o.scheduled_at DESC, o.id
+    LIMIT 1
+  `;
+  const [contextRows, countRows, alertRows, historyRows] = await Promise.all([
+    sql`
+      WITH current_operation AS (${currentOperation})
+      SELECT
+        json_build_object(
+          'id', u.id, 'name', u.name, 'clientId', u.client_id
+        ) AS operator,
+        json_build_object(
+          'id', c.id, 'name', c.name, 'city', c.municipality, 'state', c.state,
+          'location', c.municipality || ' / ' || c.state, 'mainOperation', c.main_operation,
+          'machineCount', 1, 'machines', 1, 'avgScore', 0, 'level', 'baixo'
+        ) AS client,
+        json_build_object(
+          'id', a.id, 'name', a.name, 'clientId', a.client_id, 'client', c.name,
+          'type', a.type, 'condition', a.condition, 'nearWater', a.near_water,
+          'envRisk', a.environmental_risk, 'score', 0, 'crop', a.crop,
+          'hectares', a.hectares::float8
+        ) AS area,
+        json_build_object(
+          'id', m.id, 'code', m.code, 'name', m.name, 'model', m.model, 'type', m.type,
+          'clientId', m.client_id, 'client', c.name, 'areaId', m.area_id, 'area', a.name,
+          'operatorId', m.operator_id, 'operator', u.name, 'status', m.status,
+          'score', 0, 'level', 'baixo', 'lastAlert', m.last_alert, 'lastUpdate', m.last_update
+        ) AS machine,
+        json_build_object(
+          'id', o.id, 'machineId', o.machine_id, 'machine', o.machine_id,
+          'operatorId', o.operator_id, 'clientId', o.client_id, 'areaId', o.area_id,
+          'area', a.name, 'type', o.type, 'scheduledAt', o.scheduled_at::text,
+          'start', o.start_label, 'duration', o.duration_label, 'status', o.status,
+          'score', 0, 'factors', coalesce((
+            SELECT json_agg(orf.risk_factor_id ORDER BY orf.risk_factor_id)
+            FROM agrorisk.operation_risk_factors orf WHERE orf.operation_id = o.id
+          ), '[]'::json), 'recommendationId', coalesce(o.recommendation_id, '')
+        ) AS operation
+      FROM current_operation o
+      JOIN agrorisk.users u ON u.id = o.operator_id AND u.profile = 'operador'
+      JOIN agrorisk.machines m
+        ON m.id = o.machine_id AND m.operator_id = o.operator_id
+        AND m.client_id = o.client_id AND m.area_id = o.area_id
+      JOIN agrorisk.areas a ON a.id = o.area_id AND a.client_id = o.client_id
+      JOIN agrorisk.clients c ON c.id = o.client_id
+    `,
+    sql`
+      SELECT count(*)::int AS count
+      FROM agrorisk.operations
+      WHERE operator_id = ${operatorId}
+    `,
+    sql`
+      WITH current_operation AS (${currentOperation})
+      SELECT a.id, a.machine_id AS "machineId", a.machine_id AS machine,
+        a.operation_id AS "operationId", a.type, a.criticality,
+        a.risk_level AS level, a.message, coalesce(a.main_factor_id, '') AS "mainFactor",
+        a.status, a.occurred_at::text AS datetime, a.time_label AS time
+      FROM agrorisk.alerts a
+      JOIN current_operation o ON a.operation_id = o.id AND a.machine_id = o.machine_id
+      ORDER BY a.occurred_at DESC, a.id
+      LIMIT 10
+    `,
+    sql`
+      WITH current_operation AS (${currentOperation})
+      SELECT h.id, h.occurred_on::text AS date, h.machine_id AS "machineId",
+        h.operation_id AS "operationId", h.summary, h.score
+      FROM agrorisk.operation_history h
+      JOIN current_operation o ON h.machine_id = o.machine_id
+      ORDER BY h.occurred_on DESC, h.id
+      LIMIT 10
+    `,
+  ]);
+  const context = contextRows[0];
+  if (!context) throw new Error(`Operador PostgreSQL sem operação vinculada: ${operatorId}`);
+  return {
+    operator: context.operator as { id: string; name: string; clientId: string },
+    clients: parseClients([context.client]),
+    areas: parseAreas([context.area]),
+    machines: parseMachines([context.machine]),
+    operations: parseOperations([context.operation]),
+    alerts: parseAlerts([...alertRows]),
+    history: parseHistory([...historyRows]),
+    operationCount: Number(countRows[0]?.count ?? 0),
+  };
+}
+
 async function queryClients(id?: string) {
   const sql = db();
   const filter = id !== undefined ? sql`WHERE c.id = ${id}` : sql``;

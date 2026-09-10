@@ -9,27 +9,13 @@ import { NextBestActionCard } from "@/components/next-best-action";
 import {
   OperationalSummary, GeoContextCard, RecentHistoryCard,
 } from "@/components/operador-cards";
-import {
-  getMachine, getArea, operationsByOperator,
-} from "@/lib/mock-data";
-import {
-  riskResultForOperation,
-  deriveWeatherFromReal, deriveWaterDistanceFromReal,
-  inputsForOperationWithOverrides, inclinationLabel,
-} from "@/lib/risk-score";
-import {
-  recommendationsForOperation, nextBestActionForOperation,
-  telemetrySafetyRecommendationsForOperation,
-} from "@/lib/recommendations";
 import { AlertTriangle, Cloud, Droplets, Wind, MapPin, Mountain, Loader2, Wifi, WifiOff } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
-import { getProfileAlerts } from "@/lib/profile-alerts";
 import { getWeather } from "@/lib/api/weather.functions";
 import { getWaterFeatures } from "@/lib/api/water-geo.functions";
 import { getRouting } from "@/lib/api/routing.functions";
 import { getElevation } from "@/lib/api/terrain.functions";
-import { getAreaCoords } from "@/lib/area-coordinates";
 import type { WeatherData, WaterGeoData, RouteData, ElevationData } from "@/lib/external-data.types";
 import {
   ClimateSection,
@@ -40,8 +26,11 @@ import {
   DataSourcesPanel,
   RiskFactorsWithSources,
 } from "@/components/external-data-sections";
-import { useRiskConfig } from "@/lib/risk-config";
+import { getStoredSessionToken } from "@/lib/auth";
+import { getOperadorDashboard } from "@/lib/api/operador-dashboard.functions";
+import type { OperadorDashboardSnapshot } from "@/lib/operador-dashboard-types";
 import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
+import type { ProfileAlertsBundle } from "@/lib/profile-alerts";
 
 export const Route = createFileRoute("/operador")({
   head: () => ({ meta: [{ title: "AgroRisk · Operador" }] }),
@@ -52,14 +41,10 @@ export const Route = createFileRoute("/operador")({
   ),
 });
 
-const OPERATOR_ID = "USR-OP-1";
-
 function OperadorPage() {
-  const { weights } = useRiskConfig();
-  const operation = operationsByOperator(OPERATOR_ID)[0]!;
-  const machine = getMachine(operation.machineId)!;
-  const area = getArea(operation.areaId)!;
-  const coords = getAreaCoords(operation.areaId);
+  const [snapshot, setSnapshot] = useState<OperadorDashboardSnapshot | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   // ---- Dados externos (carregados assincronamente) ----
   const [weather, setWeather] = useState<WeatherData | null>(null);
@@ -72,6 +57,28 @@ function OperadorPage() {
   const [loadingTerrain, setLoadingTerrain] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoadError(null);
+    const token = getStoredSessionToken();
+    if (!token) {
+      setLoadError("Sessão do Operador não encontrada.");
+      return;
+    }
+    void getOperadorDashboard({ data: { token } })
+      .then((response) => {
+        if (cancelled) return;
+        if (!response.ok) throw new Error(response.error);
+        setSnapshot(response.snapshot);
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "Não foi possível carregar a operação.");
+      });
+    return () => { cancelled = true; };
+  }, [attempt]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const coords = snapshot.geo;
     // Origem simulada: ~5 km ao norte da área (pátio da fazenda)
     const originLat = coords.lat + 0.045;
     const originLon = coords.lon;
@@ -95,37 +102,54 @@ function OperadorPage() {
       .then(setElevation)
       .catch((e) => console.warn("[Operador] terrain fetch failed:", e))
       .finally(() => setLoadingTerrain(false));
-  }, [coords.lat, coords.lon]);
+  }, [snapshot?.geo.lat, snapshot?.geo.lon]);
 
-  // ---- Score: recalcula com dados reais quando disponíveis ----
-  const scoreContext = (() => {
-    const weatherOverride = weather ? deriveWeatherFromReal(weather) : undefined;
-    const waterOverride = waterGeo ? deriveWaterDistanceFromReal(waterGeo) : undefined;
-    return riskResultForOperation(operation, weights, {
-      ...(weatherOverride ? { weather: weatherOverride } : {}),
-      ...(waterOverride ? { waterDistance: waterOverride } : {}),
-    });
-  })();
+  if (loadError) {
+    return (
+      <AppLayout title="Painel do Operador" subtitle="Contexto individual da operação">
+        <Card>
+          <SectionTitle title="Não foi possível carregar a operação" description={loadError} />
+          <button onClick={() => setAttempt((value) => value + 1)} className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">
+            Tentar novamente
+          </button>
+        </Card>
+      </AppLayout>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <AppLayout title="Painel do Operador" subtitle="Contexto individual da operação">
+        <Card>
+          <SectionTitle title="Carregando operação" description="Consultando o contexto individual no PostgreSQL…" />
+          <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full w-1/2 animate-pulse rounded-full bg-primary" /></div>
+        </Card>
+      </AppLayout>
+    );
+  }
+
+  const { operation, machine, area, client, risk: scoreContext, weights } = snapshot;
   const breakdown = scoreContext.breakdown;
   const score = scoreContext.finalScore;
   const level = scoreContext.level;
   const isHigh = level === "alto";
-
-  const riskOptions = {
-    weights,
-    result: scoreContext,
-    overrides: {
-      ...(weather ? { weather: deriveWeatherFromReal(weather) } : {}),
-      ...(waterGeo ? { waterDistance: deriveWaterDistanceFromReal(waterGeo) } : {}),
-    },
+  const recs = [snapshot.recommendation];
+  const telemetryRecs = snapshot.telemetryRecommendations;
+  const nextAction = snapshot.nextAction;
+  const alertsBundle: ProfileAlertsBundle = {
+    sectionId: "alertas",
+    sectionTitle: `Alertas da operação${snapshot.alertsSource === "demo" ? " · demonstração" : ""}`,
+    sectionDescription: `Filtrados por ${operation.id} e ${machine.id}`,
+    alerts: snapshot.alerts.map((alert) => ({
+      id: alert.id,
+      title: alert.type,
+      context: `${machine.id} · Operação ${operation.id}`,
+      detail: alert.message,
+      criticality: alert.criticality,
+      status: alert.status,
+      time: alert.time,
+    })),
   };
-  const recs = recommendationsForOperation(operation, "operador", riskOptions);
-  const telemetryRecs = telemetrySafetyRecommendationsForOperation(
-    operation,
-    "operador",
-    riskOptions.overrides,
-  );
-  const nextAction = nextBestActionForOperation(operation, riskOptions);
 
   // ---- Cards de condição: real quando disponível, mock como fallback ----
   const climaValue = loadingWeather
@@ -139,20 +163,18 @@ function OperadorPage() {
     : weather
     ? `${Math.round(weather.current.windSpeed)} km/h ${weather.current.windDirectionLabel}`
     : "14 km/h NE";
-  const inclinationValue = inclinationLabel(
-    inputsForOperationWithOverrides(operation, riskOptions.overrides).inclinationDegrees,
-  );
+  const inclinationValue = `${snapshot.telemetry.inclinationDegrees.toFixed(1)}° (${snapshot.telemetry.inclinationStatus})`;
 
   const conditions = [
     { icon: Cloud,    label: "Clima",   value: climaValue },
-    { icon: Droplets, label: "Solo",    value: area.condition },
+    { icon: Droplets, label: "Solo",    value: `${area.condition}${snapshot.fieldSources.areaCondition === "synthetic" ? " · sintético" : ""}` },
     { icon: Wind,     label: "Vento",   value: ventoValue },
     { icon: Mountain, label: "Inclinação", value: `${inclinationValue} · MPU6050 simulado` },
-    { icon: MapPin,   label: "Posição", value: `${area.name} · ${area.type}` },
+    { icon: MapPin,   label: "Posição", value: `${area.name} · ${area.type} · contexto sintético` },
   ];
 
   return (
-    <AppLayout title="Painel do Operador" subtitle={`Operação ${operation.id} · ${machine.client}`}>
+    <AppLayout title="Painel do Operador" subtitle={`Operação ${operation.id} · ${client.name} · ${snapshot.source === "postgres" ? "PostgreSQL" : "fallback demonstrativo"}`}>
       <div id="topo" className="scroll-mt-20" />
       {isHigh && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border-2 border-danger/50 bg-danger/10 p-4">
@@ -167,7 +189,7 @@ function OperadorPage() {
         </div>
       )}
 
-      <PersonaV2RiskPanel persona="operador" />
+      <PersonaV2RiskPanel persona="operador" result={snapshot.engineResult} recommendation={snapshot.recommendation} />
 
       {/* Topo */}
       <div id="operacao" className="mt-6 grid scroll-mt-20 gap-4 lg:grid-cols-3">
@@ -191,7 +213,7 @@ function OperadorPage() {
             <div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">Operador</div>
               <div className="mt-1 text-lg font-semibold text-foreground">{machine.operator}</div>
-              <div className="text-sm text-muted-foreground">Turno matutino · {operation.duration}</div>
+               <div className="text-sm text-muted-foreground">Turno {snapshot.shift.value.toLowerCase()} (sintético) · {operation.duration}</div>
             </div>
           </div>
 
@@ -337,14 +359,19 @@ function OperadorPage() {
         />
       </div>
 
-      {/* Histórico recente */}
       <section id="historico" className="mt-6 scroll-mt-20">
-        <RecentHistoryCard operation={operation} result={scoreContext} area={area} recommendation={recs[0]} />
+        <RecentHistoryCard
+          operation={operation}
+          result={scoreContext}
+          area={area}
+          recommendation={snapshot.recommendation}
+          history={snapshot.history}
+          alerts={snapshot.alerts}
+        />
       </section>
 
-      {/* Alertas da operação (US 5 · personalização por perfil) */}
       <div className="mt-6">
-        <ProfileAlertsSection bundle={getProfileAlerts("operador")} />
+        <ProfileAlertsSection bundle={alertsBundle} />
       </div>
     </AppLayout>
   );
