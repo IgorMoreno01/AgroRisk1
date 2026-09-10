@@ -34,6 +34,7 @@ import { getWeather } from "@/lib/api/weather.functions";
 import { CLIENT_COORDS } from "@/lib/area-coordinates";
 import type { WeatherData } from "@/lib/external-data.types";
 import { useRiskConfig } from "@/lib/risk-config";
+import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
 
 export const Route = createFileRoute("/gestor")({
   head: () => ({ meta: [{ title: "AgroRisk · Dashboard do Gestor" }] }),
@@ -287,6 +288,8 @@ function GestorPage() {
         </div>
         <Kpi label="Alertas críticos" value={String(critical)} hint="Em aberto" icon={AlertTriangle} tone="danger" />
       </div>
+
+      <PersonaV2RiskPanel persona="gestor" />
 
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">

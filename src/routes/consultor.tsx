@@ -20,6 +20,7 @@ import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getProfileAlerts } from "@/lib/profile-alerts";
 import { useRiskConfig } from "@/lib/risk-config";
+import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
 
 export const Route = createFileRoute("/consultor")({
   head: () => ({ meta: [{ title: "AgroRisk · Consultor" }] }),
@@ -73,7 +74,9 @@ function ConsultorPage() {
         })}
       </div>
 
-      <div id="analise" className="grid scroll-mt-20 gap-4 lg:grid-cols-3">
+      <PersonaV2RiskPanel persona="consultor" />
+
+      <div id="analise" className="mt-6 grid scroll-mt-20 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <SectionTitle title="Resumo do cliente" />
           <div className="flex items-start gap-4">

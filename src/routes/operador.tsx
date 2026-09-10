@@ -41,6 +41,7 @@ import {
   RiskFactorsWithSources,
 } from "@/components/external-data-sections";
 import { useRiskConfig } from "@/lib/risk-config";
+import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
 
 export const Route = createFileRoute("/operador")({
   head: () => ({ meta: [{ title: "AgroRisk · Operador" }] }),
@@ -166,8 +167,10 @@ function OperadorPage() {
         </div>
       )}
 
+      <PersonaV2RiskPanel persona="operador" />
+
       {/* Topo */}
-      <div id="operacao" className="grid scroll-mt-20 gap-4 lg:grid-cols-3">
+      <div id="operacao" className="mt-6 grid scroll-mt-20 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <SectionTitle
             title="Operação em andamento"
