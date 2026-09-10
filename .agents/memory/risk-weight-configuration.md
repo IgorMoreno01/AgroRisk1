@@ -1,6 +1,6 @@
 ---
 name: Configuração de pesos de risco
-description: Decisão de persistência e segurança para os pesos climático e operacional no MVP.
+description: Decisões de persistência, segurança e propagação dos pesos V1 e V2 no MVP.
 ---
 
 Os pesos de risco climático e operacional são autoritativos apenas no servidor e usam
@@ -15,6 +15,17 @@ Admin/Sompo. Interfaces de outros perfis apenas leem a configuração compartilh
 evolução para persistência de produção, mantenha o contrato de pesos e a validação
 server-side, adicionando auditoria e armazenamento durável sem deslocar a autoridade para
 o cliente.
+
+Os pesos V2 de ML e regras operacionais seguem a mesma autoridade server-side, com padrão
+70/30 e fallback local 70/30. Gestor, Operador e Consultor devem ler essa configuração
+compartilhada para seus painéis V2, sem oferecer controles de edição.
+
+**Why:** a configuração Sompo deve produzir a mesma composição V2 em todas as personas; um
+default fixo nos painéis consumidores fazia a configuração salva não ter efeito fora do Admin.
+
+**How to apply:** somente Admin/Sompo salva. Painéis V2 das demais personas carregam a
+configuração existente e recalculam o mesmo cenário demonstrativo com o peso recebido. Enquanto
+o armazenamento for em memória, reiniciar o processo restaura 70/30.
 
 A inclinação é exclusivamente uma camada de segurança operacional: pode gerar classificação,
 alerta, orientação ao operador, acionamento de buzzer e registro, mas nunca pontos, contribuição

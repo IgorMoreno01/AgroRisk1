@@ -34,8 +34,8 @@ describe("Risk Engine V2 · propagação entre personas", () => {
       expect(source).not.toContain("RISK_ENGINE_V2_DEMO_ML_INPUT");
       expect(source).not.toContain("RISK_ENGINE_V2_DEMO_OPERATIONAL_INPUT");
     }
-    expect(componentSource.match(/getRiskEngineV2DemoResult\(\)/g)?.length).toBe(2);
-    expect(componentSource).toContain("const result = getRiskEngineV2DemoResult()");
+    expect(componentSource).toContain("getRiskEngineV2DemoResult(mlWeight)");
+    expect(componentSource).toContain("getRiskEngineV2Configuration");
   });
 
   test("mantém semântica segura, drivers coerentes e identificação da demo", () => {
@@ -54,6 +54,16 @@ describe("Risk Engine V2 · propagação entre personas", () => {
     expect(adminSource).toContain("evaluateRiskEngineV2Demo");
     expect(adminSource).toContain("Score final de risco");
     expect(evaluateRiskEngineV2Demo().finalScore).toBe(getRiskEngineV2DemoResult().finalScore);
+  });
+
+  test("Gestor, Operador e Consultor refletem os pesos V2 salvos pela Sompo", () => {
+    const results = ["gestor", "operador", "consultor"].map(() =>
+      getRiskEngineV2DemoResult(40),
+    );
+    for (const result of results) {
+      expect(result.weights).toEqual({ ml: 40, operationalRules: 60 });
+    }
+    expect(componentSource).not.toContain("<Slider");
   });
 
   test("V1 permanece disponível no adapter", () => {

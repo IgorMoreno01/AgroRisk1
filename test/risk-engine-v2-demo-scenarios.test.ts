@@ -16,9 +16,9 @@ const panelSource = readFileSync(
 
 describe("Risk Engine V2 · cenários demonstrativos", () => {
   test.each([
-    ["low", 14],
+    ["low", 4],
     ["medium", 11],
-    ["high", 9],
+    ["high", 20],
   ] as const)("%s usa o Golden Vector %i real e retorna resultado válido", (id, vector) => {
     const scenario = RISK_ENGINE_V2_DEMO_SCENARIOS[id];
     const csvRow = goldenCsv.trim().split(/\r?\n/)[vector];
@@ -32,15 +32,20 @@ describe("Risk Engine V2 · cenários demonstrativos", () => {
     expect(result.finalScore).toBeLessThanOrEqual(100);
   });
 
-  test("produz faixas finais ordenadas e cenário alto acima de 85", () => {
+  test("produz cenários plausíveis nas faixas solicitadas e em ordem crescente", () => {
     const low = evaluateRiskEngineV2DemoScenario("low");
     const medium = evaluateRiskEngineV2DemoScenario("medium");
     const high = evaluateRiskEngineV2DemoScenario("high");
 
     expect(low.finalScore).toBeLessThan(medium.finalScore);
     expect(medium.finalScore).toBeLessThan(high.finalScore);
-    expect(high.finalScore).toBeGreaterThanOrEqual(85);
-    expect(high.operationalRules.operationalRulesScore).toBe(100);
+    expect(low.finalScore).toBeGreaterThanOrEqual(25);
+    expect(low.finalScore).toBeLessThanOrEqual(35);
+    expect(medium.finalScore).toBeGreaterThanOrEqual(50);
+    expect(medium.finalScore).toBeLessThanOrEqual(65);
+    expect(high.finalScore).toBeGreaterThanOrEqual(80);
+    expect(high.finalScore).toBeLessThanOrEqual(90);
+    expect(high.operationalRules.operationalRulesScore).toBeLessThan(100);
   });
 
   test("pesos configuráveis alteram naturalmente o score final", () => {

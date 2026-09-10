@@ -11,6 +11,10 @@ const panelSource = readFileSync(
   new URL("../src/components/admin-v2-risk-panel.tsx", import.meta.url),
   "utf8",
 );
+const personaSource = readFileSync(
+  new URL("../src/components/persona-v2-risk-panel.tsx", import.meta.url),
+  "utf8",
+);
 
 afterEach(() => {
   saveRiskEngineV2Configuration({ mlWeight: 70, operationalRulesWeight: 30 });
@@ -68,13 +72,29 @@ describe("Risk Engine V2 · salvamento temporário de pesos", () => {
     expect(panelSource).toContain("Pesos salvos com sucesso");
     expect(panelSource).toContain("Configuração ativa: ML");
     expect(panelSource).toContain('setSaveStatus("success")');
+    expect(panelSource).toContain("Prévia com pesos não salvos");
+    expect(panelSource).toContain("hasUnsavedChanges &&");
   });
 
-  test("não altera as rotas das demais personas", () => {
+  test("pesos 40/60 salvos podem ser usados pelo painel compartilhado das personas", () => {
+    const saved = saveRiskEngineV2Configuration({
+      mlWeight: 40,
+      operationalRulesWeight: 60,
+    });
+    const personaResult = evaluateRiskEngineV2Demo(saved.mlWeight);
+    expect(personaResult.weights).toEqual({ ml: 40, operationalRules: 60 });
+    expect(personaSource).toContain("getRiskEngineV2Configuration");
+    expect(personaSource).toContain("response.configuration.mlWeight");
+    expect(personaSource).toContain("getRiskEngineV2DemoResult(mlWeight)");
+  });
+
+  test("nenhuma persona recebe controles para alterar os pesos", () => {
     for (const route of ["gestor", "operador", "consultor"]) {
       const source = readFileSync(new URL(`../src/routes/${route}.tsx`, import.meta.url), "utf8");
       expect(source).not.toContain("saveRiskEngineV2Configuration");
       expect(source).not.toContain("Salvar pesos");
     }
+    expect(personaSource).not.toContain("<Slider");
+    expect(personaSource).not.toContain("Salvar pesos");
   });
 });

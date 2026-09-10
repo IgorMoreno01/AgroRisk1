@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { Activity, ArrowDownRight, ArrowUpRight, ShieldCheck, Target } from "lucide-react";
 import { Card, SectionTitle } from "@/components/app-layout";
 import { RecommendationCard } from "@/components/recommendation-card";
@@ -6,6 +7,8 @@ import { operations } from "@/lib/mock-data";
 import { recommendationsForOperation } from "@/lib/recommendations";
 import { evaluateRiskEngineV2Demo } from "@/lib/risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result } from "@/lib/risk-engine-v2/types";
+import { getStoredSessionToken } from "@/lib/auth";
+import { getRiskEngineV2Configuration } from "@/lib/api/risk-config.functions";
 
 export type RiskPersona = "gestor" | "operador" | "consultor";
 
@@ -45,8 +48,8 @@ const directionLabel = (direction?: "increase" | "decrease" | "neutral") => {
   return "tem efeito neutro";
 };
 
-export function getRiskEngineV2DemoResult(): RiskEngineV2Result {
-  return evaluateRiskEngineV2Demo();
+export function getRiskEngineV2DemoResult(mlWeight = 70): RiskEngineV2Result {
+  return evaluateRiskEngineV2Demo(mlWeight);
 }
 
 function ScoreMetric({ label, value }: { label: string; value: string | number }) {
@@ -78,7 +81,8 @@ function DriverCard({
 }
 
 export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
-  const result = getRiskEngineV2DemoResult();
+  const [mlWeight, setMlWeight] = useState(70);
+  const result = useMemo(() => getRiskEngineV2DemoResult(mlWeight), [mlWeight]);
   const copy = personaCopy[persona];
   const scenario =
     operations.find((operation) => operation.status === "Em andamento") ?? operations[0];
@@ -87,6 +91,14 @@ export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
   const operationalDriver = result.drivers.find(
     (driver) => driver.source === "operational_rules",
   );
+
+  useEffect(() => {
+    const token = getStoredSessionToken();
+    if (!token) return;
+    void getRiskEngineV2Configuration({ data: { token } }).then((response) => {
+      if (response.ok) setMlWeight(response.configuration.mlWeight);
+    });
+  }, []);
 
   return (
     <section
@@ -107,7 +119,8 @@ export function PersonaV2RiskPanel({ persona }: { persona: RiskPersona }) {
             </p>
           </div>
           <span className="w-fit shrink-0 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
-            Engine {result.engineVersion}
+            Engine {result.engineVersion} · ML {result.weights.ml}% / Regras{" "}
+            {result.weights.operationalRules}%
           </span>
         </div>
       </Card>

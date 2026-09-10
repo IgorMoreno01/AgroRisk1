@@ -11,8 +11,7 @@ import {
 import { Card } from "@/components/app-layout";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { Slider } from "@/components/ui/slider";
-import { recommendationsForOperation } from "@/lib/recommendations";
-import { operations } from "@/lib/mock-data";
+import type { GeneratedRecommendation } from "@/lib/recommendations";
 import {
   DEFAULT_RISK_ENGINE_V2_ML_WEIGHT,
   evaluateRiskEngineV2DemoScenario,
@@ -44,6 +43,69 @@ const dominantLabels = {
 } as const;
 
 const fmt = (value: number) => value.toFixed(2);
+
+export const recommendationForV2Result = (
+  result: RiskEngineV2Result,
+): GeneratedRecommendation => {
+  const mlDriver = result.drivers.find((driver) => driver.source === "ml");
+  const operationalDriver = result.drivers.find(
+    (driver) => driver.source === "operational_rules",
+  );
+  const operationalContext: Record<string, string> = {
+    water_proximity: "a proximidade de água",
+    operation_type: "o tipo da operação",
+    terrain: "a condição do terreno",
+  };
+  const factor = operationalDriver
+    ? operationalContext[operationalDriver.code] ?? operationalDriver.label.toLowerCase()
+    : "as condições operacionais";
+  const dominant =
+    result.dominantComponent === "ml"
+      ? "o score relativo do ML tem a maior contribuição ponderada"
+      : result.dominantComponent === "operational_rules"
+        ? "as regras operacionais têm a maior contribuição ponderada"
+        : "ML e regras têm contribuições ponderadas equivalentes";
+  const mlContext = mlDriver
+    ? ` O principal sinal explicativo do ML é ${mlDriver.label.toLowerCase()}, sem indicar causalidade.`
+    : "";
+
+  if (result.level === "alto") {
+    return {
+      id: "v2-admin-high",
+      title: "Revisar a operação antes de prosseguir",
+      description: `Aplicar ação preventiva prioritária e revisar ${factor} antes de manter ou liberar a operação.`,
+      rationale: `Risco alto: ${dominant}.${mlContext}`,
+      category: operationalDriver?.code === "water_proximity" ? "Rota" : "Prevenção de sinistro",
+      priority: "alta",
+      audience: "admin",
+      factor: operationalDriver?.label ?? "Risk Engine V2",
+    };
+  }
+
+  if (result.level === "medio") {
+    return {
+      id: "v2-admin-medium",
+      title: "Reforçar o acompanhamento da operação",
+      description: `Revisar ${factor} e acompanhar a evolução do risco antes da próxima etapa.`,
+      rationale: `Risco médio: ${dominant}.${mlContext}`,
+      category: operationalDriver?.code === "water_proximity" ? "Rota" : "Prevenção de sinistro",
+      priority: "média",
+      audience: "admin",
+      factor: operationalDriver?.label ?? "Risk Engine V2",
+    };
+  }
+
+  return {
+    id: "v2-admin-low",
+    title: "Manter monitoramento preventivo",
+    description: `Manter os controles atuais e observar ${factor} durante a operação.`,
+    rationale: `Risco baixo: ${dominant}.${mlContext}`,
+    category: operationalDriver?.code === "water_proximity" ? "Rota" : "Prevenção de sinistro",
+    priority: "baixa",
+    audience: "admin",
+    factor: operationalDriver?.label ?? "Risk Engine V2",
+  };
+};
 
 function LevelBadge({ level }: { level: RiskEngineV2Result["level"] }) {
   const labels = {
@@ -203,11 +265,9 @@ export function AdminV2RiskPanel() {
     operationalRulesWeight >= 0 &&
     operationalRulesWeight <= 100 &&
     mlWeight + operationalRulesWeight === 100;
-  const scenario =
-    operations.find((operation) => operation.status === "Em andamento") ?? operations[0];
-  const recommendations = recommendationsForOperation(scenario, "admin");
   const mlDriver = result.drivers.find((driver) => driver.source === "ml");
   const operationalDriver = result.drivers.find((driver) => driver.source === "operational_rules");
+  const recommendation = recommendationForV2Result(result);
 
   useEffect(() => {
     const token = getStoredSessionToken();
@@ -458,6 +518,11 @@ export function AdminV2RiskPanel() {
       </div>
 
       <Card className="border-2 border-primary/40 bg-primary/5">
+        {hasUnsavedChanges && (
+          <div className="mb-4 inline-flex rounded-full border border-warning/40 bg-warning/10 px-3 py-1 text-xs font-semibold text-warning-foreground">
+            Prévia com pesos não salvos
+          </div>
+        )}
         <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-primary">
@@ -531,8 +596,8 @@ export function AdminV2RiskPanel() {
       <Card>
         <h2 className="text-sm font-semibold">Recomendação administrativa</h2>
         <p className="mt-1 mb-3 text-xs text-muted-foreground">
-          A recomendação segue a lógica administrativa existente; o fator operacional dominante
-          apenas contextualiza a leitura.
+          Orientação demonstrativa baseada no nível, componente dominante e principais drivers do
+          cenário V2 atual.
         </p>
         <div className="mb-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-sm">
           Fator operacional dominante:{" "}
@@ -542,9 +607,7 @@ export function AdminV2RiskPanel() {
             )?.label ?? "nenhum fator ativo"}
           </strong>
         </div>
-        {recommendations.slice(0, 1).map((recommendation) => (
-          <RecommendationCard key={recommendation.id} rec={recommendation} />
-        ))}
+        <RecommendationCard rec={recommendation} />
       </Card>
     </div>
   );
