@@ -8,6 +8,7 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "seed:portfolio": "bun scripts/import-agrorisk-portfolio.ts",
+    "seed:accounts": "bun scripts/import-agrorisk-accounts.ts",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write ."

@@ -60,8 +60,24 @@ CREATE TABLE IF NOT EXISTS agrorisk.users (
   name text NOT NULL,
   profile text NOT NULL CHECK (profile IN ('gestor', 'operador', 'consultor', 'admin')),
   permissions text[] NOT NULL DEFAULT '{}',
+  email text,
+  password_hash text,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  global_scope boolean NOT NULL DEFAULT false,
+  linked_operator_id text REFERENCES agrorisk.users(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (id, client_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx
+  ON agrorisk.users (lower(email))
+  WHERE email IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS agrorisk.user_client_scopes (
+  user_id text NOT NULL REFERENCES agrorisk.users(id) ON DELETE CASCADE,
+  client_id text NOT NULL REFERENCES agrorisk.clients(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, client_id)
 );
 
 CREATE TABLE IF NOT EXISTS agrorisk.machines (
@@ -162,3 +178,4 @@ CREATE INDEX IF NOT EXISTS machines_client_area_idx ON agrorisk.machines(client_
 CREATE INDEX IF NOT EXISTS operations_client_area_machine_idx ON agrorisk.operations(client_id, area_id, machine_id);
 CREATE INDEX IF NOT EXISTS alerts_operation_machine_idx ON agrorisk.alerts(operation_id, machine_id);
 CREATE INDEX IF NOT EXISTS history_operation_machine_idx ON agrorisk.operation_history(operation_id, machine_id);
+CREATE INDEX IF NOT EXISTS user_client_scopes_client_idx ON agrorisk.user_client_scopes(client_id);
