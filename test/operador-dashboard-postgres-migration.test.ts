@@ -5,10 +5,7 @@ import { mockRepository } from "../src/lib/data/mock-repository.server";
 import { closePostgresRepository } from "../src/lib/data/postgres-repository.server";
 import type { AgroRiskRepository } from "../src/lib/data/repository";
 import type { Alert, HistoryEntry } from "../src/lib/mock-data";
-import {
-  DEMO_OPERATOR_ID,
-  loadOperadorDashboardSnapshot,
-} from "../src/lib/operador-dashboard.server";
+import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.server";
 
 const failure = async () => {
   throw new Error("database unavailable");
@@ -38,9 +35,9 @@ const repositoryWithRecords = (
 
 describe("Migração do Operador para PostgreSQL", () => {
   test("carrega somente o contexto individual do operador determinístico", async () => {
-    const snapshot = await loadOperadorDashboardSnapshot();
+    const snapshot = await loadOperadorDashboardSnapshot("OPR-001");
     expect(snapshot.source).toBe("postgres");
-    expect(snapshot.operator.id).toBe(DEMO_OPERATOR_ID);
+    expect(snapshot.operator.id).toBe("OPR-001");
     expect(snapshot.operation.operatorId).toBe(snapshot.operator.id);
     expect(snapshot.machine.operatorId).toBe(snapshot.operator.id);
     expect(snapshot.operation.machineId).toBe(snapshot.machine.id);
@@ -55,7 +52,7 @@ describe("Migração do Operador para PostgreSQL", () => {
   });
 
   test("ignora scores persistidos e mantém risco e recomendação na mesma origem V2", async () => {
-    const snapshot = await loadOperadorDashboardSnapshot(mockRepository, mockRepository);
+    const snapshot = await loadOperadorDashboardSnapshot("USR-OP-1", mockRepository, mockRepository);
     expect(snapshot.operation.score).not.toBe(snapshot.risk.finalScore);
     expect(snapshot.machine.score).not.toBe(snapshot.risk.finalScore);
     expect(snapshot.recommendation.factor).toBe(snapshot.mainFactor);
@@ -65,7 +62,7 @@ describe("Migração do Operador para PostgreSQL", () => {
   });
 
   test("mantém inclinação sintética separada do resultado de risco", async () => {
-    const snapshot = await loadOperadorDashboardSnapshot(mockRepository, mockRepository);
+    const snapshot = await loadOperadorDashboardSnapshot("USR-OP-1", mockRepository, mockRepository);
     expect(snapshot.telemetry.source).toBe("synthetic");
     expect(snapshot.risk).not.toHaveProperty("inclinationDegrees");
     expect(snapshot.telemetryRecommendations.every((item) => item.factor === "Inclinação")).toBe(true);
@@ -73,7 +70,7 @@ describe("Migração do Operador para PostgreSQL", () => {
   });
 
   test("faz fallback integral para o repositório mock", async () => {
-    const snapshot = await loadOperadorDashboardSnapshot(failingRepository, mockRepository);
+    const snapshot = await loadOperadorDashboardSnapshot("USR-OP-1", failingRepository, mockRepository);
     expect(snapshot.source).toBe("mock");
     expect(snapshot.degraded).toBe(true);
     expect(snapshot.operator.id).toBe("USR-OP-1");
@@ -84,8 +81,8 @@ describe("Migração do Operador para PostgreSQL", () => {
 
   test("gera alertas e histórico demo determinísticos quando as consultas retornam vazias", async () => {
     const repository = repositoryWithRecords([], []);
-    const first = await loadOperadorDashboardSnapshot(repository, mockRepository);
-    const second = await loadOperadorDashboardSnapshot(repository, mockRepository);
+    const first = await loadOperadorDashboardSnapshot("USR-OP-1", repository, mockRepository);
+    const second = await loadOperadorDashboardSnapshot("USR-OP-1", repository, mockRepository);
 
     expect(first.alertsSource).toBe("demo");
     expect(first.historySource).toBe("demo");
@@ -108,7 +105,11 @@ describe("Migração do Operador para PostgreSQL", () => {
   });
 
   test("preserva registros reais sem misturar dados demo nem alterar o score", async () => {
-    const context = await loadOperadorDashboardSnapshot(repositoryWithRecords([], []), mockRepository);
+    const context = await loadOperadorDashboardSnapshot(
+      "USR-OP-1",
+      repositoryWithRecords([], []),
+      mockRepository,
+    );
     const realAlert: Alert = {
       id: "REAL-ALERT-1",
       machineId: context.machine.id,
@@ -132,6 +133,7 @@ describe("Migração do Operador para PostgreSQL", () => {
       score: 0,
     };
     const snapshot = await loadOperadorDashboardSnapshot(
+      "USR-OP-1",
       repositoryWithRecords([realAlert], [realHistory]),
       mockRepository,
     );
@@ -152,7 +154,7 @@ describe("Migração do Operador para PostgreSQL", () => {
 
   test("mantém igualdade com o Admin para a operação e máquina compartilhadas", async () => {
     const [operator, admin] = await Promise.all([
-      loadOperadorDashboardSnapshot(),
+      loadOperadorDashboardSnapshot("OPR-001"),
       loadAdminDashboardSnapshot(),
     ]);
     const adminOperation = admin.operationRows.find((row) => row.operation.id === operator.operation.id);

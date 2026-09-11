@@ -1,40 +1,29 @@
+import { timingSafeEqual } from "node:crypto";
 import process from "node:process";
 
-// Server-only authentication logic. The .server.ts suffix keeps this file
-// (and the credentials/permissions below) out of the client bundle.
-
 export type ProfileId = "gestor" | "operador" | "consultor" | "admin";
-
-const PASSWORDS: Record<ProfileId, string> = {
-  gestor: "gestor123",
-  operador: "operador123",
-  consultor: "consultor123",
-  admin: "admin123",
-};
 
 const ALLOWED_ROUTES: Record<ProfileId, string[]> = {
   gestor: ["/gestor"],
   operador: ["/operador"],
   consultor: ["/consultor"],
-  admin: ["/admin", "/gestor", "/operador", "/consultor"],
+  admin: ["/admin", "/gestor", "/consultor"],
 };
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 function getSecret(): string {
-  return process.env["AUTH_SESSION_SECRET"] ?? "agrorisk-dev-session-secret";
+  const secret = process.env.SESSION_SECRET ?? process.env.AUTH_SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET não está configurado.");
+  return secret;
 }
 
 function base64url(bytes: Uint8Array): string {
-  let str = "";
-  for (const b of bytes) str += String.fromCharCode(b);
-  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return Buffer.from(bytes).toString("base64url");
 }
 
 function fromBase64url(value: string): Uint8Array {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  return new Uint8Array(Buffer.from(value, "base64url"));
 }
 
 async function hmac(payload: string): Promise<string> {
@@ -45,44 +34,75 @@ async function hmac(payload: string): Promise<string> {
     false,
     ["sign"],
   );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  return base64url(new Uint8Array(sig));
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return base64url(new Uint8Array(signature));
+}
+
+function signaturesMatch(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
 }
 
 export interface Session {
+  userId: string;
   profile: ProfileId;
+  email: string;
+  globalScope: boolean;
+  linkedOperatorId: string | null;
+  clientIds: string[] | null;
   allowedRoutes: string[];
 }
 
+export type SignInResult =
+  | { ok: true; token: string; session: Session }
+  | {
+      ok: false;
+      reason: "INVALID_CREDENTIALS" | "PROFILE_MISMATCH" | "INACTIVE_ACCOUNT" | "INVALID_SCOPE";
+    };
+
 export async function createSession(
   profile: string,
+  email: string,
   password: string,
-): Promise<{ token: string; session: Session } | null> {
-  if (!Object.prototype.hasOwnProperty.call(PASSWORDS, profile)) return null;
-  const id = profile as ProfileId;
-  if (PASSWORDS[id] !== password) return null;
-
+): Promise<SignInResult> {
+  if (!Object.prototype.hasOwnProperty.call(ALLOWED_ROUTES, profile)) {
+    return { ok: false, reason: "PROFILE_MISMATCH" };
+  }
+  const { authenticateAccount } = await import("./auth-account.server");
+  const authenticated = await authenticateAccount(profile as ProfileId, email, password);
+  if (!authenticated.ok) return authenticated;
+  const account = authenticated.account;
   const payload = base64url(
-    new TextEncoder().encode(JSON.stringify({ p: id, exp: Date.now() + SESSION_TTL_MS })),
+    new TextEncoder().encode(JSON.stringify({
+      u: account.userId,
+      exp: Date.now() + SESSION_TTL_MS,
+    })),
   );
   const token = `${payload}.${await hmac(payload)}`;
-  return { token, session: { profile: id, allowedRoutes: ALLOWED_ROUTES[id] } };
+  return {
+    ok: true,
+    token,
+    session: { ...account, allowedRoutes: ALLOWED_ROUTES[account.profile] },
+  };
 }
 
 export async function readSession(token: string): Promise<Session | null> {
   const [payload, signature] = token.split(".");
-  if (!payload || !signature) return null;
-  if ((await hmac(payload)) !== signature) return null;
-
+  if (!payload || !signature || !signaturesMatch(await hmac(payload), signature)) return null;
   try {
     const data = JSON.parse(new TextDecoder().decode(fromBase64url(payload))) as {
-      p?: string;
+      u?: string;
       exp?: number;
     };
-    if (!data.p || !data.exp || data.exp < Date.now()) return null;
-    if (!Object.prototype.hasOwnProperty.call(ALLOWED_ROUTES, data.p)) return null;
-    const id = data.p as ProfileId;
-    return { profile: id, allowedRoutes: ALLOWED_ROUTES[id] };
+    if (!data.u || !data.exp || data.exp < Date.now()) return null;
+    const { loadAuthorizedAccount } = await import("./auth-account.server");
+    const account = await loadAuthorizedAccount(data.u);
+    if (!account) return null;
+    return {
+      ...account,
+      allowedRoutes: ALLOWED_ROUTES[account.profile],
+    };
   } catch {
     return null;
   }
@@ -90,6 +110,5 @@ export async function readSession(token: string): Promise<Session | null> {
 
 export async function authorize(token: string, path: string): Promise<Session | null> {
   const session = await readSession(token);
-  if (!session) return null;
-  return session.allowedRoutes.includes(path) ? session : null;
+  return session?.allowedRoutes.includes(path) ? session : null;
 }

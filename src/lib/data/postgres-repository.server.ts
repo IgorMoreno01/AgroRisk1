@@ -24,8 +24,9 @@ export async function closePostgresRepository(): Promise<void> {
   client = undefined;
 }
 
-export async function listGestorRelationalScope(limit = 5) {
+export async function listClientRelationalScope(clientIds: readonly string[] | null) {
   const sql = db();
+  const ids = clientIds === null ? null : [...clientIds];
   const [clientRows, areaRows, machineRows, operationRows] = await Promise.all([
     sql`
       SELECT c.id, c.name, c.municipality AS city, c.state,
@@ -35,7 +36,7 @@ export async function listGestorRelationalScope(limit = 5) {
         c.avg_score AS "avgScore", c.risk_level AS level
       FROM agrorisk.clients c
       LEFT JOIN agrorisk.machines m ON m.client_id = c.id
-      WHERE c.id IN (SELECT id FROM agrorisk.clients ORDER BY id LIMIT ${limit})
+      ${ids === null ? sql`` : sql`WHERE c.id = ANY(${ids})`}
       GROUP BY c.id ORDER BY c.id
     `,
     sql`
@@ -43,7 +44,7 @@ export async function listGestorRelationalScope(limit = 5) {
         a.type, a.condition, a.near_water AS "nearWater",
         a.environmental_risk AS "envRisk", a.score, a.crop, a.hectares::float8 AS hectares
       FROM agrorisk.areas a JOIN agrorisk.clients c ON c.id = a.client_id
-      WHERE a.client_id IN (SELECT id FROM agrorisk.clients ORDER BY id LIMIT ${limit})
+      ${ids === null ? sql`` : sql`WHERE a.client_id = ANY(${ids})`}
       ORDER BY a.id
     `,
     sql`
@@ -57,7 +58,7 @@ export async function listGestorRelationalScope(limit = 5) {
       JOIN agrorisk.clients c ON c.id = m.client_id
       JOIN agrorisk.areas a ON a.id = m.area_id
       JOIN agrorisk.users u ON u.id = m.operator_id
-      WHERE m.client_id IN (SELECT id FROM agrorisk.clients ORDER BY id LIMIT ${limit})
+      ${ids === null ? sql`` : sql`WHERE m.client_id = ANY(${ids})`}
       ORDER BY m.id
     `,
     sql`
@@ -71,7 +72,7 @@ export async function listGestorRelationalScope(limit = 5) {
       FROM agrorisk.operations o
       JOIN agrorisk.areas a ON a.id = o.area_id
       LEFT JOIN agrorisk.operation_risk_factors orf ON orf.operation_id = o.id
-      WHERE o.client_id IN (SELECT id FROM agrorisk.clients ORDER BY id LIMIT ${limit})
+      ${ids === null ? sql`` : sql`WHERE o.client_id = ANY(${ids})`}
       GROUP BY o.id, a.name ORDER BY o.id
     `,
   ]);
@@ -155,7 +156,8 @@ export async function getOperatorRelationalScope(operatorId: string) {
       SELECT h.id, h.occurred_on::text AS date, h.machine_id AS "machineId",
         h.operation_id AS "operationId", h.summary, h.score
       FROM agrorisk.operation_history h
-      JOIN current_operation o ON h.machine_id = o.machine_id
+       JOIN current_operation o
+         ON h.machine_id = o.machine_id AND h.operation_id = o.id
       ORDER BY h.occurred_on DESC, h.id
       LIMIT 10
     `,

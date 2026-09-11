@@ -1,8 +1,7 @@
 import { useAuth } from "@/lib/auth";
-import { authorizePath } from "@/lib/auth.functions";
 import { ShieldAlert, Loader2 } from "lucide-react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 export function RequireProfile({
   path,
@@ -11,37 +10,12 @@ export function RequireProfile({
   path: string;
   children: ReactNode;
 }) {
-  const { profile, status } = useAuth();
+  const { profile, status, canAccess } = useAuth();
   const currentPath = useRouterState({ select: (s) => s.location.pathname });
   const target = path ?? currentPath;
-  const [check, setCheck] = useState<"loading" | "allowed" | "denied">("loading");
+  const check = canAccess(target) ? "allowed" : "denied";
 
-  useEffect(() => {
-    let cancelled = false;
-    setCheck("loading");
-    (async () => {
-      let token: string | null = null;
-      try {
-        token = localStorage.getItem("agrorisk.session");
-      } catch {}
-      if (!token) {
-        if (!cancelled) setCheck("denied");
-        return;
-      }
-      try {
-        // Authorization is decided by the server from the signed session token.
-        const result = await authorizePath({ data: { token, path: target } });
-        if (!cancelled) setCheck(result.allowed ? "allowed" : "denied");
-      } catch {
-        if (!cancelled) setCheck("denied");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [target, profile]);
-
-  if (status === "loading" || check === "loading") {
+  if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

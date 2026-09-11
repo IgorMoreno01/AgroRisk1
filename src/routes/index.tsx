@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Sprout, LayoutDashboard, Tractor, Users, ShieldCheck, ArrowRight, Lock } from "lucide-react";
+import { Sprout, LayoutDashboard, Tractor, Users, ShieldCheck, ArrowRight, Lock, Mail } from "lucide-react";
 import { profiles } from "@/lib/mock-data";
 import type { ProfileId } from "@/lib/mock-data";
 import { useState, useEffect } from "react";
@@ -26,6 +26,7 @@ function LoginScreen() {
   const navigate = useNavigate();
   const { login, profile: current, logout } = useAuth();
   const [selected, setSelected] = useState<ProfileId | null>(null);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -39,9 +40,9 @@ function LoginScreen() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
-    const ok = await login(selected, password);
-    if (!ok) {
-      setError("Senha incorreta para este perfil.");
+    const result = await login(selected, email, password);
+    if (!result.ok) {
+      setError(result.error ?? "Não foi possível entrar.");
       return;
     }
     setError(null);
@@ -58,7 +59,7 @@ function LoginScreen() {
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">AgroRisk</h1>
           <p className="mt-2 max-w-md text-sm text-muted-foreground">
             Plataforma de monitoramento, score de risco e recomendações para operações
-            agrícolas. Selecione seu perfil e informe a senha para entrar.
+            agrícolas. Selecione seu perfil e informe e-mail e senha para entrar.
           </p>
         </div>
 
@@ -110,7 +111,28 @@ function LoginScreen() {
             className="flex flex-col gap-4 rounded-xl border border-border bg-card p-6 shadow-sm"
           >
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              2 · Informe a senha
+              2 · Informe as credenciais
+            <div>
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="email">
+                E-mail
+              </label>
+              <div className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setError(null);
+                  }}
+                  placeholder="nome@agrorisk.demo"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
+                  autoComplete="username"
+                />
+              </div>
+            </div>
+
             </div>
 
             <div>
@@ -143,7 +165,7 @@ function LoginScreen() {
                   }}
                   placeholder="Digite sua senha"
                   className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
-                  autoComplete="off"
+                  autoComplete="current-password"
                 />
               </div>
             </div>
@@ -156,20 +178,12 @@ function LoginScreen() {
 
             <button
               type="submit"
-              disabled={!selected || !password}
+              disabled={!selected || !email || !password}
               className="mt-2 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Entrar
               <ArrowRight className="h-4 w-4" />
             </button>
-
-            <div className="rounded-md border border-dashed border-border bg-background/60 p-3 text-[11px] leading-relaxed text-muted-foreground">
-              <div className="mb-1 font-semibold text-foreground">Senhas de demonstração</div>
-              gestor → <code>gestor123</code><br />
-              operador → <code>operador123</code><br />
-              consultor → <code>consultor123</code><br />
-              admin → <code>admin123</code>
-            </div>
 
             {current && (
               <button
@@ -184,7 +198,7 @@ function LoginScreen() {
         </div>
 
         <p className="mt-10 text-center text-xs text-muted-foreground">
-          Versão demonstrativa · Dados simulados · Autenticação apenas para fins de MVP
+          Versão demonstrativa · Dados simulados · Acesso autenticado por conta
         </p>
       </div>
     </div>

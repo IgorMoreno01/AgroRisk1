@@ -20,10 +20,11 @@ const failingRepository: AgroRiskRepository = {
   getMachine: failure,
   getOperation: failure,
 };
+const scope = { userId: "GST-TEST", clientIds: ["CL-01", "CL-02", "CL-03"] };
 
 describe("Migração do Gestor para PostgreSQL", () => {
   test("aplica escopo determinístico e mantém todas as relações dos clientes selecionados", async () => {
-    const snapshot = await loadGestorDashboardSnapshot(mockRepository, mockRepository);
+    const snapshot = await loadGestorDashboardSnapshot(scope, mockRepository, mockRepository);
     const scopedIds = new Set(snapshot.clients.map((client) => client.id));
 
     expect(snapshot.clients.map((client) => client.id)).toEqual(["CL-01", "CL-02", "CL-03"]);
@@ -33,7 +34,7 @@ describe("Migração do Gestor para PostgreSQL", () => {
   });
 
   test("ignora scores persistidos e deriva recomendação do mesmo fator calculado", async () => {
-    const snapshot = await loadGestorDashboardSnapshot(mockRepository, mockRepository);
+    const snapshot = await loadGestorDashboardSnapshot(scope, mockRepository, mockRepository);
     expect(snapshot.machineRows.some((row) => row.score !== row.machine.score)).toBe(true);
     expect(snapshot.machineRows.every((row) => row.recommendation.factor === row.mainFactor)).toBe(true);
     expect(snapshot.machineRows.every((row) => row.score > 0)).toBe(true);
@@ -60,13 +61,13 @@ describe("Migração do Gestor para PostgreSQL", () => {
       listOperations: wrap(() => mockRepository.listOperations()),
     };
 
-    await loadGestorDashboardSnapshot(repository, mockRepository);
+    await loadGestorDashboardSnapshot(scope, repository, mockRepository);
     expect(calls).toBe(4);
     expect(peak).toBe(4);
   });
 
   test("usa fallback integral quando o PostgreSQL falha", async () => {
-    const snapshot = await loadGestorDashboardSnapshot(failingRepository, mockRepository);
+    const snapshot = await loadGestorDashboardSnapshot(scope, failingRepository, mockRepository);
     expect(snapshot.source).toBe("mock");
     expect(snapshot.degraded).toBe(true);
     expect(snapshot.machineRows.length).toBeGreaterThan(0);
@@ -75,7 +76,7 @@ describe("Migração do Gestor para PostgreSQL", () => {
 
   test("mantém score, pesos, dominante e causa iguais ao Admin para máquina compartilhada", async () => {
     const [gestor, admin] = await Promise.all([
-      loadGestorDashboardSnapshot(mockRepository, mockRepository),
+      loadGestorDashboardSnapshot(scope, mockRepository, mockRepository),
       loadAdminDashboardSnapshot(mockRepository, mockRepository),
     ]);
     const gestorMachine = gestor.machineRows[0];

@@ -9,6 +9,13 @@ export const getConsultorDashboard = createServerFn({ method: "POST" })
     if (!session || (session.profile !== "consultor" && session.profile !== "admin")) {
       return { ok: false as const, error: "Sessão Consultor/Corretor não autorizada." };
     }
+    const clientIds = session.globalScope ? null : session.clientIds;
+    if (clientIds !== null && clientIds.length === 0) {
+      return { ok: false as const, error: "Conta Consultor/Corretor sem clientes autorizados." };
+    }
     const { loadConsultorDashboardSnapshot } = await import("../consultor-dashboard.server");
-    return { ok: true as const, snapshot: await loadConsultorDashboardSnapshot() };
+    return {
+      ok: true as const,
+      snapshot: await loadConsultorDashboardSnapshot({ userId: session.userId, clientIds }),
+    };
   });

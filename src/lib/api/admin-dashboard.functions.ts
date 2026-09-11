@@ -10,7 +10,7 @@ export const getAdminDashboard = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { authorize } = await import("../auth-session.server");
     const session = await authorize(data.token, "/admin");
-    if (!session || session.profile !== "admin") {
+    if (!session || session.profile !== "admin" || !session.globalScope) {
       return { ok: false as const, error: "Sessão Admin/Sompo não autorizada." };
     }
 

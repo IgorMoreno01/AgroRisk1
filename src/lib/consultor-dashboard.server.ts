@@ -1,7 +1,7 @@
 import { alerts as demoAlerts, type Alert, type Client, type Machine, type Operation } from "./mock-data";
 import type { AgroRiskRepository } from "./data/repository";
 import { mockRepository } from "./data/mock-repository.server";
-import { listGestorRelationalScope, postgresRepository } from "./data/postgres-repository.server";
+import { listClientRelationalScope, postgresRepository } from "./data/postgres-repository.server";
 import { buildAdminDashboardSnapshot } from "./admin-dashboard.server";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
@@ -11,8 +11,10 @@ import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/t
 import type { GeneratedRecommendation, NextBestAction, RecCategory } from "./recommendations";
 import type { ConsultorClientView, ConsultorDashboardSnapshot } from "./consultor-dashboard-types";
 
-const CLIENT_LIMIT = 6;
-const SCOPE_RULE = "Primeiros 6 clientes por ID e todos os registros relacionados";
+export interface ConsultorAccessScope {
+  userId: string;
+  clientIds: string[] | null;
+}
 const stableNumber = (value: string) => [...value].reduce((sum, char) => sum + char.charCodeAt(0), 0);
 const scenarioFor = (clientId: string): RiskEngineV2DemoScenarioId =>
   (["low", "medium", "high"] as const)[stableNumber(clientId) % 3];
@@ -114,16 +116,19 @@ function buildClientView(
   };
 }
 
-async function readScope(repository: AgroRiskRepository) {
+async function readScope(repository: AgroRiskRepository, scope: ConsultorAccessScope) {
   if (repository === postgresRepository) {
-    const relational = await listGestorRelationalScope(CLIENT_LIMIT);
+    const relational = await listClientRelationalScope(scope.clientIds);
     const ids = new Set(relational.machines.map((machine) => machine.id));
     return { ...relational, alerts: demoAlerts.filter((alert) => ids.has(alert.machineId)) };
   }
   const [allClients, allAreas, allMachines, allOperations] = await Promise.all([
     repository.listClients(), repository.listAreas(), repository.listMachines(), repository.listOperations(),
   ]);
-  const clients = [...allClients].sort((a, b) => a.id.localeCompare(b.id)).slice(0, CLIENT_LIMIT);
+  const allowedIds = scope.clientIds === null ? null : new Set(scope.clientIds);
+  const clients = [...allClients]
+    .filter((client) => allowedIds === null || allowedIds.has(client.id))
+    .sort((a, b) => a.id.localeCompare(b.id));
   const ids = new Set(clients.map((client) => client.id));
   const machines = allMachines.filter((machine) => ids.has(machine.clientId));
   const machineIds = new Set(machines.map((machine) => machine.id));
@@ -141,6 +146,7 @@ function buildSnapshot(
   source: "postgres" | "mock",
   degraded: boolean,
   weights: RiskEngineV2Weights,
+  scope: ConsultorAccessScope,
 ) {
   const base = buildAdminDashboardSnapshot(relational, source, degraded, weights);
   const clients = new Map(relational.clients.map((client) => [client.id, client]));
@@ -155,7 +161,9 @@ function buildSnapshot(
     source,
     degraded,
     loadedAt: base.loadedAt,
-    scopeRule: SCOPE_RULE,
+    scopeRule: scope.clientIds === null
+      ? "Escopo global autorizado pela conta Admin/Sompo"
+      : `Carteira autorizada para a conta ${scope.userId}`,
     weights,
     alertsSource: "demo" as const,
     clients: relational.clients.map((client) => buildClientView(client, base, resultByMachine, relational.alerts)),
@@ -166,30 +174,33 @@ async function loadUncached(
   primary: AgroRiskRepository,
   fallback: AgroRiskRepository,
   weights: RiskEngineV2Weights,
+  scope: ConsultorAccessScope,
 ): Promise<ConsultorDashboardSnapshot> {
   try {
-    return buildSnapshot(await readScope(primary), "postgres", false, weights);
+    return buildSnapshot(await readScope(primary, scope), "postgres", false, weights, scope);
   } catch (error) {
     console.error("[consultor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
-    return buildSnapshot(await readScope(fallback), "mock", true, weights);
+    return buildSnapshot(await readScope(fallback, scope), "mock", true, weights, scope);
   }
 }
 
 export async function loadConsultorDashboardSnapshot(
+  scope: ConsultorAccessScope,
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
 ): Promise<ConsultorDashboardSnapshot> {
   const config = getRiskEngineV2Configuration();
   const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
   if (primary !== postgresRepository || fallback !== mockRepository) {
-    return loadUncached(primary, fallback, weights);
+    return loadUncached(primary, fallback, weights, scope);
   }
-  const key = `consultor-dashboard:v1:${config.mlWeight}:${config.operationalRulesWeight}`;
+  const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
+  const key = `consultor-dashboard:v2:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
   const pending = inFlight.get(key);
   if (pending) return pending;
-  const request = cacheOrFetch(key, 15, () => loadUncached(primary, fallback, weights));
+  const request = cacheOrFetch(key, 15, () => loadUncached(primary, fallback, weights, scope));
   inFlight.set(key, request);
   try { return await request; } finally { inFlight.delete(key); }
 }

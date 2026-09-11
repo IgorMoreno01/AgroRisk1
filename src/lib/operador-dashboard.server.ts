@@ -15,9 +15,8 @@ import { RISK_ENGINE_V2_DEMO_SCENARIOS } from "./risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
 import type { RiskResult } from "./risk-score";
 
-export const DEMO_OPERATOR_ID = "OPR-001";
-export const OPERATOR_SCOPE_RULE =
-  "Operador demonstrativo OPR-001; somente sua operação atual, máquina, área, cliente, alertas e histórico relacionados.";
+const operatorScopeRule = (operatorId: string) =>
+  `Operador autenticado ${operatorId}; somente sua operação atual, máquina, área, cliente, alertas e histórico relacionados.`;
 
 const inFlight = new Map<string, Promise<OperadorDashboardSnapshot>>();
 
@@ -237,7 +236,7 @@ function syntheticHistory(operation: Operation, machineId: string): OperatorHist
   ];
 }
 
-async function readFallback(repository: AgroRiskRepository) {
+async function readFallback(repository: AgroRiskRepository, operatorId: string) {
   const [clients, areas, machines, operations, alerts, history] = await Promise.all([
     repository.listClients(),
     repository.listAreas(),
@@ -246,8 +245,12 @@ async function readFallback(repository: AgroRiskRepository) {
     repository.listAlerts(),
     repository.listOperationHistory(),
   ]);
-  const operator = users.find((item) => item.profile === "operador" && operations.some((op) => op.operatorId === item.id));
-  if (!operator) throw new Error("Fallback sem operador demonstrativo.");
+  const operator = users.find((item) =>
+    item.id === operatorId &&
+    item.profile === "operador" &&
+    operations.some((operation) => operation.operatorId === item.id)
+  );
+  if (!operator) throw new Error(`Fallback sem dados para o operador autenticado ${operatorId}.`);
   const operatorOperations = operations.filter((item) => item.operatorId === operator.id);
   const operation = [...operatorOperations].sort((a, b) =>
     Number(b.status === "Em andamento") - Number(a.status === "Em andamento") ||
@@ -261,7 +264,9 @@ async function readFallback(repository: AgroRiskRepository) {
     machines: [machine],
     operations: [operation],
     alerts: alerts.filter((item) => item.operationId === operation.id && item.machineId === machine.id),
-    history: history.filter((item) => item.machineId === machine.id),
+    history: history.filter((item) =>
+      item.machineId === machine.id && item.operationId === operation.id
+    ),
     operationCount: operatorOperations.length,
   };
 }
@@ -271,6 +276,7 @@ function buildSnapshot(
   source: "postgres" | "mock",
   degraded: boolean,
   engineWeights: RiskEngineV2Weights,
+  operatorId: string,
 ): OperadorDashboardSnapshot {
   const operation = relational.operations[0];
   const machine = relational.machines[0];
@@ -302,7 +308,7 @@ function buildSnapshot(
     source,
     degraded,
     loadedAt: new Date().toISOString(),
-    scopeRule: OPERATOR_SCOPE_RULE,
+    scopeRule: operatorScopeRule(operatorId),
     operationCount: relational.operationCount,
     operator: relational.operator,
     operation,
@@ -340,34 +346,38 @@ async function loadUncached(
   primary: AgroRiskRepository,
   fallback: AgroRiskRepository,
   weights: RiskEngineV2Weights,
+  operatorId: string,
 ) {
   try {
     const relational = primary === postgresRepository
-      ? await getOperatorRelationalScope(DEMO_OPERATOR_ID)
-      : await readFallback(primary);
-    return buildSnapshot(relational, "postgres", false, weights);
+      ? await getOperatorRelationalScope(operatorId)
+      : await readFallback(primary, operatorId);
+    return buildSnapshot(relational, "postgres", false, weights, operatorId);
   } catch (error) {
     console.error("[operador-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
-    const relational = await readFallback(fallback);
-    return buildSnapshot(relational, "mock", true, weights);
+    const relational = await readFallback(fallback, operatorId);
+    return buildSnapshot(relational, "mock", true, weights, operatorId);
   }
 }
 
 export async function loadOperadorDashboardSnapshot(
+  operatorId: string,
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
 ): Promise<OperadorDashboardSnapshot> {
   const config = getRiskEngineV2Configuration();
   const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
-  if (primary !== postgresRepository || fallback !== mockRepository) return loadUncached(primary, fallback, weights);
-  const key = `operador-dashboard:v2:${DEMO_OPERATOR_ID}:${weights.ml}:${weights.operationalRules}`;
+  if (primary !== postgresRepository || fallback !== mockRepository) {
+    return loadUncached(primary, fallback, weights, operatorId);
+  }
+  const key = `operador-dashboard:v3:${operatorId}:${weights.ml}:${weights.operationalRules}`;
   const cached = cacheGet<OperadorDashboardSnapshot>(key);
   if (cached) return cached;
   const pending = inFlight.get(key);
   if (pending) return pending;
-  const request = loadUncached(primary, fallback, weights).then((snapshot) => {
+  const request = loadUncached(primary, fallback, weights, operatorId).then((snapshot) => {
     cacheSet(key, snapshot, 15);
     return snapshot;
   }).finally(() => inFlight.delete(key));

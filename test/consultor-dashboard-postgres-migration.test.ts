@@ -20,10 +20,11 @@ const failingRepository: AgroRiskRepository = {
   getMachine: failure,
   getOperation: failure,
 };
+const scope = { userId: "CST-TEST", clientIds: ["CL-01", "CL-02", "CL-03"] };
 
 describe("Migração do Consultor/Corretor para PostgreSQL", () => {
   test("aplica uma carteira determinística sem expor a carteira Admin", async () => {
-    const snapshot = await loadConsultorDashboardSnapshot(mockRepository, mockRepository);
+    const snapshot = await loadConsultorDashboardSnapshot(scope, mockRepository, mockRepository);
     expect(snapshot.clients.map((item) => item.client.id)).toEqual(["CL-01", "CL-02", "CL-03"]);
     expect(snapshot.clients.every((item) =>
       item.machines.every((row) => row.machine.clientId === item.client.id) &&
@@ -32,7 +33,7 @@ describe("Migração do Consultor/Corretor para PostgreSQL", () => {
   });
 
   test("ignora scores persistidos e mantém recomendação e explicação na mesma origem", async () => {
-    const snapshot = await loadConsultorDashboardSnapshot(mockRepository, mockRepository);
+    const snapshot = await loadConsultorDashboardSnapshot(scope, mockRepository, mockRepository);
     for (const view of snapshot.clients) {
       expect(view.summary.score).toBeGreaterThan(0);
       expect(view.recommendation.factor).toBe(view.summary.mainFactor);
@@ -65,13 +66,13 @@ describe("Migração do Consultor/Corretor para PostgreSQL", () => {
       listOperations: wrap(() => mockRepository.listOperations()),
     };
 
-    await loadConsultorDashboardSnapshot(repository, mockRepository);
+    await loadConsultorDashboardSnapshot(scope, repository, mockRepository);
     expect(calls).toBe(4);
     expect(peak).toBe(4);
   });
 
   test("usa fallback integral para mock e identifica alertas demonstrativos", async () => {
-    const snapshot = await loadConsultorDashboardSnapshot(failingRepository, mockRepository);
+    const snapshot = await loadConsultorDashboardSnapshot(scope, failingRepository, mockRepository);
     expect(snapshot.source).toBe("mock");
     expect(snapshot.degraded).toBe(true);
     expect(snapshot.alertsSource).toBe("demo");
@@ -80,7 +81,7 @@ describe("Migração do Consultor/Corretor para PostgreSQL", () => {
 
   test("mantém score, pesos, fator e origem da recomendação iguais ao Admin", async () => {
     const [consultor, admin] = await Promise.all([
-      loadConsultorDashboardSnapshot(mockRepository, mockRepository),
+      loadConsultorDashboardSnapshot(scope, mockRepository, mockRepository),
       loadAdminDashboardSnapshot(mockRepository, mockRepository),
     ]);
     const machine = consultor.clients[0].machines[0];

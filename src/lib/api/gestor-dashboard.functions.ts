@@ -9,6 +9,13 @@ export const getGestorDashboard = createServerFn({ method: "POST" })
     if (!session || (session.profile !== "gestor" && session.profile !== "admin")) {
       return { ok: false as const, error: "Sessão Gestor não autorizada." };
     }
+    const clientIds = session.globalScope ? null : session.clientIds;
+    if (clientIds !== null && clientIds.length === 0) {
+      return { ok: false as const, error: "Conta Gestor sem clientes autorizados." };
+    }
     const { loadGestorDashboardSnapshot } = await import("../gestor-dashboard.server");
-    return { ok: true as const, snapshot: await loadGestorDashboardSnapshot() };
+    return {
+      ok: true as const,
+      snapshot: await loadGestorDashboardSnapshot({ userId: session.userId, clientIds }),
+    };
   });
