@@ -60,7 +60,11 @@ export async function listActionableAlerts(session: Session): Promise<Actionable
   const current = await scope(sql, session);
   const rows = await sql`SELECT ${columns(sql)} FROM agrorisk.actionable_alerts a
     WHERE a.recipient_user_id=${session.userId} AND ${where(current, sql)}
-    ORDER BY a.created_at DESC, a.id`;
+       AND a.status <> 'resolved'
+     ORDER BY CASE a.severity
+       WHEN 'critical' THEN 1 WHEN 'high' THEN 2
+       WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END,
+       a.created_at DESC, a.id`;
   return { alerts: rows.map(map), unreadCount: rows.filter((row) => row.status === "new").length };
 }
 export const getActionableAlerts = listActionableAlerts;
