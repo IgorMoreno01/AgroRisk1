@@ -49,7 +49,7 @@ const NAV_BY_PROFILE: Record<ProfileId, NavItem[]> = {
     { label: "Minha operação",      icon: Activity,        href: "#operacao" },
     { label: "Alertas",             icon: Bell,            href: "#alertas-operacao" },
     { label: "Recomendações",       icon: Lightbulb,       href: "#recomendacoes" },
-    { label: "Contexto geográfico", icon: MapPin,          href: "#geo" },
+    { label: "Registro da operação", icon: Wrench,         href: "#registro-operacao" },
     { label: "Histórico recente",   icon: Layers,          href: "#historico" },
   ],
   gestor: [

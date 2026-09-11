@@ -2,34 +2,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge } from "@/components/risk-badge";
-import { RiskComposition } from "@/components/risk-composition";
-import { RecommendationCard } from "@/components/recommendation-card";
-import { RiskExplanation } from "@/components/risk-explanation";
 import { NextBestActionCard } from "@/components/next-best-action";
-import {
-  OperationalSummary, GeoContextCard, RecentHistoryCard,
-} from "@/components/operador-cards";
-import { AlertTriangle, Cloud, Droplets, Wind, MapPin, Mountain, Loader2, Wifi, WifiOff } from "lucide-react";
+import { RecentHistoryCard } from "@/components/operador-cards";
+import { CloudSun, Droplets, Mountain, Wind, type LucideIcon } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
 import { getWeather } from "@/lib/api/weather.functions";
-import { getWaterFeatures } from "@/lib/api/water-geo.functions";
-import { getRouting } from "@/lib/api/routing.functions";
-import { getElevation } from "@/lib/api/terrain.functions";
-import type { WeatherData, WaterGeoData, RouteData, ElevationData } from "@/lib/external-data.types";
-import {
-  ClimateSection,
-  WaterFeaturesSection,
-  RoutingSection,
-  TerrainSection,
-  SoilDemoSection,
-  DataSourcesPanel,
-  RiskFactorsWithSources,
-} from "@/components/external-data-sections";
+import type { WeatherData } from "@/lib/external-data.types";
 import { getStoredSessionToken } from "@/lib/auth";
 import { getOperadorDashboard } from "@/lib/api/operador-dashboard.functions";
 import type { OperadorDashboardSnapshot } from "@/lib/operador-dashboard-types";
-import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
 import { OperationRegistrationCard } from "@/components/operation-registration-card";
 import type { ProfileAlertsBundle } from "@/lib/profile-alerts";
 
@@ -47,15 +29,10 @@ function OperadorPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
-  // ---- Dados externos (carregados assincronamente) ----
+  // O clima permanece disponível como resumo operacional; os demais dados
+  // externos continuam no backend, mas não são exibidos nesta persona.
   const [weather, setWeather] = useState<WeatherData | null>(null);
-  const [waterGeo, setWaterGeo] = useState<WaterGeoData | null>(null);
-  const [routeData, setRouteData] = useState<RouteData | null>(null);
-  const [elevation, setElevation] = useState<ElevationData | null>(null);
   const [loadingWeather, setLoadingWeather] = useState(true);
-  const [loadingWater, setLoadingWater] = useState(true);
-  const [loadingRoute, setLoadingRoute] = useState(true);
-  const [loadingTerrain, setLoadingTerrain] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,29 +57,10 @@ function OperadorPage() {
   useEffect(() => {
     if (!snapshot) return;
     const coords = snapshot.geo;
-    // Origem simulada: ~5 km ao norte da área (pátio da fazenda)
-    const originLat = coords.lat + 0.045;
-    const originLon = coords.lon;
-
     getWeather({ data: { lat: coords.lat, lon: coords.lon } })
       .then(setWeather)
       .catch((e) => console.warn("[Operador] weather fetch failed:", e))
       .finally(() => setLoadingWeather(false));
-
-    getWaterFeatures({ data: { lat: coords.lat, lon: coords.lon, radiusM: 3000 } })
-      .then(setWaterGeo)
-      .catch((e) => console.warn("[Operador] water-geo fetch failed:", e))
-      .finally(() => setLoadingWater(false));
-
-    getRouting({ data: { originLat, originLon, destLat: coords.lat, destLon: coords.lon } })
-      .then(setRouteData)
-      .catch((e) => console.warn("[Operador] routing fetch failed:", e))
-      .finally(() => setLoadingRoute(false));
-
-    getElevation({ data: { lat: coords.lat, lon: coords.lon } })
-      .then(setElevation)
-      .catch((e) => console.warn("[Operador] terrain fetch failed:", e))
-      .finally(() => setLoadingTerrain(false));
   }, [snapshot?.geo.lat, snapshot?.geo.lon]);
 
   if (loadError) {
@@ -129,13 +87,9 @@ function OperadorPage() {
     );
   }
 
-  const { operation, machine, area, client, risk: scoreContext, weights } = snapshot;
-  const breakdown = scoreContext.breakdown;
+  const { operation, machine, area, client, risk: scoreContext } = snapshot;
   const score = scoreContext.finalScore;
   const level = scoreContext.level;
-  const isHigh = level === "alto";
-  const recs = [snapshot.recommendation];
-  const telemetryRecs = snapshot.telemetryRecommendations;
   const nextAction = snapshot.nextAction;
   const alertsBundle: ProfileAlertsBundle = {
     sectionId: "alertas",
@@ -152,27 +106,16 @@ function OperadorPage() {
     })),
   };
 
-  // ---- Cards de condição: real quando disponível, mock como fallback ----
-  const climaValue = loadingWeather
-    ? "Carregando…"
+  const climate = loadingWeather
+    ? { condition: "Carregando…", temperature: "—", precipitation: "—", wind: "—" }
     : weather
-    ? weather.current.conditionLabel
-    : breakdown.parts[0].detail;
-
-  const ventoValue = loadingWeather
-    ? "Carregando…"
-    : weather
-    ? `${Math.round(weather.current.windSpeed)} km/h ${weather.current.windDirectionLabel}`
-    : "14 km/h NE";
-  const inclinationValue = `${snapshot.telemetry.inclinationDegrees.toFixed(1)}° (${snapshot.telemetry.inclinationStatus})`;
-
-  const conditions = [
-    { icon: Cloud,    label: "Clima",   value: climaValue },
-    { icon: Droplets, label: "Solo",    value: `${area.condition}${snapshot.fieldSources.areaCondition === "synthetic" ? " · sintético" : ""}` },
-    { icon: Wind,     label: "Vento",   value: ventoValue },
-    { icon: Mountain, label: "Inclinação", value: `${inclinationValue} · MPU6050 simulado` },
-    { icon: MapPin,   label: "Posição", value: `${area.name} · ${area.type} · contexto sintético` },
-  ];
+    ? {
+        condition: weather.current.conditionLabel,
+        temperature: `${Math.round(weather.current.temperature)}°C`,
+        precipitation: `${weather.current.precipitation.toFixed(1)} mm/h`,
+        wind: `${Math.round(weather.current.windSpeed)} km/h ${weather.current.windDirectionLabel}`,
+      }
+    : { condition: "Dados indisponíveis", temperature: "—", precipitation: "—", wind: "—" };
 
   return (
     <AppLayout
@@ -184,7 +127,7 @@ function OperadorPage() {
         clientName: client.name,
         clientLocation: client.location,
         operationId: operation.id,
-        machineName: machine.name,
+        machineName: `${machine.type} · ${machine.id}`,
         areaName: area.name,
         operationStatus: operation.status,
         lastUpdate: machine.lastUpdate,
@@ -192,191 +135,68 @@ function OperadorPage() {
       alerts={alertsBundle}
     >
       <div id="topo" className="scroll-mt-20" />
-      {isHigh && (
-        <div className="mb-6 flex items-start gap-3 rounded-xl border-2 border-danger/50 bg-danger/10 p-4">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger" />
-          <div className="flex-1">
-            <div className="font-semibold text-danger">ALERTA DE RISCO ALTO</div>
-            <p className="mt-0.5 text-sm text-foreground/80">
-              Motivo principal: {recs[0]?.factor.toLowerCase() ?? breakdown.mainFactor.toLowerCase()}.
-              {recs[0] ? ` ${recs[0].title}.` : " Pause a operação se houver agravamento."}
-            </p>
-          </div>
-        </div>
-      )}
-
-      <PersonaV2RiskPanel persona="operador" result={snapshot.engineResult} recommendation={snapshot.recommendation} />
-
-      {/* Topo */}
-      <div id="operacao" className="mt-6 grid scroll-mt-20 gap-4 lg:grid-cols-3">
+      <div id="operacao" className="grid scroll-mt-20 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <SectionTitle
-            title="Operação em andamento"
-            description={`Iniciada às ${operation.start} · ${operation.type} · ${area.name}`}
+            title="Operação atual"
+            description={`${operation.type} · ${area.name}`}
             action={
               <span className="inline-flex items-center gap-1.5 rounded-full bg-success/15 px-2.5 py-0.5 text-xs font-medium text-success">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
-                Ativa
+                {operation.status}
               </span>
             }
           />
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Equipamento</div>
-              <div className="mt-1 text-lg font-semibold text-foreground">{machine.name}</div>
-              <div className="text-sm text-muted-foreground">{machine.id} · {machine.client}</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Máquina</div>
+              <div className="mt-1 text-lg font-semibold text-foreground">{machine.type} · {machine.id}</div>
             </div>
             <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Operador</div>
-              <div className="mt-1 text-lg font-semibold text-foreground">{machine.operator}</div>
-               <div className="text-sm text-muted-foreground">Turno {snapshot.shift.value.toLowerCase()} (sintético) · {operation.duration}</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">Operação</div>
+              <div className="mt-1 text-lg font-semibold text-foreground">{operation.id}</div>
             </div>
-          </div>
-
-          {/* Badge de fonte dos dados climáticos */}
-          <div className="mt-4 flex items-center gap-2">
-            {loadingWeather ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-[11px] text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" /> Buscando dados climáticos…
-              </span>
-            ) : weather?.source === "open-meteo" ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-info/10 px-2.5 py-0.5 text-[11px] font-medium text-info">
-                <Wifi className="h-3 w-3" /> Clima via Open-Meteo · {weather.current.temperature}°C · umidade {weather.current.humidity}%
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-[11px] text-muted-foreground">
-                <WifiOff className="h-3 w-3" /> Dados climáticos simulados (API indisponível)
-              </span>
-            )}
-          </div>
-
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
-            {conditions.map((c) => (
-              <div key={c.label} className="rounded-lg border border-border p-3">
-                <c.icon className="h-4 w-4 text-muted-foreground" />
-                <div className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">
-                  {c.label}
-                </div>
-                <div className="text-sm font-medium text-foreground">{c.value}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-5">
-            <NextBestActionCard action={nextAction} />
           </div>
         </Card>
-
         <Card>
-          <SectionTitle title="Score de risco atual" />
+          <SectionTitle title="Risco agora" />
           <div className="flex flex-col items-center justify-center py-2">
             <ScoreGauge score={score} />
-            <RiskBadge level={level} className="mt-3" />
-            <p className="mt-3 text-center text-xs text-muted-foreground">
-              Atualizado há instantes · escala 0–100
-            </p>
-            <div className="mt-3 w-full">
-              <RiskExplanation result={scoreContext} weights={weights} recommendation={recs[0]} audience="operador" />
+            <RiskBadge level={level} className="mt-3" score={score} />
+            <div className="mt-4 w-full rounded-lg bg-muted/50 p-3 text-sm">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Fator principal</div>
+              <div className="mt-1 font-medium text-foreground">{nextAction.factor}</div>
             </div>
           </div>
         </Card>
       </div>
 
-      <div className="mt-6">
+      <div id="recomendacoes" className="mt-6 grid scroll-mt-20 gap-4 lg:grid-cols-2">
+        <Card>
+          <SectionTitle title="Próxima ação" description="Prioridade para a operação atual" />
+          <NextBestActionCard action={nextAction} />
+        </Card>
+        <Card>
+          <SectionTitle title="Clima e segurança" description={climate.condition} />
+          <div className="grid grid-cols-2 gap-3">
+            <QuickStatus icon={CloudSun} label="Temperatura" value={climate.temperature} />
+            <QuickStatus icon={Droplets} label="Precipitação" value={climate.precipitation} />
+            <QuickStatus icon={Wind} label="Vento" value={climate.wind} />
+            <QuickStatus
+              icon={Mountain}
+              label="Inclinação"
+              value={`${snapshot.telemetry.inclinationDegrees.toFixed(1)}° · ${snapshot.telemetry.inclinationStatus}`}
+            />
+          </div>
+        </Card>
+      </div>
+
+      <div id="alertas-operacao" className="mt-6 scroll-mt-20">
+        <ProfileAlertsSection bundle={alertsBundle} />
+      </div>
+
+      <div id="registro-operacao" className="mt-6 scroll-mt-20">
         <OperationRegistrationCard />
-      </div>
-
-      {/* Meio: resumo + mini-mapa */}
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <OperationalSummary
-          operation={operation}
-          machine={machine}
-          area={area}
-          result={scoreContext}
-          nextAction={nextAction}
-        />
-        <section id="geo" className="scroll-mt-20">
-          <GeoContextCard area={area} breakdown={breakdown} waterGeo={waterGeo} loadingWater={loadingWater} routeData={routeData} loadingRoute={loadingRoute} />
-        </section>
-      </div>
-
-      {/* Inferior: composição + ações */}
-      <div id="recomendacoes" className="mt-6 grid scroll-mt-20 gap-4 xl:grid-cols-2">
-        <Card>
-          <SectionTitle
-            title="Composição do score"
-            description={`Como os ${score} pontos foram calculados`}
-          />
-          <RiskComposition breakdown={breakdown} />
-        </Card>
-
-        <Card>
-          <SectionTitle
-            title="Ações recomendadas"
-            description="Decida e execute em sequência — prioridade alta primeiro"
-          />
-          <div className="space-y-3">
-            {recs.map((r) => (
-              <RecommendationCard key={r.id} rec={r} showAction />
-            ))}
-          </div>
-          {telemetryRecs.length > 0 && (
-            <div className="mt-4 border-t border-border pt-4">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Segurança imediata por telemetria
-              </div>
-              <div className="space-y-3">
-                {telemetryRecs.map((r) => (
-                  <RecommendationCard key={r.id} rec={r} showAction />
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* ──────────── Dados externos das APIs ──────────── */}
-
-      {/* Fontes de dados — status geral */}
-      <div id="fontes" className="mt-6 scroll-mt-20">
-        <DataSourcesPanel
-          weather={weather}
-          waterGeo={waterGeo}
-          routeData={routeData}
-          elevation={elevation}
-          loadingWeather={loadingWeather}
-          loadingWater={loadingWater}
-          loadingRoute={loadingRoute}
-          loadingTerrain={loadingTerrain}
-        />
-      </div>
-
-      {/* Condições climáticas (Open-Meteo) + Recursos hídricos (Overpass/OSM) */}
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <ClimateSection weather={weather} loading={loadingWeather} />
-        <WaterFeaturesSection waterGeo={waterGeo} loading={loadingWater} />
-      </div>
-
-      {/* Rota operacional (openrouteservice) + Terreno (OpenTopography) */}
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <RoutingSection routeData={routeData} loading={loadingRoute} />
-        <TerrainSection elevation={elevation} loading={loadingTerrain} />
-      </div>
-
-      {/* Análise do Solo (SoilGrids — demonstração) */}
-      <div className="mt-6">
-        <SoilDemoSection />
-      </div>
-
-      {/* Fatores de risco com origem dos dados */}
-      <div className="mt-6">
-        <RiskFactorsWithSources
-          breakdown={breakdown}
-          weather={weather}
-          waterGeo={waterGeo}
-          elevation={elevation}
-          routeData={routeData}
-        />
       </div>
 
       <section id="historico" className="mt-6 scroll-mt-20">
@@ -389,11 +209,26 @@ function OperadorPage() {
           alerts={snapshot.alerts}
         />
       </section>
-
-      <div className="mt-6">
-        <ProfileAlertsSection bundle={alertsBundle} />
-      </div>
     </AppLayout>
+  );
+}
+
+function QuickStatus({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-3">
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" /> {label}
+      </div>
+      <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
+    </div>
   );
 }
 

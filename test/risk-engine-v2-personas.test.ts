@@ -17,9 +17,11 @@ const adminSource = readFileSync(
 );
 
 describe("Risk Engine V2 · propagação entre personas", () => {
-  test("Gestor, Operador e Consultor usam o mesmo componente e resultado V2", () => {
+  test("Gestor e Consultor usam o painel V2; Operador mantém o mesmo resultado em resumo compacto", () => {
     expect(routeSources[0]).toContain('<PersonaV2RiskPanel persona="gestor"');
-    expect(routeSources[1]).toContain('<PersonaV2RiskPanel persona="operador"');
+    expect(routeSources[1]).not.toContain('<PersonaV2RiskPanel persona="operador"');
+    expect(routeSources[1]).toContain("scoreContext.finalScore");
+    expect(routeSources[1]).toContain("snapshot.nextAction");
     expect(routeSources[2]).toContain('<PersonaV2RiskPanel persona="consultor"');
 
     const results = routeSources.map(() => getRiskEngineV2DemoResult());
