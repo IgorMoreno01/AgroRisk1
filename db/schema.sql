@@ -193,6 +193,20 @@ CREATE TABLE IF NOT EXISTS agrorisk.operation_logs (
   )
 );
 
+CREATE TABLE IF NOT EXISTS agrorisk.maintenance_records (
+  id text PRIMARY KEY,
+  machine_id text NOT NULL REFERENCES agrorisk.machines(id) ON DELETE CASCADE,
+  maintenance_type text NOT NULL,
+  performed_at timestamptz NOT NULL,
+  next_due_at timestamptz NOT NULL,
+  observation text NOT NULL DEFAULT '',
+  status text NOT NULL CHECK (status IN ('ok', 'due_soon', 'overdue')),
+  source text NOT NULL DEFAULT 'synthetic' CHECK (source IN ('real', 'demo', 'synthetic')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (next_due_at > performed_at)
+);
+
 CREATE INDEX IF NOT EXISTS farms_client_idx ON agrorisk.farms(client_id);
 CREATE INDEX IF NOT EXISTS areas_client_farm_idx ON agrorisk.areas(client_id, farm_id);
 CREATE INDEX IF NOT EXISTS machines_client_area_idx ON agrorisk.machines(client_id, area_id);
@@ -205,3 +219,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS operation_logs_one_active_per_operation_idx
   WHERE status = 'in_progress';
 CREATE INDEX IF NOT EXISTS operation_logs_operator_operation_recent_idx
   ON agrorisk.operation_logs(operator_id, operation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS maintenance_records_machine_due_idx
+  ON agrorisk.maintenance_records(machine_id, next_due_at DESC);

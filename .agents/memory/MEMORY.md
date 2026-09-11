@@ -6,3 +6,4 @@
 - [Macrocomponentes de risco](risk-component-naming.md) — Sompo pondera Climático e Operacional; ML não é macrocomponente e será apenas fonte futura de probabilidades.
 - [Registro de execução do Operador](operator-execution-logs.md) — execução persiste separada de operações planejadas e não altera o cálculo de risco.
 - [Foco visual do Operador](operator-ui-focus.md) — a tela do Operador prioriza decisão e execução; detalhes técnicos permanecem fora da interface.
+- [Manutenção preventiva](preventive-maintenance.md) — manutenção segue a máquina autorizada da operação e permanece fora do cálculo de risco.

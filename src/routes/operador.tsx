@@ -12,6 +12,7 @@ import { getStoredSessionToken } from "@/lib/auth";
 import { getOperadorDashboard } from "@/lib/api/operador-dashboard.functions";
 import type { OperadorDashboardSnapshot } from "@/lib/operador-dashboard-types";
 import { OperationRegistrationCard } from "@/components/operation-registration-card";
+import { PreventiveMaintenanceCard } from "@/components/preventive-maintenance-card";
 import type { ProfileAlertsBundle } from "@/lib/profile-alerts";
 
 export const Route = createFileRoute("/operador")({
@@ -188,6 +189,10 @@ function OperadorPage() {
             />
           </div>
         </Card>
+      </div>
+
+      <div className="mt-6">
+        <PreventiveMaintenanceCard />
       </div>
 
       <div id="alertas-operacao" className="mt-6 scroll-mt-20">
