@@ -1,7 +1,8 @@
 import type { Alert, Area, Client, Machine, Operation, RiskLevel } from "./mock-data";
 import type { AgroRiskRepository } from "./data/repository";
 import { mockRepository } from "./data/mock-repository.server";
-import { postgresRepository } from "./data/postgres-repository.server";
+import { listAdminOperationalOverview, postgresRepository } from "./data/postgres-repository.server";
+import { cacheOrFetch } from "./cache.server";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { evaluateRiskEngineV2 } from "./risk-engine-v2/evaluate";
 import {
@@ -17,6 +18,7 @@ import type {
   AdminMachineRow,
   AdminOperationRow,
   AdminOperationTypeRow,
+  AdminOperationalOverview,
   AdminRiskDistribution,
 } from "./admin-dashboard-types";
 
@@ -123,6 +125,10 @@ export function buildAdminDashboardSnapshot(
   source: "postgres" | "mock",
   degraded: boolean,
   weights: RiskEngineV2Weights,
+  operationalOverview: AdminOperationalOverview = {
+    maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+    activity: [],
+  },
 ): AdminDashboardSnapshot {
   const clientById = new Map(relational.clients.map((client) => [client.id, client]));
   const operationsByMachine = new Map<string, Operation[]>();
@@ -229,6 +235,7 @@ export function buildAdminDashboardSnapshot(
     operationTypeRows,
     machineDistribution: distribution(machineRows),
     areaDistribution: distribution(areaRows),
+    operationalOverview,
   };
 }
 
@@ -253,17 +260,26 @@ export async function loadAdminDashboardSnapshot(
     operationalRules: configuration.operationalRulesWeight,
   };
 
-  try {
-    return buildAdminDashboardSnapshot(
-      await readRepository(primary),
-      "postgres",
-      false,
-      weights,
-    );
-  } catch (error) {
-    console.error("[admin-dashboard] PostgreSQL indisponível; usando fallback mock.", {
-      error: error instanceof Error ? error.message : "Erro desconhecido",
-    });
-    return buildAdminDashboardSnapshot(await readRepository(fallback), "mock", true, weights);
-  }
+  const load = async () => {
+    try {
+      const [relational, operationalOverview] = await Promise.all([
+        readRepository(primary),
+        primary === postgresRepository
+          ? listAdminOperationalOverview()
+          : Promise.resolve({ maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] }, activity: [] }),
+      ]);
+      return buildAdminDashboardSnapshot(relational, "postgres", false, weights, operationalOverview);
+    } catch (error) {
+      console.error("[admin-dashboard] PostgreSQL indisponível; usando fallback mock.", {
+        error: error instanceof Error ? error.message : "Erro desconhecido",
+      });
+      return buildAdminDashboardSnapshot(await readRepository(fallback), "mock", true, weights);
+    }
+  };
+  if (primary !== postgresRepository || fallback !== mockRepository) return load();
+  return cacheOrFetch(
+    `admin-dashboard:v2:${configuration.mlWeight}:${configuration.operationalRulesWeight}`,
+    15,
+    load,
+  );
 }

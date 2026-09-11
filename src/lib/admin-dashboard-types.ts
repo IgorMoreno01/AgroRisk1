@@ -46,6 +46,34 @@ export interface AdminRiskDistribution {
   total: number;
 }
 
+export interface AdminOperationalOverview {
+  maintenance: {
+    overdueCount: number;
+    dueSoonCount: number;
+    top: Array<{
+      id: string;
+      machineId: string;
+      machineType: string;
+      client: string;
+      lastPerformedAt: string | null;
+      nextDueAt: string;
+      status: "due_soon" | "overdue";
+    }>;
+  };
+  activity: Array<{
+    id: string;
+    operator: string;
+    client: string;
+    operationId: string;
+    machineId: string;
+    machineType: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+    status: string;
+    observation: string | null;
+  }>;
+}
+
 export interface AdminDashboardSnapshot {
   source: "postgres" | "mock";
   degraded: boolean;
@@ -65,4 +93,5 @@ export interface AdminDashboardSnapshot {
   operationTypeRows: AdminOperationTypeRow[];
   machineDistribution: AdminRiskDistribution;
   areaDistribution: AdminRiskDistribution;
+  operationalOverview: AdminOperationalOverview;
 }

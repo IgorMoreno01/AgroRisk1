@@ -2,10 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout, Card } from "@/components/app-layout";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
-import {
-  alerts,
-  type MachineStatus, type AlertCriticality, type AlertStatus,
-} from "@/lib/mock-data";
+import { type MachineStatus } from "@/lib/mock-data";
 import {
   allRecommendationsConsolidated, countByCategory, countByPriority,
   type RecCategory, type RecPriority,
@@ -20,6 +17,8 @@ import { AdminV2RiskPanel } from "@/components/admin-v2-risk-panel";
 import { getStoredSessionToken } from "@/lib/auth";
 import { getAdminDashboard } from "@/lib/api/admin-dashboard.functions";
 import type { AdminDashboardSnapshot } from "@/lib/admin-dashboard-types";
+import { AdminOperationalOverview } from "@/components/admin-operational-overview";
+import { useActionableAlerts } from "@/lib/actionable-alerts";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "AgroRisk · Admin / Sompo" }] }),
@@ -42,7 +41,7 @@ type TabId =
   | "alerts"
   | "motor-risco";
 
-const createTabs = (snapshot: AdminDashboardSnapshot) => [
+const createTabs = (snapshot: AdminDashboardSnapshot, actionableAlertCount: number) => [
   { id: "visao-geral" as const, label: "Visão geral", icon: ShieldCheck, count: null as number | null },
   { id: "rankings" as const, label: "Rankings de risco", icon: Trophy, count: 2 },
   { id: "scores" as const, label: "Scores consolidados", icon: Gauge, count: 4 },
@@ -51,7 +50,7 @@ const createTabs = (snapshot: AdminDashboardSnapshot) => [
   { id: "machines" as const, label: "Máquinas monitoradas", icon: Tractor, count: snapshot.machines.length },
   { id: "areas" as const, label: "Áreas e regiões", icon: MapIcon, count: snapshot.areas.length },
   { id: "operations" as const, label: "Operações monitoradas", icon: ListChecks, count: snapshot.operations.length },
-  { id: "alerts" as const, label: "Central de alertas", icon: Bell, count: alerts.length },
+  { id: "alerts" as const, label: "Central de alertas", icon: Bell, count: actionableAlertCount },
   { id: "motor-risco" as const, label: "Configuração do motor de risco", icon: SlidersHorizontal, count: null as number | null },
 ];
 
@@ -98,12 +97,10 @@ function useAdminDashboardLoader() {
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void load();
     };
-    const interval = window.setInterval(load, 10_000);
     window.addEventListener("focus", refreshWhenVisible);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
       window.removeEventListener("focus", refreshWhenVisible);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
@@ -116,7 +113,11 @@ function AdminPage() {
   const { weights } = useRiskConfig();
   const { snapshot, error } = useAdminDashboardLoader();
   const [tab, setTab] = useState<TabId>("visao-geral");
-  const tabs = useMemo(() => (snapshot ? createTabs(snapshot) : []), [snapshot]);
+  const { snapshot: actionableAlerts } = useActionableAlerts();
+  const tabs = useMemo(
+    () => (snapshot ? createTabs(snapshot, actionableAlerts.alerts.length) : []),
+    [snapshot, actionableAlerts.alerts.length],
+  );
 
   useEffect(() => {
     if (!snapshot) return;
@@ -224,7 +225,8 @@ function OverviewPanel() {
         data.machineRows.reduce((total, row) => total + row.score, 0) / data.machineRows.length,
       )
     : 0;
-  const criticalAlerts = alerts.filter((a) => a.criticality === "alta").length;
+  const { snapshot: actionableAlerts } = useActionableAlerts();
+  const criticalAlerts = actionableAlerts.alerts.filter((alert) => alert.severity === "critical").length;
   const opsAtRisk = data.operationRows.filter((row) => row.level === "alto").length;
   const topRecs = allRecommendationsConsolidated(weights)
     .filter((r) => r.rec.priority === "alta")
@@ -238,6 +240,8 @@ function OverviewPanel() {
         <SummaryCard label="Score médio da frota" value={String(avgScore)} tone={avgScore >= 71 ? "danger" : avgScore >= 41 ? "warning" : "success"} />
         <SummaryCard label="Alertas críticos" value={String(criticalAlerts)} tone="danger" />
       </div>
+
+      <AdminOperationalOverview overview={data.operationalOverview} />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
@@ -682,36 +686,6 @@ function OperationsTable() {
           </tr>
         );
       })}
-    </TableShell>
-  );
-}
-
-const alertCritTone: Record<AlertCriticality, "green" | "yellow" | "red"> = {
-  baixa: "green",
-  "média": "yellow",
-  alta: "red",
-};
-const alertStatusTone: Record<AlertStatus, "yellow" | "blue" | "green"> = {
-  aberto: "yellow",
-  "em análise": "blue",
-  resolvido: "green",
-};
-
-function AlertsTable() {
-  return (
-    <TableShell headers={["ID", "Tipo", "Máquina", "Operação", "Mensagem", "Criticidade", "Status", "Quando"]}>
-      {alerts.map((a) => (
-        <tr key={a.id} className="hover:bg-muted/40">
-          <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
-          <TD className="font-medium text-foreground">{a.type}</TD>
-          <TD>{a.machineId}</TD>
-          <TD className="font-mono text-xs text-muted-foreground">{a.operationId}</TD>
-          <TD className="max-w-[320px] text-muted-foreground">{a.message}</TD>
-          <TD><StatusPill label={a.criticality} tone={alertCritTone[a.criticality]} /></TD>
-          <TD><StatusPill label={a.status} tone={alertStatusTone[a.status]} /></TD>
-          <TD className="text-xs text-muted-foreground">{a.time}</TD>
-        </tr>
-      ))}
     </TableShell>
   );
 }
