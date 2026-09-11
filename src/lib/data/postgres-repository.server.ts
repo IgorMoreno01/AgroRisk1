@@ -10,6 +10,7 @@ import {
 import type { AgroRiskRepository } from "./repository";
 import type { GestorOperationalOverview } from "../gestor-dashboard-types";
 import type { AdminOperationalOverview } from "../admin-dashboard-types";
+import type { ConsultorPreventiveOverview } from "../consultor-dashboard-types";
 
 let client: ReturnType<typeof postgres> | undefined;
 
@@ -180,6 +181,63 @@ export async function listAdminOperationalOverview(): Promise<AdminOperationalOv
       top: [...maintenanceRows],
     } as AdminOperationalOverview["maintenance"],
     activity: [...activityRows] as AdminOperationalOverview["activity"],
+  };
+}
+
+export async function listConsultorPreventiveOverview(
+  clientIds: readonly string[] | null,
+): Promise<ConsultorPreventiveOverview> {
+  if (clientIds !== null && clientIds.length === 0) {
+    return { maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] }, attentionPoints: [] };
+  }
+  const sql = db();
+  const ids = clientIds === null ? null : [...clientIds];
+  const [maintenanceRows, attentionRows] = await Promise.all([
+    sql`
+      SELECT r.id, m.client_id AS "clientId", c.name AS client,
+        r.machine_id AS "machineId", m.type AS "machineType",
+        r.next_due_at::text AS "nextDueAt", r.status,
+        count(*) FILTER (WHERE r.status = 'overdue') OVER ()::int AS "overdueCount",
+        count(*) FILTER (WHERE r.status = 'due_soon') OVER ()::int AS "dueSoonCount"
+      FROM agrorisk.maintenance_records r
+      JOIN agrorisk.machines m ON m.id = r.machine_id
+      JOIN agrorisk.clients c ON c.id = m.client_id
+      WHERE r.status IN ('due_soon', 'overdue')
+        ${ids === null ? sql`` : sql`AND m.client_id = ANY(${ids})`}
+      ORDER BY CASE WHEN r.status = 'overdue' THEN 0 ELSE 1 END,
+        r.next_due_at ASC, r.id ASC
+      LIMIT 5
+    `,
+    sql`
+      SELECT l.id, o.client_id AS "clientId", c.name AS client,
+        u.name AS operator, m.id AS "machineId", m.type AS "machineType",
+        coalesce(l.finished_at, l.started_at, l.created_at)::text AS "occurredAt",
+        l.status, l.observation
+      FROM agrorisk.operation_logs l
+      JOIN agrorisk.operations o
+        ON o.id = l.operation_id AND o.machine_id = l.machine_id
+        AND o.operator_id = l.operator_id
+      JOIN agrorisk.machines m ON m.id = o.machine_id AND m.client_id = o.client_id
+        AND m.operator_id = l.operator_id
+      JOIN agrorisk.clients c ON c.id = o.client_id
+      JOIN agrorisk.users u ON u.id = l.operator_id AND u.profile = 'operador'
+      WHERE (
+        nullif(btrim(l.observation), '') IS NOT NULL
+        OR lower(l.status) IN ('interrupted', 'paused', 'error', 'cancelled')
+      )
+        ${ids === null ? sql`` : sql`AND o.client_id = ANY(${ids})`}
+      ORDER BY coalesce(l.finished_at, l.started_at, l.created_at) DESC, l.id DESC
+      LIMIT 5
+    `,
+  ]);
+  const first = maintenanceRows[0] as { overdueCount?: number; dueSoonCount?: number } | undefined;
+  return {
+    maintenance: {
+      overdueCount: Number(first?.overdueCount ?? 0),
+      dueSoonCount: Number(first?.dueSoonCount ?? 0),
+      top: [...maintenanceRows],
+    } as ConsultorPreventiveOverview["maintenance"],
+    attentionPoints: [...attentionRows] as ConsultorPreventiveOverview["attentionPoints"],
   };
 }
 

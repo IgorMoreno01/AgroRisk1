@@ -23,6 +23,33 @@ export interface ConsultorClientView {
   alerts: Alert[];
 }
 
+export interface ConsultorPreventiveOverview {
+  maintenance: {
+    overdueCount: number;
+    dueSoonCount: number;
+    top: Array<{
+      id: string;
+      clientId: string;
+      client: string;
+      machineId: string;
+      machineType: string;
+      nextDueAt: string;
+      status: "due_soon" | "overdue";
+    }>;
+  };
+  attentionPoints: Array<{
+    id: string;
+    clientId: string;
+    client: string;
+    operator: string;
+    machineId: string;
+    machineType: string;
+    occurredAt: string | null;
+    status: string;
+    observation: string | null;
+  }>;
+}
+
 export interface ConsultorDashboardSnapshot {
   source: "postgres" | "mock";
   degraded: boolean;
@@ -31,4 +58,5 @@ export interface ConsultorDashboardSnapshot {
   weights: { ml: number; operationalRules: number };
   alertsSource: "demo";
   clients: ConsultorClientView[];
+  preventiveOverview: ConsultorPreventiveOverview;
 }

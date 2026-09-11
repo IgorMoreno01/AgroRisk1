@@ -1,7 +1,11 @@
 import { alerts as demoAlerts, type Alert, type Client, type Machine, type Operation } from "./mock-data";
 import type { AgroRiskRepository } from "./data/repository";
 import { mockRepository } from "./data/mock-repository.server";
-import { listClientRelationalScope, postgresRepository } from "./data/postgres-repository.server";
+import {
+  listClientRelationalScope,
+  listConsultorPreventiveOverview,
+  postgresRepository,
+} from "./data/postgres-repository.server";
 import { buildAdminDashboardSnapshot } from "./admin-dashboard.server";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
@@ -9,7 +13,11 @@ import { evaluateRiskEngineV2 } from "./risk-engine-v2/evaluate";
 import { RISK_ENGINE_V2_DEMO_SCENARIOS, type RiskEngineV2DemoScenarioId } from "./risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
 import type { GeneratedRecommendation, NextBestAction, RecCategory } from "./recommendations";
-import type { ConsultorClientView, ConsultorDashboardSnapshot } from "./consultor-dashboard-types";
+import type {
+  ConsultorClientView,
+  ConsultorDashboardSnapshot,
+  ConsultorPreventiveOverview,
+} from "./consultor-dashboard-types";
 
 export interface ConsultorAccessScope {
   userId: string;
@@ -147,6 +155,10 @@ function buildSnapshot(
   degraded: boolean,
   weights: RiskEngineV2Weights,
   scope: ConsultorAccessScope,
+  preventiveOverview: ConsultorPreventiveOverview = {
+    maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+    attentionPoints: [],
+  },
 ) {
   const base = buildAdminDashboardSnapshot(relational, source, degraded, weights);
   const clients = new Map(relational.clients.map((client) => [client.id, client]));
@@ -167,6 +179,7 @@ function buildSnapshot(
     weights,
     alertsSource: "demo" as const,
     clients: relational.clients.map((client) => buildClientView(client, base, resultByMachine, relational.alerts)),
+    preventiveOverview,
   };
 }
 
@@ -177,7 +190,16 @@ async function loadUncached(
   scope: ConsultorAccessScope,
 ): Promise<ConsultorDashboardSnapshot> {
   try {
-    return buildSnapshot(await readScope(primary, scope), "postgres", false, weights, scope);
+    const [relational, preventiveOverview] = await Promise.all([
+      readScope(primary, scope),
+      primary === postgresRepository
+        ? listConsultorPreventiveOverview(scope.clientIds)
+        : Promise.resolve({
+            maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+            attentionPoints: [],
+          }),
+    ]);
+    return buildSnapshot(relational, "postgres", false, weights, scope, preventiveOverview);
   } catch (error) {
     console.error("[consultor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
@@ -197,7 +219,7 @@ export async function loadConsultorDashboardSnapshot(
     return loadUncached(primary, fallback, weights, scope);
   }
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
-  const key = `consultor-dashboard:v2:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
+  const key = `consultor-dashboard:v3:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
   const pending = inFlight.get(key);
   if (pending) return pending;
   const request = cacheOrFetch(key, 15, () => loadUncached(primary, fallback, weights, scope));

@@ -77,6 +77,10 @@ describe("Migração do Consultor/Corretor para PostgreSQL", () => {
     expect(snapshot.degraded).toBe(true);
     expect(snapshot.alertsSource).toBe("demo");
     expect(snapshot.clients.length).toBeGreaterThan(0);
+    expect(snapshot.preventiveOverview).toEqual({
+      maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+      attentionPoints: [],
+    });
   });
 
   test("mantém score, pesos, fator e origem da recomendação iguais ao Admin", async () => {

@@ -39,7 +39,7 @@ describe("interface de alertas acionáveis", () => {
     const routes = [
       ["src/routes/operador.tsx", "alertas-operacao", "ActionableAlertsList"],
       ["src/routes/gestor.tsx", "GestorOperationalOverview", "GestorOperationalOverview"],
-      ["src/routes/consultor.tsx", "alertas-cliente", "ActionableAlertsList"],
+      ["src/routes/consultor.tsx", "ConsultorPreventiveOverview", "ConsultorPreventiveOverview"],
       ["src/routes/admin.tsx", "central-alertas", "ActionableAlertsList"],
     ] as const;
     for (const [path, sectionId, componentName] of routes) {

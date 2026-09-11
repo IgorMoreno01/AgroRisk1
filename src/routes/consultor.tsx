@@ -5,12 +5,12 @@ import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { NextBestActionCard } from "@/components/next-best-action";
 import { AlertTriangle, Building2, Database, FileText } from "lucide-react";
-import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { RequireProfile } from "@/components/require-profile";
 import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
 import { getStoredSessionToken } from "@/lib/auth";
 import { getConsultorDashboard } from "@/lib/api/consultor-dashboard.functions";
 import type { ConsultorDashboardSnapshot } from "@/lib/consultor-dashboard-types";
+import { ConsultorPreventiveOverview } from "@/components/consultor-preventive-overview";
 
 export const Route = createFileRoute("/consultor")({
   head: () => ({ meta: [{ title: "AgroRisk · Consultor" }] }),
@@ -115,7 +115,7 @@ function ConsultorPage() {
       </div>
       <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Database className="h-3.5 w-3.5" />
-        {`${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas demo`}
+        {`${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas persistentes`}
       </div>
 
       <PersonaV2RiskPanel persona="consultor" />
@@ -282,7 +282,7 @@ function ConsultorPage() {
         </section>
       </div>
 
-      <div className="mt-6"><ActionableAlertsList sectionId="alertas-cliente" title="Alertas do cliente" /></div>
+      <ConsultorPreventiveOverview overview={snapshot.preventiveOverview} />
     </AppLayout>
   );
 }
