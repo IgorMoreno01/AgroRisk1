@@ -8,3 +8,4 @@
 - [Foco visual do Operador](operator-ui-focus.md) — a tela do Operador prioriza decisão e execução; detalhes técnicos permanecem fora da interface.
 - [Manutenção preventiva](preventive-maintenance.md) — manutenção segue a máquina autorizada da operação e permanece fora do cálculo de risco.
 - [Alertas acionáveis por destinatário](actionable-alerts.md) — cada usuário mantém estado próprio; toda leitura e transição revalida o escopo atual server-side.
+- [Watcher Vite e caches](vite-watcher-cache.md) — o watcher deve ignorar caches e saídas geradas; observar `.cache` esgota descritores e trava o Preview.
