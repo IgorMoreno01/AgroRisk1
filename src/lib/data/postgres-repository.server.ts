@@ -11,7 +11,10 @@ import type { AgroRiskRepository } from "./repository";
 import type { GestorOperationalOverview } from "../gestor-dashboard-types";
 import type { AdminOperationalOverview } from "../admin-dashboard-types";
 import type { ConsultorPreventiveOverview } from "../consultor-dashboard-types";
-import type { OperationRiskRelationalContext } from "../risk-engine-v2/operation-input.server";
+import type {
+  OperationRiskRelationalContext,
+  SerializableJson,
+} from "../risk-engine-v2/operation-input.server";
 
 let client: ReturnType<typeof postgres> | undefined;
 
@@ -46,7 +49,8 @@ export async function listOperationRiskContexts(scope: {
       u.name AS "operatorName",
       a.id AS "areaId", a.name AS "areaName", a.type AS "areaType",
       a.condition AS "areaCondition", a.near_water AS "nearWater",
-      a.environmental_risk AS "environmentalRisk", a.crop, a.hectares::float8 AS hectares,
+      a.environmental_risk AS "environmentalRisk", a.terrain_context AS "terrainContext",
+      a.crop, a.hectares::float8 AS hectares,
       f.id AS "farmId", f.name AS "farmName", f.municipality AS "farmMunicipality",
       f.state AS "farmState",
       c.id AS "clientId", c.name AS "clientName", c.municipality AS "clientMunicipality",
@@ -90,6 +94,7 @@ export async function listOperationRiskContexts(scope: {
       id: String(row.farmId), name: String(row.farmName),
       municipality: String(row.farmMunicipality), state: String(row.farmState),
     },
+    terrainContext: row.terrainContext as SerializableJson,
     client: {
       id: String(row.clientId), name: String(row.clientName),
       city: String(row.clientMunicipality), state: String(row.clientState),

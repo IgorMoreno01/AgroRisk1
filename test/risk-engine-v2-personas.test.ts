@@ -35,6 +35,8 @@ describe("Risk Engine V2 · propagação entre personas", () => {
     }
     expect(componentSource).toContain('clima {quality.weather === "historical_api" ? "histórico real" : "imputado"}');
     expect(componentSource).toContain('altitude {quality.altitude === "elevation_api" ? "real" : "imputada"}');
+    expect(componentSource).toContain('Água {quality.water === "hydrography_api" ? "real" : "sintética"}');
+    expect(componentSource).toContain('quality.terrain === "synthetic_demo" ? "sintético" : "validado"');
     expect(componentSource).toContain("evaluation.context.farm.name");
   });
 

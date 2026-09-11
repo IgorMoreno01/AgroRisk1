@@ -51,6 +51,12 @@ Nunca chamar APIs externas diretamente do frontend.
 
 ### Overpass / OSM
 - HTTP 406 aparece intermitentemente (rate limit ou query format). Adapter já tem fallback para mock.
+- Para risco por distância, `center` de way/relation não representa o ponto mais próximo da água. Solicite `out geom`, calcule a menor distância aos segmentos e descarte feições sem geometria.
+- Não arredonde `nearestDistanceM` antes dos limites de 50/100/150 m; cache hidrográfico deve preservar precisão submétrica da coordenada.
+
+**Why:** centros de rios e reservatórios longos classificavam operações próximas como distantes, e arredondamento podia atravessar thresholds operacionais.
+
+**How to apply:** somente geometria Overpass real pode gerar `hydrography_api`; respostas mock, incompletas ou sem distância finita permanecem sintéticas.
 
 ## Integração no dashboard Operador
 `src/routes/operador.tsx` — usa `useEffect` + `useState` para buscar clima, hidrografia, rota e elevação.

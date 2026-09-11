@@ -84,6 +84,15 @@ describe("auditoria transversal das quatro personas", () => {
       operador.evaluationContext.input,
     ];
     expect(new Set(sharedInputs.map((input) => JSON.stringify(input))).size).toBe(1);
+    const sharedOperationalProvenance = [
+      adminMachine!.evaluation.provenance.operationalRules,
+      gestorMachine!.evaluation.provenance.operationalRules,
+      consultorMachine!.evaluation.provenance.operationalRules,
+      operador.evaluationContext.provenance.operationalRules,
+    ];
+    expect(new Set(
+      sharedOperationalProvenance.map((provenance) => JSON.stringify(provenance)),
+    ).size).toBe(1);
     expect(admin.weights).toEqual(gestor.weights);
     expect(admin.weights).toEqual(consultor.weights);
     expect(operador.weights).toEqual({

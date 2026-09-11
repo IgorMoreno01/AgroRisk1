@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   buildOperationRiskV2EvaluationInput,
   evaluateOperationRiskV2,
+  mapNearestWaterDistance,
+  mapValidatedTerrainContext,
+  validateOperationType,
   type OperationRiskExternalServices,
   type OperationRiskRelationalContext,
 } from "../src/lib/risk-engine-v2/operation-input.server";
@@ -65,9 +68,37 @@ const availableServices: OperationRiskExternalServices = {
     slopeLabel: "Plano",
     nearbyPoints: [],
   }),
+  water: async () => ({
+    source: "overpass",
+    lat: -15.6,
+    lon: -47.7,
+    radiusM: 5_000,
+    fetchedAt: "2026-09-11T00:00:00.000Z",
+    features: [],
+    nearestDistanceM: 125,
+    nearestName: "Rio real",
+  }),
 };
 
 describe("mapper central operação PostgreSQL → Risk Engine V2", () => {
+  test.each([
+    [151, "acima_150"],
+    [150, "100_150"],
+    [100, "100_150"],
+    [99.99, "50_100"],
+    [50, "50_100"],
+    [49.99, "abaixo_50"],
+  ] as const)("mapeia %p metros para %s", (distance, expected) => {
+    expect(mapNearestWaterDistance(distance)).toBe(expected);
+  });
+
+  test.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "não classifica distância hidrográfica inválida: %p",
+    (distance) => {
+      expect(mapNearestWaterDistance(distance)).toBeNull();
+    },
+  );
+
   test("usa data, UF da fazenda e tipo da operação", async () => {
     const mapped = await buildOperationRiskV2EvaluationInput(
       context, { ml: 70, operationalRules: 30 }, availableServices,
@@ -91,7 +122,7 @@ describe("mapper central operação PostgreSQL → Risk Engine V2", () => {
     expect(mapped.provenance.external.altitude).toBe("elevation_api");
   });
 
-  test("marca água e terreno determinísticos como synthetic_demo", async () => {
+  test("usa água real e mantém terreno sem semântica como synthetic_demo", async () => {
     const first = await buildOperationRiskV2EvaluationInput(
       context, { ml: 70, operationalRules: 30 }, availableServices,
     );
@@ -99,8 +130,97 @@ describe("mapper central operação PostgreSQL → Risk Engine V2", () => {
       context, { ml: 70, operationalRules: 30 }, availableServices,
     );
     expect(first.input).toEqual(second.input);
-    expect(first.provenance.operationalRules.waterDistance).toBe("synthetic_demo");
+    expect(first.input.operationalRulesInput.waterDistance).toBe("100_150");
+    expect(first.provenance.operationalRules.waterDistance).toBe("hydrography_api");
     expect(first.provenance.operationalRules.terrain).toBe("synthetic_demo");
+    expect(first.provenance.external.water).toBe("hydrography_api");
+    expect(first.provenance.external.terrain).toBe("synthetic_demo");
+  });
+
+  test("falha ou mock hidrográfico não inventa distância real", async () => {
+    const forWater = (water: OperationRiskExternalServices["water"]) => ({
+      ...availableServices,
+      water,
+    });
+    const rejected = await buildOperationRiskV2EvaluationInput(
+      context, { ml: 70, operationalRules: 30 }, forWater(async () => {
+        throw new Error("hydrography unavailable");
+      }),
+    );
+    const mocked = await buildOperationRiskV2EvaluationInput(
+      context, { ml: 70, operationalRules: 30 }, forWater(async () => ({
+        source: "mock",
+        lat: -15.6,
+        lon: -47.7,
+        radiusM: 5_000,
+        fetchedAt: "2026-09-11T00:00:00Z",
+        features: [],
+        nearestDistanceM: 25,
+        nearestName: "Córrego simulado",
+      })),
+    );
+    for (const mapped of [rejected, mocked]) {
+      expect(mapped.input.operationalRulesInput.waterDistance).toBe("acima_150");
+      expect(mapped.provenance.operationalRules.waterDistance).toBe("synthetic_demo");
+      expect(mapped.provenance.external.water).toBe("synthetic_demo");
+      expect(mapped.externalData.water).toBeNull();
+    }
+  });
+
+  test("terreno só é convertido com contexto operacional explicitamente validado", () => {
+    expect(mapValidatedTerrainContext({
+      dataNature: "validated_operational_terrain",
+      classification: "baixa_aderencia",
+    })).toBe("baixa_aderencia");
+    expect(mapValidatedTerrainContext({
+      dataNature: "synthetic_operational_area",
+      classification: "not_provided",
+      altitudeM: 900,
+      slopePercent: 30,
+    })).toBeNull();
+    expect(mapValidatedTerrainContext({
+      altitudeM: 900,
+      slopePercent: 30,
+    })).toBeNull();
+  });
+
+  test("aplica terrain_context somente quando a classificação persistida é validada", async () => {
+    const mapped = await buildOperationRiskV2EvaluationInput(
+      {
+        ...context,
+        terrainContext: {
+          dataNature: "validated_operational_terrain",
+          classification: "critico",
+        },
+      },
+      { ml: 70, operationalRules: 30 },
+      availableServices,
+    );
+    expect(mapped.input.operationalRulesInput.terrain).toBe("critico");
+    expect(mapped.provenance.operationalRules.terrain).toBe("postgres_context");
+    expect(mapped.provenance.external.terrain).toBe("postgres_context");
+
+    const mockMapped = await buildOperationRiskV2EvaluationInput(
+      {
+        ...context,
+        source: "mock",
+        terrainContext: {
+          dataNature: "validated_operational_terrain",
+          classification: "critico",
+        },
+      },
+      { ml: 70, operationalRules: 30 },
+      availableServices,
+    );
+    expect(mockMapped.input.operationalRulesInput.terrain).toBe("normal");
+    expect(mockMapped.provenance.operationalRules.terrain).toBe("synthetic_demo");
+  });
+
+  test("operationType é validado no domínio aceito sem criar score manual", () => {
+    expect(validateOperationType("Colheita")).toBe("Colheita");
+    expect(() => validateOperationType("Tipo desconhecido")).toThrow(
+      "Tipo de operação inválido",
+    );
   });
 
   test("nível vem do motor e pesos Sompo continuam aplicados", async () => {
@@ -139,6 +259,7 @@ describe("mapper central operação PostgreSQL → Risk Engine V2", () => {
       geocode: availableServices.geocode,
       historicalWeather: async () => null,
       elevation: async () => null,
+      water: async () => null,
     };
     const mapped = await buildOperationRiskV2EvaluationInput(
       context, { ml: 70, operationalRules: 30 }, unavailable,

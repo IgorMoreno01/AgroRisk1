@@ -64,7 +64,8 @@ describe("Admin · hierarquia executiva do Risk Engine V2", () => {
   test("identifica inputs incompletos e mantém semântica sem probabilidade real", () => {
     expect(panelSource).toContain("clima {quality.weather");
     expect(panelSource).toContain("altitude {quality.altitude");
-    expect(panelSource).toContain("água e terreno seguem sintéticos");
+    expect(panelSource).toContain('Água {quality.water === "hydrography_api" ? "real" : "sintética"}');
+    expect(panelSource).toContain('quality.terrain === "synthetic_demo" ? "sintético" : "validado"');
     expect(panelSource).not.toContain("sampleProbabilityInternal");
     expect(panelSource.toLowerCase()).not.toContain("probabilidade real");
     expect(panelSource.toLowerCase()).not.toContain("chance de sinistro");

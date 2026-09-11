@@ -330,7 +330,9 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
                 Localização {quality.location === "geocoded" ? "geocodificada" : "indisponível"};
                 clima {quality.weather === "historical_api" ? "histórico real" : "imputado"};
                 altitude {quality.altitude === "elevation_api" ? "real" : "imputada"}.
-                COD_MOD e histórico de itens seguem imputados; água e terreno seguem sintéticos.
+                Água {quality.water === "hydrography_api" ? "real" : "sintética"};
+                terreno {quality.terrain === "synthetic_demo" ? "sintético" : "validado"}.
+                COD_MOD e histórico de itens seguem imputados.
               </p>
             )}
           </div>

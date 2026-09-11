@@ -3,8 +3,18 @@ import type { MlRiskInput } from "../ml-risk/types";
 import { geocodeMunicipality, type GeocodedLocation } from "../adapters/location.server";
 import { getHistoricalClimate } from "../adapters/climate.server";
 import { getElevationForRisk } from "../adapters/terrain.server";
-import type { ElevationData, HistoricalWeatherFeatures } from "../external-data.types";
+import { getWaterGeo } from "../adapters/water-geo.server";
+import type {
+  ElevationData,
+  HistoricalWeatherFeatures,
+  WaterGeoData,
+} from "../external-data.types";
 import { evaluateRiskEngineV2, type RiskEngineV2EvaluationInput } from "./evaluate";
+import type {
+  OperationalActivityType,
+  OperationalTerrain,
+  OperationalWaterDistance,
+} from "./operational-rules";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./types";
 
 export type RiskInputSource =
@@ -15,6 +25,9 @@ export type RiskInputSource =
   | "geocoded"
   | "historical_api"
   | "elevation_api"
+  | "hydrography_api"
+  | "postgres_context"
+  | "derived_validated"
   | "fallback_unavailable";
 
 export interface OperationRiskFarm {
@@ -24,6 +37,14 @@ export interface OperationRiskFarm {
   state: string;
 }
 
+export type SerializableJson =
+  | string
+  | number
+  | boolean
+  | null
+  | SerializableJson[]
+  | { [key: string]: SerializableJson };
+
 export interface OperationRiskRelationalContext {
   source: "postgres" | "mock";
   operation: Operation;
@@ -31,6 +52,7 @@ export interface OperationRiskRelationalContext {
   area: Area;
   farm: OperationRiskFarm;
   client: Client;
+  terrainContext?: SerializableJson;
 }
 
 export interface OperationRiskInputProvenance {
@@ -44,6 +66,8 @@ export interface OperationRiskInputProvenance {
     location: "geocoded" | "fallback_unavailable";
     weather: "historical_api" | "missing_imputed";
     altitude: "elevation_api" | "missing_imputed";
+    water: "hydrography_api" | "synthetic_demo";
+    terrain: "postgres_context" | "derived_validated" | "synthetic_demo";
   };
 }
 
@@ -57,6 +81,7 @@ export interface OperationRiskEvaluation {
     location: GeocodedLocation | null;
     weather: HistoricalWeatherFeatures | null;
     elevation: Pick<ElevationData, "source" | "elevationM"> | null;
+    water: Pick<WaterGeoData, "source" | "nearestDistanceM"> | null;
   };
 }
 
@@ -72,13 +97,54 @@ export interface OperationRiskExternalServices {
     referenceDate: string,
   ) => Promise<HistoricalWeatherFeatures | null>;
   elevation: (lat: number, lon: number) => Promise<ElevationData | null>;
+  water: (lat: number, lon: number) => Promise<WaterGeoData | null>;
 }
 
 const defaultExternalServices: OperationRiskExternalServices = {
   geocode: geocodeMunicipality,
   historicalWeather: getHistoricalClimate,
   elevation: getElevationForRisk,
+  water: getWaterGeo,
 };
+
+const OPERATION_TYPES = new Set<OperationalActivityType>([
+  "Trabalho no campo",
+  "Transporte",
+  "Operação próxima de água",
+  "Deslocamento interno",
+  "Pulverização",
+  "Colheita",
+]);
+
+export function validateOperationType(value: string): OperationalActivityType {
+  if (OPERATION_TYPES.has(value as OperationalActivityType)) {
+    return value as OperationalActivityType;
+  }
+  throw new Error(`Tipo de operação inválido para o Risk Engine V2: ${value}`);
+}
+
+export function mapNearestWaterDistance(
+  nearestDistanceM: number,
+): OperationalWaterDistance | null {
+  if (!Number.isFinite(nearestDistanceM) || nearestDistanceM < 0) return null;
+  if (nearestDistanceM > 150) return "acima_150";
+  if (nearestDistanceM >= 100) return "100_150";
+  if (nearestDistanceM >= 50) return "50_100";
+  return "abaixo_50";
+}
+
+export function mapValidatedTerrainContext(value: unknown): OperationalTerrain | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.dataNature !== "validated_operational_terrain") return null;
+  const classification = record.classification;
+  return classification === "normal" ||
+    classification === "umido" ||
+    classification === "critico" ||
+    classification === "baixa_aderencia"
+    ? classification
+    : null;
+}
 
 export function buildFallbackOperationRiskContext(
   operation: Operation,
@@ -136,12 +202,20 @@ export async function buildOperationRiskV2EvaluationInput(
   const location = context.source === "postgres"
     ? await services.geocode(context.farm.municipality, context.farm.state)
     : null;
-  const [weather, elevation] = location
+  const [weather, elevation, waterData] = location
     ? await Promise.all([
         services.historicalWeather(location.latitude, location.longitude, referenceDate),
         services.elevation(location.latitude, location.longitude),
+        services.water(location.latitude, location.longitude).catch(() => null),
       ])
-    : [null, null];
+    : [null, null, null];
+  const realWaterDistanceM =
+    waterData?.source === "overpass" ? waterData.nearestDistanceM : null;
+  const mappedWaterDistance =
+    realWaterDistanceM === null ? null : mapNearestWaterDistance(realWaterDistanceM);
+  const mappedTerrain = context.source === "postgres"
+    ? mapValidatedTerrainContext(context.terrainContext)
+    : null;
   if (weather) {
     mlInput.PRECIPITACAO_D1_MM = weather.precipitationD1Mm;
     mlInput.CHUVA_7D_MM = weather.rain7dMm;
@@ -156,10 +230,10 @@ export async function buildOperationRiskV2EvaluationInput(
   const input: RiskEngineV2EvaluationInput = {
     mlInput,
     operationalRulesInput: {
-      operationType: context.operation.type,
-      // Temporários e neutros: não são derivados de score, near_water ou declividade.
-      waterDistance: "acima_150",
-      terrain: "normal",
+      operationType: validateOperationType(context.operation.type),
+      // Fallbacks temporários e neutros; nunca derivados de score, near_water, altitude ou declividade.
+      waterDistance: mappedWaterDistance ?? "acima_150",
+      terrain: mappedTerrain ?? "normal",
     },
     weights,
   };
@@ -185,13 +259,15 @@ export async function buildOperationRiskV2EvaluationInput(
     },
     operationalRules: {
       operationType: entitySource,
-      waterDistance: "synthetic_demo",
-      terrain: "synthetic_demo",
+      waterDistance: mappedWaterDistance ? "hydrography_api" : "synthetic_demo",
+      terrain: mappedTerrain ? "postgres_context" : "synthetic_demo",
     },
     external: {
       location: location ? "geocoded" : "fallback_unavailable",
       weather: weather ? "historical_api" : "missing_imputed",
       altitude: elevation ? "elevation_api" : "missing_imputed",
+      water: mappedWaterDistance ? "hydrography_api" : "synthetic_demo",
+      terrain: mappedTerrain ? "postgres_context" : "synthetic_demo",
     },
   };
   return {
@@ -203,6 +279,9 @@ export async function buildOperationRiskV2EvaluationInput(
       location,
       weather,
       elevation: elevation ? { source: elevation.source, elevationM: elevation.elevationM } : null,
+      water: waterData && mappedWaterDistance
+        ? { source: waterData.source, nearestDistanceM: waterData.nearestDistanceM }
+        : null,
     },
   };
 }

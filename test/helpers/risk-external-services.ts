@@ -31,4 +31,14 @@ export const testRiskExternalServices: OperationRiskExternalServices = {
     slopeLabel: "Plano",
     nearbyPoints: [],
   }),
+  water: async (lat, lon) => ({
+    source: "overpass",
+    lat,
+    lon,
+    radiusM: 5_000,
+    fetchedAt: "2026-09-11T00:00:00Z",
+    features: [],
+    nearestDistanceM: 175,
+    nearestName: "Rio validado",
+  }),
 };
