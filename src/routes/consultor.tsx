@@ -118,7 +118,13 @@ function ConsultorPage() {
         {`${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas persistentes`}
       </div>
 
-      <PersonaV2RiskPanel persona="consultor" />
+      {topMachine && (
+        <PersonaV2RiskPanel
+          persona="consultor"
+          result={topMachine.evaluation.result}
+          evaluation={topMachine.evaluation}
+        />
+      )}
 
       <div id="analise" className="mt-6 grid scroll-mt-20 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

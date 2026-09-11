@@ -9,8 +9,6 @@ import {
 import { buildAdminDashboardSnapshot } from "./admin-dashboard.server";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
-import { evaluateRiskEngineV2 } from "./risk-engine-v2/evaluate";
-import { RISK_ENGINE_V2_DEMO_SCENARIOS, type RiskEngineV2DemoScenarioId } from "./risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
 import type { GeneratedRecommendation, NextBestAction, RecCategory } from "./recommendations";
 import type {
@@ -23,28 +21,6 @@ export interface ConsultorAccessScope {
   userId: string;
   clientIds: string[] | null;
 }
-const stableNumber = (value: string) => [...value].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-const scenarioFor = (clientId: string): RiskEngineV2DemoScenarioId =>
-  (["low", "medium", "high"] as const)[stableNumber(clientId) % 3];
-
-function evaluateOperation(operation: Operation, client: Client | undefined, weights: RiskEngineV2Weights) {
-  const scenario = RISK_ENGINE_V2_DEMO_SCENARIOS[scenarioFor(operation.clientId)];
-  return evaluateRiskEngineV2({
-    mlInput: { ...scenario.mlInput, DT_REFERENCIA: operation.scheduledAt.slice(0, 10), UF: client?.state ?? scenario.mlInput.UF },
-    operationalRulesInput: { ...scenario.operationalRulesInput, operationType: operation.type },
-    weights,
-  });
-}
-
-function evaluateReference(clientId: string, weights: RiskEngineV2Weights) {
-  const scenario = RISK_ENGINE_V2_DEMO_SCENARIOS[scenarioFor(clientId)];
-  return evaluateRiskEngineV2({
-    mlInput: scenario.mlInput,
-    operationalRulesInput: { waterDistance: "acima_150", operationType: "Trabalho no campo", terrain: "normal" },
-    weights,
-  });
-}
-
 function newest(operations: Operation[]) {
   return [...operations].sort((a, b) =>
     Number(b.status === "Em andamento") - Number(a.status === "Em andamento") ||
@@ -161,13 +137,9 @@ function buildSnapshot(
   },
 ) {
   const base = buildAdminDashboardSnapshot(relational, source, degraded, weights);
-  const clients = new Map(relational.clients.map((client) => [client.id, client]));
-  const operationsByMachine = new Map<string, Operation[]>();
-  relational.operations.forEach((operation) => operationsByMachine.set(operation.machineId, [...(operationsByMachine.get(operation.machineId) ?? []), operation]));
   const resultByMachine = new Map<string, RiskEngineV2Result>();
-  relational.machines.forEach((machine: Machine) => {
-    const operation = newest(operationsByMachine.get(machine.id) ?? []);
-    resultByMachine.set(machine.id, operation ? evaluateOperation(operation, clients.get(machine.clientId), weights) : evaluateReference(machine.clientId, weights));
+  base.machineRows.forEach((row) => {
+    resultByMachine.set(row.machine.id, row.evaluation.result);
   });
   return {
     source,

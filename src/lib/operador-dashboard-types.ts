@@ -2,6 +2,7 @@ import type { Alert, Area, Client, HistoryEntry, Machine, Operation } from "./mo
 import type { GeneratedRecommendation, NextBestAction } from "./recommendations";
 import type { RiskResult, RiskWeights } from "./risk-score";
 import type { RiskEngineV2Result } from "./risk-engine-v2/types";
+import type { OperationRiskEvaluation } from "./risk-engine-v2/operation-input.server";
 
 export interface OperatorIdentity {
   id: string;
@@ -48,6 +49,7 @@ export interface OperadorDashboardSnapshot {
   weights: RiskWeights;
   risk: RiskResult;
   engineResult: RiskEngineV2Result;
+  evaluationContext: OperationRiskEvaluation;
   mainFactor: string;
   recommendation: GeneratedRecommendation;
   nextAction: NextBestAction;

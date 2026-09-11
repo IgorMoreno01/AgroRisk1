@@ -212,7 +212,10 @@ function AdminPage() {
 }
 
 function RiskEngineConfigurationPanel() {
-  return <AdminV2RiskPanel />;
+  const data = useAdminDashboardData();
+  const evaluation = data.operationRows[0]?.evaluation;
+  if (!evaluation) return <Card>Nenhuma operação disponível para avaliação.</Card>;
+  return <AdminV2RiskPanel evaluation={evaluation} />;
 }
 
 function OverviewPanel() {

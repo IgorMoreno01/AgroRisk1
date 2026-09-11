@@ -11,6 +11,7 @@ import type { AgroRiskRepository } from "./repository";
 import type { GestorOperationalOverview } from "../gestor-dashboard-types";
 import type { AdminOperationalOverview } from "../admin-dashboard-types";
 import type { ConsultorPreventiveOverview } from "../consultor-dashboard-types";
+import type { OperationRiskRelationalContext } from "../risk-engine-v2/operation-input.server";
 
 let client: ReturnType<typeof postgres> | undefined;
 
@@ -27,10 +28,81 @@ export async function closePostgresRepository(): Promise<void> {
   client = undefined;
 }
 
+export async function listOperationRiskContexts(scope: {
+  clientIds?: readonly string[] | null;
+  operatorId?: string;
+}): Promise<OperationRiskRelationalContext[]> {
+  const sql = db();
+  const ids = scope.clientIds === null ? null : scope.clientIds ? [...scope.clientIds] : undefined;
+  if (ids?.length === 0) return [];
+  const rows = await sql`
+    SELECT
+      o.id AS "operationId", o.type AS "operationType", o.status AS "operationStatus",
+      o.scheduled_at::text AS "scheduledAt", o.start_label AS "startLabel",
+      o.duration_label AS "durationLabel", o.operator_id AS "operatorId",
+      m.id AS "machineId", m.code AS "machineCode", m.name AS "machineName",
+      m.type AS "machineType", m.model AS "machineModel", m.status AS "machineStatus",
+      u.name AS "operatorName",
+      a.id AS "areaId", a.name AS "areaName", a.type AS "areaType",
+      a.condition AS "areaCondition", a.near_water AS "nearWater",
+      a.environmental_risk AS "environmentalRisk", a.crop, a.hectares::float8 AS hectares,
+      f.id AS "farmId", f.name AS "farmName", f.municipality AS "farmMunicipality",
+      f.state AS "farmState",
+      c.id AS "clientId", c.name AS "clientName", c.municipality AS "clientMunicipality",
+      c.state AS "clientState", c.main_operation AS "mainOperation"
+    FROM agrorisk.operations o
+    JOIN agrorisk.machines m
+      ON m.id=o.machine_id AND m.area_id=o.area_id AND m.client_id=o.client_id
+    JOIN agrorisk.users u
+      ON u.id=o.operator_id AND u.client_id=o.client_id
+    JOIN agrorisk.areas a ON a.id=o.area_id AND a.client_id=o.client_id
+    JOIN agrorisk.farms f ON f.id=a.farm_id AND f.client_id=a.client_id
+    JOIN agrorisk.clients c ON c.id=o.client_id
+    WHERE true
+      ${scope.operatorId ? sql`AND o.operator_id=${scope.operatorId}` : sql``}
+      ${ids === null || ids === undefined ? sql`` : sql`AND o.client_id=ANY(${ids})`}
+    ORDER BY o.id
+  `;
+  return rows.map((row) => ({
+    source: "postgres" as const,
+    operation: {
+      id: String(row.operationId), machineId: String(row.machineId), machine: String(row.machineId),
+      operatorId: String(row.operatorId), clientId: String(row.clientId), areaId: String(row.areaId),
+      area: String(row.areaName), type: row.operationType, scheduledAt: String(row.scheduledAt),
+      start: String(row.startLabel), duration: String(row.durationLabel), status: row.operationStatus,
+      score: 0, factors: [], recommendationId: "",
+    },
+    machine: {
+      id: String(row.machineId), code: String(row.machineCode), name: String(row.machineName),
+      model: String(row.machineModel), type: row.machineType, clientId: String(row.clientId),
+      client: String(row.clientName), areaId: String(row.areaId), area: String(row.areaName),
+      operatorId: String(row.operatorId), operator: String(row.operatorName),
+      status: row.machineStatus, score: 0, level: "baixo", lastAlert: "", lastUpdate: "",
+    },
+    area: {
+      id: String(row.areaId), name: String(row.areaName), clientId: String(row.clientId),
+      client: String(row.clientName), type: row.areaType, condition: String(row.areaCondition),
+      nearWater: row.nearWater, envRisk: row.environmentalRisk, score: 0,
+      crop: String(row.crop), hectares: Number(row.hectares),
+    },
+    farm: {
+      id: String(row.farmId), name: String(row.farmName),
+      municipality: String(row.farmMunicipality), state: String(row.farmState),
+    },
+    client: {
+      id: String(row.clientId), name: String(row.clientName),
+      city: String(row.clientMunicipality), state: String(row.clientState),
+      location: `${row.clientMunicipality} / ${row.clientState}`,
+      mainOperation: String(row.mainOperation), machineCount: 0, machines: 0,
+      avgScore: 0, level: "baixo",
+    },
+  })) as OperationRiskRelationalContext[];
+}
+
 export async function listClientRelationalScope(clientIds: readonly string[] | null) {
   const sql = db();
   const ids = clientIds === null ? null : [...clientIds];
-  const [clientRows, areaRows, machineRows, operationRows] = await Promise.all([
+  const [clientRows, areaRows, machineRows, operationRows, riskContexts] = await Promise.all([
     sql`
       SELECT c.id, c.name, c.municipality AS city, c.state,
         c.municipality || ' / ' || c.state AS location,
@@ -78,12 +150,14 @@ export async function listClientRelationalScope(clientIds: readonly string[] | n
       ${ids === null ? sql`` : sql`WHERE o.client_id = ANY(${ids})`}
       GROUP BY o.id, a.name ORDER BY o.id
     `,
+    listOperationRiskContexts({ clientIds }),
   ]);
   return {
     clients: parseClients([...clientRows]),
     areas: parseAreas([...areaRows]),
     machines: parseMachines([...machineRows]),
     operations: parseOperations([...operationRows]),
+    riskContexts,
   };
 }
 
@@ -250,7 +324,7 @@ export async function getOperatorRelationalScope(operatorId: string) {
     ORDER BY (o.status = 'Em andamento') DESC, o.scheduled_at DESC, o.id
     LIMIT 1
   `;
-  const [contextRows, countRows, alertRows, historyRows] = await Promise.all([
+  const [contextRows, riskContexts, countRows, alertRows, historyRows] = await Promise.all([
     sql`
       WITH current_operation AS (${currentOperation})
       SELECT
@@ -285,13 +359,13 @@ export async function getOperatorRelationalScope(operatorId: string) {
           ), '[]'::json), 'recommendationId', coalesce(o.recommendation_id, '')
         ) AS operation
       FROM current_operation o
-      JOIN agrorisk.users u ON u.id = o.operator_id AND u.profile = 'operador'
+       JOIN agrorisk.users u ON u.id = o.operator_id AND u.client_id = o.client_id
       JOIN agrorisk.machines m
-        ON m.id = o.machine_id AND m.operator_id = o.operator_id
-        AND m.client_id = o.client_id AND m.area_id = o.area_id
+         ON m.id = o.machine_id AND m.client_id = o.client_id AND m.area_id = o.area_id
       JOIN agrorisk.areas a ON a.id = o.area_id AND a.client_id = o.client_id
       JOIN agrorisk.clients c ON c.id = o.client_id
     `,
+    listOperationRiskContexts({ operatorId }),
     sql`
       SELECT count(*)::int AS count
       FROM agrorisk.operations
@@ -330,6 +404,7 @@ export async function getOperatorRelationalScope(operatorId: string) {
     alerts: parseAlerts([...alertRows]),
     history: parseHistory([...historyRows]),
     operationCount: Number(countRows[0]?.count ?? 0),
+    riskContexts,
   };
 }
 

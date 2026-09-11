@@ -269,7 +269,16 @@ function GestorPage() {
           : "Carregando carteira do Gestor…")}
       </div>
 
-      <PersonaV2RiskPanel persona="gestor" />
+      {snapshot?.operationRows[0] && (
+        <PersonaV2RiskPanel
+          persona="gestor"
+          result={snapshot.operationRows[0].evaluation.result}
+          evaluation={snapshot.operationRows[0].evaluation}
+          recommendation={snapshot.machineRows.find(
+            (row) => row.machine.id === snapshot.operationRows[0].operation.machineId,
+          )?.recommendation}
+        />
+      )}
 
       {snapshot && <GestorOperationalOverview overview={snapshot.operationalOverview} />}
 

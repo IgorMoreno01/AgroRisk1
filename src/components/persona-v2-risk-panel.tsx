@@ -1,13 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
 import { Activity, ArrowDownRight, ArrowUpRight, ShieldCheck, Target } from "lucide-react";
 import { Card, SectionTitle } from "@/components/app-layout";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { RiskBadge } from "@/components/risk-badge";
 import type { GeneratedRecommendation } from "@/lib/recommendations";
-import { evaluateRiskEngineV2Demo } from "@/lib/risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result } from "@/lib/risk-engine-v2/types";
-import { getStoredSessionToken } from "@/lib/auth";
-import { getRiskEngineV2Configuration } from "@/lib/api/risk-config.functions";
+import type { OperationRiskEvaluation } from "@/lib/risk-engine-v2/operation-input.server";
 
 export type RiskPersona = "gestor" | "operador" | "consultor";
 
@@ -47,10 +44,6 @@ const directionLabel = (direction?: "increase" | "decrease" | "neutral") => {
   return "tem efeito neutro";
 };
 
-export function getRiskEngineV2DemoResult(mlWeight = 70): RiskEngineV2Result {
-  return evaluateRiskEngineV2Demo(mlWeight);
-}
-
 function ScoreMetric({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="min-w-0 rounded-lg border border-border bg-background/70 p-3">
@@ -81,55 +74,24 @@ function DriverCard({
 
 export function PersonaV2RiskPanel({
   persona,
-  result: providedResult,
-  recommendation: providedRecommendation,
+  result,
+  recommendation,
+  evaluation,
 }: {
   persona: RiskPersona;
-  result?: RiskEngineV2Result;
+  result: RiskEngineV2Result;
   recommendation?: GeneratedRecommendation;
+  evaluation: OperationRiskEvaluation;
 }) {
-  const [mlWeight, setMlWeight] = useState(70);
-  const result = useMemo(
-    () => providedResult ?? getRiskEngineV2DemoResult(mlWeight),
-    [mlWeight, providedResult],
-  );
-  const [demoRecommendation, setDemoRecommendation] = useState<GeneratedRecommendation>();
   const copy = personaCopy[persona];
-  const recommendation = providedRecommendation ?? demoRecommendation;
   const mlDriver = result.drivers.find((driver) => driver.source === "ml");
   const operationalDriver = result.drivers.find(
     (driver) => driver.source === "operational_rules",
   );
 
-  useEffect(() => {
-    if (providedResult) return;
-    const token = getStoredSessionToken();
-    if (!token) return;
-    void getRiskEngineV2Configuration({ data: { token } }).then((response) => {
-      if (response.ok) setMlWeight(response.configuration.mlWeight);
-    });
-  }, [providedResult]);
-
-  useEffect(() => {
-    if (providedRecommendation) return;
-    let cancelled = false;
-    void Promise.all([import("@/lib/mock-data"), import("@/lib/recommendations")]).then(
-      ([mockData, recommendationModule]) => {
-        if (cancelled) return;
-        const scenario =
-          mockData.operations.find((operation) => operation.status === "Em andamento") ??
-          mockData.operations[0];
-        setDemoRecommendation(
-          recommendationModule.recommendationsForOperation(scenario, persona)[0],
-        );
-      },
-    );
-    return () => { cancelled = true; };
-  }, [persona, providedRecommendation]);
-
   return (
     <section
-      aria-label={`Resultado demonstrativo do Risk Engine V2 para ${persona}`}
+      aria-label={`Resultado do Risk Engine V2 para ${persona}`}
       className="mt-6 space-y-4"
     >
       <Card className="border-primary/25 bg-primary/5">
@@ -141,10 +103,17 @@ export function PersonaV2RiskPanel({
             </div>
             <p className="mt-1 text-sm text-muted-foreground">{copy.description}</p>
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              {providedResult
-                ? "Resultado da operação atual; complementos sintéticos são identificados separadamente."
-                : "Cenário demonstrativo do MVP; não representa uma operação produtiva real e algumas fontes podem utilizar dados simulados/fallback."}
+              {evaluation.context.client.name} · {evaluation.context.farm.name} ·{" "}
+              {evaluation.context.machine.type} {evaluation.context.machine.id} · operação{" "}
+              {evaluation.context.operation.id} · {evaluation.context.farm.municipality}/
+              {evaluation.context.farm.state}
             </p>
+            {evaluation.hasIncompleteInputs && (
+              <p className="mt-1 text-xs leading-relaxed text-warning-foreground">
+                Parte dos inputs está indisponível e usa imputação oficial; água e terreno ainda
+                usam fallback sintético demonstrativo.
+              </p>
+            )}
           </div>
           <span className="w-fit shrink-0 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
              Engine {result.engineVersion} · Climático {result.weights.ml}% / Operacional{" "}
@@ -257,7 +226,7 @@ export function PersonaV2RiskPanel({
         ) : (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Target className="h-4 w-4" />
-            Nenhuma recomendação ativa para este cenário.
+            Nenhuma recomendação ativa para esta operação.
           </div>
         )}
       </Card>

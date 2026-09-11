@@ -61,8 +61,9 @@ describe("Admin · hierarquia executiva do Risk Engine V2", () => {
     expect(panelSource).not.toContain("recommendationsForOperation");
   });
 
-  test("mantém demo e semântica sem probabilidade real", () => {
-    expect(panelSource).toContain("Cenário demonstrativo do MVP");
+  test("identifica inputs incompletos e mantém semântica sem probabilidade real", () => {
+    expect(panelSource).toContain("imputação oficial");
+    expect(panelSource).toContain("sintéticos demonstrativos");
     expect(panelSource).not.toContain("sampleProbabilityInternal");
     expect(panelSource.toLowerCase()).not.toContain("probabilidade real");
     expect(panelSource.toLowerCase()).not.toContain("chance de sinistro");

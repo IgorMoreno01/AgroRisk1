@@ -188,6 +188,15 @@ describe("Migração do Operador para PostgreSQL", () => {
       new URL("../src/components/persona-v2-risk-panel.tsx", import.meta.url),
       "utf8",
     );
-    expect(panelSource).toContain("providedResult ?? getRiskEngineV2DemoResult(mlWeight)");
+    expect(panelSource).not.toContain("getRiskEngineV2DemoResult");
+    expect(panelSource).not.toContain("evaluateRiskEngineV2Demo");
+  });
+
+  test("contexto relacional não exige que a atribuição atual da máquina repita o operador histórico", () => {
+    const repositorySource = readFileSync(
+      new URL("../src/lib/data/postgres-repository.server.ts", import.meta.url),
+      "utf8",
+    );
+    expect(repositorySource).not.toContain("m.operator_id = o.operator_id");
   });
 });

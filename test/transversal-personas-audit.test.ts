@@ -72,6 +72,13 @@ describe("auditoria transversal das quatro personas", () => {
     expect(operador.risk.finalScore).toBe(adminMachine!.score);
     expect(operador.risk.level).toBe(adminMachine!.level);
     expect(operador.mainFactor).toBe(adminMachine!.mainFactor);
+    const sharedInputs = [
+      adminMachine!.evaluation.input,
+      gestorMachine!.evaluation.input,
+      consultorMachine!.evaluation.input,
+      operador.evaluationContext.input,
+    ];
+    expect(new Set(sharedInputs.map((input) => JSON.stringify(input))).size).toBe(1);
     expect(admin.weights).toEqual(gestor.weights);
     expect(admin.weights).toEqual(consultor.weights);
     expect(operador.weights).toEqual({

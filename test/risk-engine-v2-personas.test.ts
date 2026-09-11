@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { getRiskEngineV2DemoResult } from "../src/components/persona-v2-risk-panel";
-import { evaluateRiskEngineV2Demo } from "../src/lib/risk-engine-v2/demo-scenario";
 import { evaluateWithRiskEngineAdapter } from "../src/lib/risk-engine/engine-adapter.server";
 
 const componentSource = readFileSync(
@@ -11,73 +9,50 @@ const componentSource = readFileSync(
 const routeSources = ["gestor", "operador", "consultor"].map((route) =>
   readFileSync(new URL(`../src/routes/${route}.tsx`, import.meta.url), "utf8"),
 );
-const adminSource = readFileSync(
-  new URL("../src/components/admin-v2-risk-panel.tsx", import.meta.url),
-  "utf8",
-);
+const runtimeSources = [
+  "../src/lib/admin-dashboard.server.ts",
+  "../src/lib/operador-dashboard.server.ts",
+  "../src/lib/consultor-dashboard.server.ts",
+  "../src/components/admin-v2-risk-panel.tsx",
+  "../src/components/persona-v2-risk-panel.tsx",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
 
 describe("Risk Engine V2 · propagação entre personas", () => {
-  test("Gestor e Consultor usam o painel V2; Operador mantém o mesmo resultado em resumo compacto", () => {
-    expect(routeSources[0]).toContain('<PersonaV2RiskPanel persona="gestor"');
-    expect(routeSources[1]).not.toContain('<PersonaV2RiskPanel persona="operador"');
+  test("Gestor e Consultor recebem resultado/contexto central; Operador usa o snapshot", () => {
+    expect(routeSources[0]).toContain('persona="gestor"');
+    expect(routeSources[0]).toContain("evaluation={snapshot.operationRows[0].evaluation}");
     expect(routeSources[1]).toContain("scoreContext.finalScore");
     expect(routeSources[1]).toContain("snapshot.nextAction");
-    expect(routeSources[2]).toContain('<PersonaV2RiskPanel persona="consultor"');
-
-    const results = routeSources.map(() => getRiskEngineV2DemoResult());
-    expect(new Set(results.map((result) => result.finalScore)).size).toBe(1);
-    expect(new Set(results.map((result) => result.level)).size).toBe(1);
-    expect(new Set(results.map((result) => result.dominantComponent)).size).toBe(1);
+    expect(routeSources[2]).toContain('persona="consultor"');
+    expect(routeSources[2]).toContain("evaluation={topMachine.evaluation}");
   });
 
-  test("nenhuma rota duplica o cenário ou recalcula o score V2", () => {
-    for (const source of routeSources) {
+  test("Golden Vector e cenários baixo/médio/alto não alimentam runtime", () => {
+    for (const source of runtimeSources) {
       expect(source).not.toContain("evaluateRiskEngineV2Demo");
-      expect(source).not.toContain("RISK_ENGINE_V2_DEMO_ML_INPUT");
-      expect(source).not.toContain("RISK_ENGINE_V2_DEMO_OPERATIONAL_INPUT");
+      expect(source).not.toContain("RISK_ENGINE_V2_DEMO_SCENARIOS");
+      expect(source).not.toContain("Golden Vector");
     }
-    expect(componentSource).toContain("getRiskEngineV2DemoResult(mlWeight)");
-    expect(componentSource).toContain("getRiskEngineV2Configuration");
+    expect(componentSource).toContain("imputação oficial");
+    expect(componentSource).toContain("evaluation.context.farm.name");
   });
 
-  test("mantém semântica segura, drivers coerentes e identificação da demo", () => {
-    const visibleSources = [componentSource, ...routeSources, adminSource].join("\n");
-    expect(componentSource).toContain("Score climático");
-    expect(componentSource).toContain('driver.source === "ml"');
-    expect(componentSource).toContain('driver.source === "operational_rules"');
-    expect(componentSource).toContain("Cenário demonstrativo do MVP");
+  test("não apresenta probabilidade absoluta", () => {
+    const visibleSources = [componentSource, ...routeSources].join("\n");
     expect(visibleSources).not.toContain("sampleProbabilityInternal");
     expect(visibleSources.toLowerCase()).not.toContain("probabilidade calibrada");
     expect(visibleSources.toLowerCase()).not.toContain("probabilidade de sinistro");
-    expect(visibleSources.toLowerCase()).not.toContain("chance real de sinistro");
-  });
-
-  test("Sompo permanece funcional com o mesmo cenário V2", () => {
-    expect(adminSource).toContain("evaluateRiskEngineV2Demo");
-    expect(adminSource).toContain("Score final de risco");
-    expect(evaluateRiskEngineV2Demo().finalScore).toBe(getRiskEngineV2DemoResult().finalScore);
-  });
-
-  test("Gestor, Operador e Consultor refletem os pesos V2 salvos pela Sompo", () => {
-    const results = ["gestor", "operador", "consultor"].map(() =>
-      getRiskEngineV2DemoResult(40),
-    );
-    for (const result of results) {
-      expect(result.weights).toEqual({ ml: 40, operationalRules: 60 });
-    }
-    expect(componentSource).not.toContain("<Slider");
   });
 
   test("V1 permanece disponível no adapter", () => {
-    const operation = {
-      weather: "seco" as const,
-      waterDistance: "mais_100" as const,
-      operationType: "Transporte" as const,
-      terrain: "seco" as const,
-    };
     const result = evaluateWithRiskEngineAdapter({
       mode: "v1",
-      v1Input: operation,
+      v1Input: {
+        weather: "seco",
+        waterDistance: "mais_100",
+        operationType: "Transporte",
+        terrain: "seco",
+      },
       evaluateV1: () => ({ finalScore: 18, level: "baixo" }),
     });
     expect(result.mode).toBe("v1");

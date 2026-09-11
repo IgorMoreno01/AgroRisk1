@@ -10,9 +10,12 @@ import type {
 } from "./operador-dashboard-types";
 import type { GeneratedRecommendation } from "./recommendations";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
-import { evaluateRiskEngineV2 } from "./risk-engine-v2/evaluate";
-import { RISK_ENGINE_V2_DEMO_SCENARIOS } from "./risk-engine-v2/demo-scenario";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
+import {
+  buildFallbackOperationRiskContext,
+  evaluateOperationRiskV2,
+  type OperationRiskRelationalContext,
+} from "./risk-engine-v2/operation-input.server";
 import type { RiskResult } from "./risk-score";
 
 const operatorScopeRule = (operatorId: string) =>
@@ -22,29 +25,6 @@ const inFlight = new Map<string, Promise<OperadorDashboardSnapshot>>();
 
 const stableNumber = (value: string) =>
   [...value].reduce((total, character) => total + character.charCodeAt(0), 0);
-
-const scenarioForClient = (clientId: string) =>
-  (["low", "medium", "high"] as const)[stableNumber(clientId) % 3];
-
-function evaluateOperation(
-  operation: Operation,
-  client: Client,
-  weights: RiskEngineV2Weights,
-): RiskEngineV2Result {
-  const scenario = RISK_ENGINE_V2_DEMO_SCENARIOS[scenarioForClient(operation.clientId)];
-  return evaluateRiskEngineV2({
-    mlInput: {
-      ...scenario.mlInput,
-      DT_REFERENCIA: operation.scheduledAt.slice(0, 10),
-      UF: client.state,
-    },
-    operationalRulesInput: {
-      ...scenario.operationalRulesInput,
-      operationType: operation.type,
-    },
-    weights,
-  });
-}
 
 function toPresentationRisk(result: RiskEngineV2Result): RiskResult {
   const climateScore = Math.round(result.ml.mlRelativeScore);
@@ -272,7 +252,9 @@ async function readFallback(repository: AgroRiskRepository, operatorId: string) 
 }
 
 function buildSnapshot(
-  relational: Awaited<ReturnType<typeof getOperatorRelationalScope>>,
+  relational: Omit<Awaited<ReturnType<typeof getOperatorRelationalScope>>, "riskContexts"> & {
+    riskContexts?: OperationRiskRelationalContext[];
+  },
   source: "postgres" | "mock",
   degraded: boolean,
   engineWeights: RiskEngineV2Weights,
@@ -287,7 +269,10 @@ function buildSnapshot(
   const presentedArea = areaConditionSource === "postgres"
     ? area
     : { ...area, condition: "Condição estável (demonstração)" };
-  const result = evaluateOperation(operation, client, engineWeights);
+  const context = relational.riskContexts?.find((item) => item.operation.id === operation.id)
+    ?? buildFallbackOperationRiskContext(operation, machine, area, client);
+  const evaluation = evaluateOperationRiskV2(context, engineWeights);
+  const result = evaluation.result;
   const risk = toPresentationRisk(result);
   const recommendation = centralRecommendation(operation, result);
   const telemetry = syntheticInclination(operation.id);
@@ -325,6 +310,7 @@ function buildSnapshot(
       ...result,
       ml: { ...result.ml, sampleProbabilityInternal: undefined },
     },
+    evaluationContext: evaluation,
     mainFactor: recommendation.factor,
     recommendation,
     nextAction: {

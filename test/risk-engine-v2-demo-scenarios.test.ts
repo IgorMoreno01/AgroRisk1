@@ -55,12 +55,13 @@ describe("Risk Engine V2 · cenários demonstrativos", () => {
     expect(changedResult.weights).toEqual({ ml: 40, operationalRules: 60 });
   });
 
-  test("Admin possui seletor e não exibe probabilidade absoluta", () => {
-    expect(panelSource).toContain("Cenário demonstrativo");
+  test("Admin preserva demos somente nos testes e não exibe probabilidade absoluta", () => {
+    expect(panelSource).toContain("Risk Engine V2 · operação avaliada");
     expect(RISK_ENGINE_V2_DEMO_SCENARIOS.low.label).toBe("Baixo");
     expect(RISK_ENGINE_V2_DEMO_SCENARIOS.medium.label).toBe("Médio");
     expect(RISK_ENGINE_V2_DEMO_SCENARIOS.high.label).toBe("Alto");
-    expect(panelSource).toContain("evaluateRiskEngineV2DemoScenario");
+    expect(panelSource).not.toContain("evaluateRiskEngineV2DemoScenario");
+    expect(panelSource).not.toContain("RISK_ENGINE_V2_DEMO_SCENARIOS");
     expect(panelSource).not.toContain("sampleProbabilityInternal");
     expect(panelSource.toLowerCase()).not.toContain("probabilidade calibrada");
     expect(panelSource.toLowerCase()).not.toContain("probabilidade de sinistro");

@@ -5,6 +5,7 @@ import type {
   Operation,
   RiskLevel,
 } from "./mock-data";
+import type { OperationRiskEvaluation } from "./risk-engine-v2/operation-input.server";
 
 export interface AdminEntityRisk {
   score: number;
@@ -16,6 +17,7 @@ export interface AdminMachineRow extends AdminEntityRisk {
   machine: Machine;
   operation?: Operation;
   alertsCount: number;
+  evaluation: OperationRiskEvaluation;
 }
 
 export interface AdminAreaRow extends AdminEntityRisk {
@@ -32,6 +34,7 @@ export interface AdminClientRow extends AdminEntityRisk {
 
 export interface AdminOperationRow extends AdminEntityRisk {
   operation: Operation;
+  evaluation: OperationRiskEvaluation;
 }
 
 export interface AdminOperationTypeRow extends AdminEntityRisk {

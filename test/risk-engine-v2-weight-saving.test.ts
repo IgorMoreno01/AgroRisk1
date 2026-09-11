@@ -83,9 +83,10 @@ describe("Risk Engine V2 · salvamento temporário de pesos", () => {
     });
     const personaResult = evaluateRiskEngineV2Demo(saved.mlWeight);
     expect(personaResult.weights).toEqual({ ml: 40, operationalRules: 60 });
-    expect(personaSource).toContain("getRiskEngineV2Configuration");
-    expect(personaSource).toContain("response.configuration.mlWeight");
-    expect(personaSource).toContain("getRiskEngineV2DemoResult(mlWeight)");
+    expect(personaSource).toContain("result: RiskEngineV2Result");
+    expect(personaSource).toContain("evaluation: OperationRiskEvaluation");
+    expect(personaSource).not.toContain("getRiskEngineV2Configuration");
+    expect(personaSource).not.toContain("getRiskEngineV2DemoResult");
   });
 
   test("nenhuma persona recebe controles para alterar os pesos", () => {

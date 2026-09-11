@@ -1,14 +1,14 @@
 import type { Alert, Area, Client, Machine, Operation, RiskLevel } from "./mock-data";
 import type { AgroRiskRepository } from "./data/repository";
 import { mockRepository } from "./data/mock-repository.server";
-import { listAdminOperationalOverview, postgresRepository } from "./data/postgres-repository.server";
+import { listAdminOperationalOverview, listClientRelationalScope, postgresRepository } from "./data/postgres-repository.server";
 import { cacheOrFetch } from "./cache.server";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
-import { evaluateRiskEngineV2 } from "./risk-engine-v2/evaluate";
 import {
-  RISK_ENGINE_V2_DEMO_SCENARIOS,
-  type RiskEngineV2DemoScenarioId,
-} from "./risk-engine-v2/demo-scenario";
+  buildFallbackOperationRiskContext,
+  evaluateOperationRiskV2,
+  type OperationRiskRelationalContext,
+} from "./risk-engine-v2/operation-input.server";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
 import type {
   AdminAreaRow,
@@ -28,35 +28,8 @@ interface RelationalSnapshot {
   machines: Machine[];
   operations: Operation[];
   alerts: Alert[];
+  riskContexts?: OperationRiskRelationalContext[];
 }
-
-const stableNumber = (value: string): number =>
-  [...value].reduce((total, character) => total + character.charCodeAt(0), 0);
-
-const scenarioForClient = (clientId: string): RiskEngineV2DemoScenarioId =>
-  (["low", "medium", "high"] as const)[stableNumber(clientId) % 3];
-
-const evaluateOperation = (
-  operation: Operation,
-  clientById: ReadonlyMap<string, Client>,
-  weights: RiskEngineV2Weights,
-): RiskEngineV2Result => {
-  const scenario = RISK_ENGINE_V2_DEMO_SCENARIOS[scenarioForClient(operation.clientId)];
-  const client = clientById.get(operation.clientId);
-
-  return evaluateRiskEngineV2({
-    mlInput: {
-      ...scenario.mlInput,
-      DT_REFERENCIA: operation.scheduledAt.slice(0, 10),
-      UF: client?.state ?? scenario.mlInput.UF,
-    },
-    operationalRulesInput: {
-      ...scenario.operationalRulesInput,
-      operationType: operation.type,
-    },
-    weights,
-  });
-};
 
 const toEntityRisk = (result: RiskEngineV2Result): AdminEntityRisk => ({
   score: result.finalScore,
@@ -102,24 +75,6 @@ const newestOperation = (operations: readonly Operation[]): Operation | undefine
     );
   })[0];
 
-const referenceRisk = (
-  clientId: string,
-  weights: RiskEngineV2Weights,
-): AdminEntityRisk => {
-  const scenario = RISK_ENGINE_V2_DEMO_SCENARIOS[scenarioForClient(clientId)];
-  return toEntityRisk(
-    evaluateRiskEngineV2({
-      mlInput: scenario.mlInput,
-      operationalRulesInput: {
-        waterDistance: "acima_150",
-        operationType: "Trabalho no campo",
-        terrain: "normal",
-      },
-      weights,
-    }),
-  );
-};
-
 export function buildAdminDashboardSnapshot(
   relational: RelationalSnapshot,
   source: "postgres" | "mock",
@@ -131,6 +86,11 @@ export function buildAdminDashboardSnapshot(
   },
 ): AdminDashboardSnapshot {
   const clientById = new Map(relational.clients.map((client) => [client.id, client]));
+  const areaById = new Map(relational.areas.map((area) => [area.id, area]));
+  const machineById = new Map(relational.machines.map((machine) => [machine.id, machine]));
+  const contextByOperationId = new Map(
+    (relational.riskContexts ?? []).map((context) => [context.operation.id, context]),
+  );
   const operationsByMachine = new Map<string, Operation[]>();
   const operationsByArea = new Map<string, Operation[]>();
 
@@ -145,61 +105,69 @@ export function buildAdminDashboardSnapshot(
     ]);
   }
 
-  const operationRows: AdminOperationRow[] = relational.operations.map((operation) => ({
-    operation,
-    ...toEntityRisk(evaluateOperation(operation, clientById, weights)),
-  }));
+  const operationRows: AdminOperationRow[] = relational.operations.map((operation) => {
+    const context = contextByOperationId.get(operation.id) ?? buildFallbackOperationRiskContext(
+      operation,
+      machineById.get(operation.machineId)!,
+      areaById.get(operation.areaId)!,
+      clientById.get(operation.clientId)!,
+    );
+    const evaluation = evaluateOperationRiskV2(context, weights);
+    return { operation, evaluation, ...toEntityRisk(evaluation.result) };
+  });
   const operationRiskById = new Map(operationRows.map((row) => [row.operation.id, row]));
 
   const machineRows: AdminMachineRow[] = relational.machines
-    .map((machine) => {
+    .flatMap((machine): AdminMachineRow[] => {
       const operation = newestOperation(operationsByMachine.get(machine.id) ?? []);
-      const risk = operation
-        ? operationRiskById.get(operation.id)!
-        : referenceRisk(machine.clientId, weights);
-      return {
+      if (!operation) return [];
+      const risk = operationRiskById.get(operation.id)!;
+      return [{
         machine,
         operation,
         score: risk.score,
         level: risk.level,
         mainFactor: risk.mainFactor,
+        evaluation: risk.evaluation,
         alertsCount: relational.alerts.filter((alert) => alert.machineId === machine.id).length,
-      };
+      }];
     })
     .sort((left, right) => right.score - left.score || left.machine.id.localeCompare(right.machine.id));
   const machineRiskById = new Map(machineRows.map((row) => [row.machine.id, row]));
 
   const areaRows: AdminAreaRow[] = relational.areas
-    .map((area) => {
+    .flatMap((area): AdminAreaRow[] => {
       const areaMachines = relational.machines.filter((machine) => machine.areaId === area.id);
-      const risk = averageRisk(
-        areaMachines.map((machine) => machineRiskById.get(machine.id)!),
-        referenceRisk(area.clientId, weights),
-      );
-      return {
+      const risks = areaMachines
+        .map((machine) => machineRiskById.get(machine.id))
+        .filter((risk): risk is AdminMachineRow => risk !== undefined);
+      if (risks.length === 0) return [];
+      const risk = averageRisk(risks, risks[0]);
+      return [{
         area,
         ...risk,
         activeOperations: (operationsByArea.get(area.id) ?? []).filter(
           (operation) => operation.status === "Em andamento",
         ).length,
         machineCount: areaMachines.length,
-      };
+      }];
     })
     .sort((left, right) => right.score - left.score || left.area.id.localeCompare(right.area.id));
   const clientRows: AdminClientRow[] = relational.clients
-    .map((client) => {
+    .flatMap((client): AdminClientRow[] => {
       const clientMachines = machineRows.filter((row) => row.machine.clientId === client.id);
       const clientAreas = areaRows.filter((row) => row.area.clientId === client.id);
-      const risk = averageRisk(clientMachines, referenceRisk(client.id, weights));
+      if (clientMachines.length === 0) return [];
+      const risk = averageRisk(clientMachines, clientMachines[0]);
       const topArea = [...clientAreas].sort(
         (left, right) => right.score - left.score || left.area.id.localeCompare(right.area.id),
       )[0];
-      return {
+      return [{
         client,
         ...risk,
         machinesHigh: clientMachines.filter((row) => row.level === "alto").length,
         topAreaName: topArea?.area.name ?? "—",
-      };
+      }];
     })
     .sort((left, right) => right.score - left.score || left.client.id.localeCompare(right.client.id));
 
@@ -240,6 +208,13 @@ export function buildAdminDashboardSnapshot(
 }
 
 const readRepository = async (repository: AgroRiskRepository): Promise<RelationalSnapshot> => {
+  if (repository === postgresRepository) {
+    const [relational, alerts] = await Promise.all([
+      listClientRelationalScope(null),
+      repository.listAlerts(),
+    ]);
+    return { ...relational, alerts };
+  }
   const [clients, areas, machines, operations, alerts] = await Promise.all([
     repository.listClients(),
     repository.listAreas(),
