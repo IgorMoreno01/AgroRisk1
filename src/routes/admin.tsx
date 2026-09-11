@@ -14,8 +14,7 @@ import { Tractor, Building2, Map as MapIcon, ListChecks, Bell, Gauge, Trophy, Fl
 
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
-import { ProfileAlertsSection } from "@/components/profile-alerts-section";
-import { getProfileAlerts } from "@/lib/profile-alerts";
+import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { useRiskConfig } from "@/lib/risk-config";
 import { AdminV2RiskPanel } from "@/components/admin-v2-risk-panel";
 import { getStoredSessionToken } from "@/lib/auth";
@@ -200,9 +199,8 @@ function AdminPage() {
         {tab === "areas" && <Card className="p-0"><AreasTable /></Card>}
         {tab === "operations" && <Card className="p-0"><OperationsTable /></Card>}
         {tab === "alerts" && (
-          <div id="central-alertas" className="space-y-4 scroll-mt-20">
-            <Card className="p-0"><AlertsTable /></Card>
-            <ProfileAlertsSection bundle={getProfileAlerts("admin")} />
+          <div className="space-y-4 scroll-mt-20">
+            <ActionableAlertsList sectionId="central-alertas" title="Central de alertas" />
           </div>
         )}
         {tab === "motor-risco" && <RiskEngineConfigurationPanel />}

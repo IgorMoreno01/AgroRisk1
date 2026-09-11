@@ -207,6 +207,32 @@ CREATE TABLE IF NOT EXISTS agrorisk.maintenance_records (
   CHECK (next_due_at > performed_at)
 );
 
+CREATE TABLE IF NOT EXISTS agrorisk.actionable_alerts (
+  id text PRIMARY KEY,
+  recipient_user_id text NOT NULL REFERENCES agrorisk.users(id) ON DELETE CASCADE,
+  type text NOT NULL,
+  severity text NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  title text NOT NULL,
+  message text NOT NULL,
+  status text NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'viewed', 'acknowledged', 'resolved')),
+  client_id text REFERENCES agrorisk.clients(id) ON DELETE CASCADE,
+  operator_id text REFERENCES agrorisk.users(id) ON DELETE SET NULL,
+  machine_id text REFERENCES agrorisk.machines(id) ON DELETE CASCADE,
+  operation_id text REFERENCES agrorisk.operations(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  viewed_at timestamptz,
+  acknowledged_at timestamptz,
+  resolved_at timestamptz,
+  source text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((status = 'new' AND viewed_at IS NULL AND acknowledged_at IS NULL AND resolved_at IS NULL)
+    OR (status = 'viewed' AND viewed_at IS NOT NULL AND acknowledged_at IS NULL AND resolved_at IS NULL)
+    OR (status = 'acknowledged' AND viewed_at IS NOT NULL AND acknowledged_at IS NOT NULL AND resolved_at IS NULL)
+    OR (status = 'resolved' AND viewed_at IS NOT NULL AND acknowledged_at IS NOT NULL AND resolved_at IS NOT NULL)),
+  CHECK (acknowledged_at IS NULL OR viewed_at IS NOT NULL),
+  CHECK (resolved_at IS NULL OR acknowledged_at IS NOT NULL)
+);
+
 CREATE INDEX IF NOT EXISTS farms_client_idx ON agrorisk.farms(client_id);
 CREATE INDEX IF NOT EXISTS areas_client_farm_idx ON agrorisk.areas(client_id, farm_id);
 CREATE INDEX IF NOT EXISTS machines_client_area_idx ON agrorisk.machines(client_id, area_id);
@@ -221,3 +247,9 @@ CREATE INDEX IF NOT EXISTS operation_logs_operator_operation_recent_idx
   ON agrorisk.operation_logs(operator_id, operation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS maintenance_records_machine_due_idx
   ON agrorisk.maintenance_records(machine_id, next_due_at DESC);
+CREATE INDEX IF NOT EXISTS actionable_alerts_recipient_status_created_idx
+  ON agrorisk.actionable_alerts(recipient_user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS actionable_alerts_client_idx ON agrorisk.actionable_alerts(client_id);
+CREATE INDEX IF NOT EXISTS actionable_alerts_operator_idx ON agrorisk.actionable_alerts(operator_id);
+CREATE INDEX IF NOT EXISTS actionable_alerts_machine_idx ON agrorisk.actionable_alerts(machine_id);
+CREATE INDEX IF NOT EXISTS actionable_alerts_operation_idx ON agrorisk.actionable_alerts(operation_id);

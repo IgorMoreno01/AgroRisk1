@@ -5,6 +5,7 @@ import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { RecommendationCard } from "@/components/recommendation-card";
 import { NextBestActionCard } from "@/components/next-best-action";
 import { AlertTriangle, Building2, Database, FileText } from "lucide-react";
+import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { RequireProfile } from "@/components/require-profile";
 import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
 import { getStoredSessionToken } from "@/lib/auth";
@@ -281,32 +282,7 @@ function ConsultorPage() {
         </section>
       </div>
 
-      <div className="mt-6">
-        <Card>
-          <SectionTitle
-            title="Alertas do cliente · demonstração"
-            description={`Alertas demonstrativos compatíveis com ${client.name}`}
-          />
-          <div className="space-y-2">
-            {selected.alerts.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nenhum alerta demonstrativo compatível com este cliente.</p>
-            )}
-            {selected.alerts.map((alert) => (
-              <div key={alert.id} className="flex items-start gap-3 rounded-lg border border-border p-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 text-warning" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-foreground">{alert.type}</span>
-                    <RiskBadge level={alert.level} />
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{alert.message}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{alert.machineId} · {alert.time} · demonstração</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+      <div className="mt-6"><ActionableAlertsList sectionId="alertas-cliente" title="Alertas do cliente" /></div>
     </AppLayout>
   );
 }

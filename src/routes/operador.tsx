@@ -5,7 +5,7 @@ import { RiskBadge } from "@/components/risk-badge";
 import { NextBestActionCard } from "@/components/next-best-action";
 import { CloudSun, Droplets, Mountain, Wind, type LucideIcon } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
-import { ProfileAlertsSection } from "@/components/profile-alerts-section";
+import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { getWeather } from "@/lib/api/weather.functions";
 import type { WeatherData } from "@/lib/external-data.types";
 import { getStoredSessionToken } from "@/lib/auth";
@@ -13,7 +13,6 @@ import { getOperadorDashboard } from "@/lib/api/operador-dashboard.functions";
 import type { OperadorDashboardSnapshot } from "@/lib/operador-dashboard-types";
 import { OperationRegistrationCard } from "@/components/operation-registration-card";
 import { PreventiveMaintenanceCard } from "@/components/preventive-maintenance-card";
-import type { ProfileAlertsBundle } from "@/lib/profile-alerts";
 
 export const Route = createFileRoute("/operador")({
   head: () => ({ meta: [{ title: "AgroRisk · Operador" }] }),
@@ -91,21 +90,6 @@ function OperadorPage() {
   const score = scoreContext.finalScore;
   const level = scoreContext.level;
   const nextAction = snapshot.nextAction;
-  const alertsBundle: ProfileAlertsBundle = {
-    sectionId: "alertas",
-    sectionTitle: `Alertas da operação${snapshot.alertsSource === "demo" ? " · demonstração" : ""}`,
-    sectionDescription: `Filtrados por ${operation.id} e ${machine.id}`,
-    alerts: snapshot.alerts.map((alert) => ({
-      id: alert.id,
-      title: `${alert.type}${alert.source === "demo" ? " · demonstração" : ""}`,
-      context: `${machine.id} · Operação ${operation.id}`,
-      detail: alert.message,
-      criticality: alert.criticality,
-      status: alert.status,
-      time: alert.time,
-    })),
-  };
-
   const climate = loadingWeather
     ? { condition: "Carregando…", temperature: "—", precipitation: "—", wind: "—" }
     : weather
@@ -132,7 +116,6 @@ function OperadorPage() {
         operationStatus: operation.status,
         lastUpdate: machine.lastUpdate,
       }}
-      alerts={alertsBundle}
     >
       <div id="topo" className="scroll-mt-20" />
       <div id="operacao" className="grid scroll-mt-20 gap-4 lg:grid-cols-3">
@@ -195,8 +178,8 @@ function OperadorPage() {
         <PreventiveMaintenanceCard />
       </div>
 
-      <div id="alertas-operacao" className="mt-6 scroll-mt-20">
-        <ProfileAlertsSection bundle={alertsBundle} />
+      <div className="mt-6">
+        <ActionableAlertsList sectionId="alertas-operacao" title="Alertas da operação" />
       </div>
 
       <div id="registro-operacao" className="mt-6 scroll-mt-20">

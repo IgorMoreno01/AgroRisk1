@@ -39,7 +39,7 @@ describe("Tela operacional simplificada", () => {
       "Próxima ação",
       "Clima e segurança",
       "PreventiveMaintenanceCard",
-      "ProfileAlertsSection",
+      "ActionableAlertsList",
       "OperationRegistrationCard",
       "machine.type",
       "machine.id",

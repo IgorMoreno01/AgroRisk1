@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { useAuth, userFor, clientFor, profileLabels } from "@/lib/auth";
 import type { ProfileId } from "@/lib/mock-data";
 import { HeaderAlerts, HeaderUserMenu } from "@/components/header-menus";
-import type { ProfileAlertsBundle } from "@/lib/profile-alerts";
+import { CriticalAlertBanner } from "@/components/actionable-alerts";
 import {
   Tooltip,
   TooltipContent,
@@ -123,13 +123,11 @@ export function AppLayout({
   title,
   subtitle,
   account,
-  alerts,
   children,
 }: {
   title: string;
   subtitle?: string;
   account?: AppLayoutAccount;
-  alerts?: ProfileAlertsBundle;
   children: ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -415,12 +413,13 @@ export function AppLayout({
               <OperatorContext account={account} />
             ) : null}
 
-            <HeaderAlerts bundleOverride={alerts} />
+             <HeaderAlerts />
 
             <div className="border-l border-border pl-2">
               <HeaderUserMenu account={account} />
             </div>
           </header>
+           <CriticalAlertBanner />
 
           <main className="flex-1 p-6">{children}</main>
         </div>

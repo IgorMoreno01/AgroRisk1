@@ -15,8 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
-import { ProfileAlertsSection } from "@/components/profile-alerts-section";
-import { getProfileAlerts } from "@/lib/profile-alerts";
+import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { getStoredSessionToken } from "@/lib/auth";
 import { getGestorDashboard } from "@/lib/api/gestor-dashboard.functions";
 import type { GestorDashboardSnapshot } from "@/lib/gestor-dashboard-types";
@@ -534,7 +533,7 @@ function GestorPage() {
 
       {/* Alertas gerenciais (US 5 · personalização por perfil) */}
       <div className="mt-6">
-        <ProfileAlertsSection bundle={getProfileAlerts("gestor")} />
+        <ActionableAlertsList sectionId="alertas-gerenciais" title="Alertas gerenciais" />
       </div>
 
       <MachineDetailDialog
