@@ -57,15 +57,15 @@ function AlertRow({ a, read }: { a: ProfileAlert; read?: boolean }) {
   );
 }
 
-export function HeaderAlerts() {
+export function HeaderAlerts({ bundleOverride }: { bundleOverride?: ReturnType<typeof getProfileAlerts> }) {
   const { profile } = useAuth();
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [allOpen, setAllOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const bundle = useMemo(
-    () => (profile ? getProfileAlerts(profile) : null),
-    [profile],
+    () => bundleOverride ?? (profile && profile !== "operador" ? getProfileAlerts(profile) : null),
+    [bundleOverride, profile],
   );
   const alerts = bundle?.alerts ?? [];
   const recent = alerts.slice(0, 5);
@@ -164,20 +164,25 @@ type ProfileContext = {
   permissions: string[];
 };
 
-function buildContext(profile: ProfileId): ProfileContext {
-  const user = userFor(profile);
-  const client = clientFor(user);
+export interface HeaderAccountContext {
+  userId: string;
+  name: string;
+  clientName?: string;
+  clientLocation?: string;
+  operationId?: string;
+  machineName?: string;
+  areaName?: string;
+}
 
+function buildContext(profile: ProfileId, account?: HeaderAccountContext): ProfileContext {
   if (profile === "operador") {
-    const op = operations.find((o) => o.operatorId === user?.id) ?? operations[0];
-    const machine = machines.find((m) => m.id === op?.machineId);
     return {
       scope: "Visão restrita à sua operação atual",
       rows: [
-        { icon: Building2, label: "Fazenda",       value: client?.name ?? "—" },
-        { icon: Activity,  label: "Operação",      value: op?.id ?? "—" },
-        { icon: Tractor,   label: "Equipamento",   value: machine?.name ?? "—" },
-        { icon: MapPin,    label: "Área atual",    value: op?.area ?? "—" },
+        { icon: Building2, label: "Fazenda",       value: account?.clientName ?? "—" },
+        { icon: Activity,  label: "Operação",      value: account?.operationId ?? "—" },
+        { icon: Tractor,   label: "Equipamento",   value: account?.machineName ?? "—" },
+        { icon: MapPin,    label: "Área atual",    value: account?.areaName ?? "—" },
       ],
       permissions: [
         "Visualizar própria operação",
@@ -187,6 +192,8 @@ function buildContext(profile: ProfileId): ProfileContext {
       ],
     };
   }
+  const user = userFor(profile);
+  const client = clientFor(user);
   if (profile === "gestor") {
     return {
       scope: "Visão gerencial da operação",
@@ -241,16 +248,16 @@ function buildContext(profile: ProfileId): ProfileContext {
   };
 }
 
-export function HeaderUserMenu() {
+export function HeaderUserMenu({ account }: { account?: HeaderAccountContext }) {
   const { profile, logout } = useAuth();
   const navigate = useNavigate();
   const [accountOpen, setAccountOpen] = useState(false);
 
-  const user = profile ? userFor(profile) : undefined;
-  const client = clientFor(user);
-  const name = user?.name ?? "Usuário";
+  const fallbackUser = profile && profile !== "operador" ? userFor(profile) : undefined;
+  const fallbackClient = clientFor(fallbackUser);
+  const name = account?.name ?? fallbackUser?.name ?? "Usuário";
   const label = profile ? profileLabels[profile] : "—";
-  const ctx = profile ? buildContext(profile) : null;
+  const ctx = profile ? buildContext(profile, account) : null;
 
   const handleLogout = () => {
     logout();
@@ -362,17 +369,26 @@ export function HeaderUserMenu() {
               <ShieldCheck className="h-4 w-4 text-primary" />
               Minha conta
             </DialogTitle>
-            <DialogDescription>Dados simulados do usuário logado.</DialogDescription>
+            <DialogDescription>
+              {profile === "operador" ? "Dados da conta autenticada." : "Dados do usuário logado."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
             <Row label="Nome" value={name} />
             <Row label="Perfil" value={label} />
-            <Row label="ID do usuário" value={user?.id ?? "—"} />
-            {client && <Row label="Cliente / Fazenda" value={`${client.name} · ${client.location}`} />}
+            <Row label="ID do usuário" value={account?.userId ?? fallbackUser?.id ?? "—"} />
+            {(account?.clientName || fallbackClient) && (
+              <Row
+                label="Cliente / Fazenda"
+                value={account
+                  ? `${account.clientName ?? "—"} · ${account.clientLocation ?? "—"}`
+                  : `${fallbackClient!.name} · ${fallbackClient!.location}`}
+              />
+            )}
             <div>
               <div className="text-xs font-medium text-muted-foreground">Permissões principais</div>
               <div className="mt-1 flex flex-wrap gap-1">
-                {(ctx?.permissions ?? user?.permissions ?? []).map((p) => (
+                {(ctx?.permissions ?? fallbackUser?.permissions ?? []).map((p) => (
                   <span key={p} className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-[11px] text-foreground">
                     <Eye className="h-3 w-3 text-muted-foreground" />
                     {p}

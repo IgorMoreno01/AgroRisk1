@@ -174,7 +174,22 @@ function OperadorPage() {
   ];
 
   return (
-    <AppLayout title="Painel do Operador" subtitle={`Operação ${operation.id} · ${client.name} · ${snapshot.source === "postgres" ? "PostgreSQL" : "fallback demonstrativo"}`}>
+    <AppLayout
+      title="Painel do Operador"
+      subtitle={`Operação ${operation.id} · ${client.name} · ${snapshot.source === "postgres" ? "PostgreSQL" : "fallback demonstrativo"}`}
+      account={{
+        userId: snapshot.operator.id,
+        name: snapshot.operator.name,
+        clientName: client.name,
+        clientLocation: client.location,
+        operationId: operation.id,
+        machineName: machine.name,
+        areaName: area.name,
+        operationStatus: operation.status,
+        lastUpdate: machine.lastUpdate,
+      }}
+      alerts={alertsBundle}
+    >
       <div id="topo" className="scroll-mt-20" />
       {isHigh && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border-2 border-danger/50 bg-danger/10 p-4">

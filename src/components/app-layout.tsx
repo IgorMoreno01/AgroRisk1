@@ -24,8 +24,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, userFor, clientFor, profileLabels } from "@/lib/auth";
-import { operations, machines, type ProfileId } from "@/lib/mock-data";
+import type { ProfileId } from "@/lib/mock-data";
 import { HeaderAlerts, HeaderUserMenu } from "@/components/header-menus";
+import type { ProfileAlertsBundle } from "@/lib/profile-alerts";
 import {
   Tooltip,
   TooltipContent,
@@ -91,21 +92,30 @@ const SEARCH_BY_PROFILE: Record<ProfileId, string | null> = {
 
 const SIDEBAR_KEY = "agrorisk:sidebar-collapsed";
 
-function OperatorContext() {
-  // Operação atual do operador padrão (Carlos Mendes / USR-OP-1)
-  const op = operations.find((o) => o.id === "OP-1001");
-  const machine = op ? machines.find((m) => m.id === op.machineId) : undefined;
-  if (!op) return null;
+export interface AppLayoutAccount {
+  userId: string;
+  name: string;
+  clientName?: string;
+  clientLocation?: string;
+  operationId?: string;
+  machineName?: string;
+  areaName?: string;
+  operationStatus?: string;
+  lastUpdate?: string;
+}
+
+function OperatorContext({ account }: { account?: AppLayoutAccount }) {
+  if (!account?.operationId) return null;
   return (
     <div className="hidden items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-[12px] text-muted-foreground lg:flex">
       <span className="inline-flex h-1.5 w-1.5 rounded-full bg-success" />
-      <span className="font-medium text-foreground">{op.id}</span>
+      <span className="font-medium text-foreground">{account.operationId}</span>
       <span className="text-border">•</span>
-      <span>{op.area}</span>
+      <span>{account.areaName ?? "Área atual"}</span>
       <span className="text-border">•</span>
-      <span className="text-success">{op.status}</span>
+      <span className="text-success">{account.operationStatus ?? "Em andamento"}</span>
       <span className="text-border">•</span>
-      <span>Atualizado {machine?.lastUpdate ?? "há instantes"}</span>
+      <span>Atualizado {account.lastUpdate ?? "há instantes"}</span>
     </div>
   );
 }
@@ -113,10 +123,14 @@ function OperatorContext() {
 export function AppLayout({
   title,
   subtitle,
+  account,
+  alerts,
   children,
 }: {
   title: string;
   subtitle?: string;
+  account?: AppLayoutAccount;
+  alerts?: ProfileAlertsBundle;
   children: ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -125,8 +139,10 @@ export function AppLayout({
 
   const navItems = profile ? NAV_BY_PROFILE[profile] : [];
   const searchPlaceholder = profile ? SEARCH_BY_PROFILE[profile] : null;
-  const user = profile ? userFor(profile) : undefined;
-  const client = clientFor(user);
+  const fallbackUser = profile && profile !== "operador" ? userFor(profile) : undefined;
+  const fallbackClient = clientFor(fallbackUser);
+  const user = account ? { name: account.name } : fallbackUser;
+  const clientName = account?.clientName ?? fallbackClient?.name;
 
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
@@ -299,7 +315,7 @@ export function AppLayout({
                 <TooltipContent side="right">
                   <div className="text-xs font-medium">{user.name}</div>
                   <div className="text-[10px] opacity-70">{profile ? profileLabels[profile] : ""}</div>
-                  {client && <div className="text-[10px] opacity-70">{client.name}</div>}
+                  {clientName && <div className="text-[10px] opacity-70">{clientName}</div>}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -322,7 +338,7 @@ export function AppLayout({
                 </div>
               </div>
               <div className="mt-1.5 truncate text-[11px] text-sidebar-foreground/60">
-                {client?.name ?? "AgroRisk"}
+                {clientName ?? "AgroRisk"}
               </div>
             </div>
           ))}
@@ -397,13 +413,13 @@ export function AppLayout({
                 />
               </div>
             ) : profile === "operador" ? (
-              <OperatorContext />
+              <OperatorContext account={account} />
             ) : null}
 
-            <HeaderAlerts />
+            <HeaderAlerts bundleOverride={alerts} />
 
             <div className="border-l border-border pl-2">
-              <HeaderUserMenu />
+              <HeaderUserMenu account={account} />
             </div>
           </header>
 
