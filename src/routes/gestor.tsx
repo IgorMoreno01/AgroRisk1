@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
-import { ActionableAlertsList } from "@/components/actionable-alerts";
+import { GestorOperationalOverview } from "@/components/gestor-operational-overview";
 import { getStoredSessionToken } from "@/lib/auth";
+import { useActionableAlerts } from "@/lib/actionable-alerts";
 import { getGestorDashboard } from "@/lib/api/gestor-dashboard.functions";
 import type { GestorDashboardSnapshot } from "@/lib/gestor-dashboard-types";
 import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
@@ -163,6 +164,7 @@ function FilterSelect<T extends string>({
 }
 
 function GestorPage() {
+  const { snapshot: actionableAlerts } = useActionableAlerts();
   const [clientId,     setClientId]     = useState<string>("all");
   const [level,        setLevel]        = useState<RiskLevel | "all">("all");
   const [operationType, setOperationType] = useState<OperationType | "all">("all");
@@ -258,16 +260,18 @@ function GestorPage() {
         <Kpi label="Máquinas monitoradas" value={String(monitored)} hint="Frota ativa hoje" icon={Tractor} tone="default" />
         <Kpi label="Operações em risco" value={snapshot ? String(snapshot.machinesAtRisk) : "…"} hint="Score ≥ 70" icon={Activity} tone="warning" trend={{ dir: "up", value: "+12%" }} />
         <Kpi label="Score médio da frota" value={snapshot ? String(avg) : "…"} hint="Escala 0–100 (Risk Engine V2)" icon={Gauge} tone="success" trend={{ dir: "down", value: "-3%" }} />
-        <Kpi label="Alertas críticos" value={snapshot ? String(snapshot.criticalAlerts) : "…"} hint="Em aberto" icon={AlertTriangle} tone="danger" />
+        <Kpi label="Alertas críticos" value={String(actionableAlerts.alerts.filter((alert) => alert.severity === "critical").length)} hint="Persistentes e ativos" icon={AlertTriangle} tone="danger" />
       </div>
       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Database className="h-3.5 w-3.5" />
         {loadError ?? (snapshot
-          ? `${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas demonstrativos`
+          ? `${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas persistentes`
           : "Carregando carteira do Gestor…")}
       </div>
 
       <PersonaV2RiskPanel persona="gestor" />
+
+      {snapshot && <GestorOperationalOverview overview={snapshot.operationalOverview} />}
 
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
@@ -530,11 +534,6 @@ function GestorPage() {
         </Tabs>
       </Card>
       </section>
-
-      {/* Alertas gerenciais (US 5 · personalização por perfil) */}
-      <div className="mt-6">
-        <ActionableAlertsList sectionId="alertas-gerenciais" title="Alertas gerenciais" />
-      </div>
 
       <MachineDetailDialog
         machine={selectedMachine}

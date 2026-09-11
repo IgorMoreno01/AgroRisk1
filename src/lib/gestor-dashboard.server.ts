@@ -2,7 +2,7 @@ import { alerts as demoAlerts, type Alert } from "./mock-data";
 import type { AgroRiskRepository } from "./data/repository";
 import { mockRepository } from "./data/mock-repository.server";
 import { postgresRepository } from "./data/postgres-repository.server";
-import { listClientRelationalScope } from "./data/postgres-repository.server";
+import { listClientRelationalScope, listGestorOperationalOverview } from "./data/postgres-repository.server";
 import { buildAdminDashboardSnapshot } from "./admin-dashboard.server";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
@@ -78,6 +78,7 @@ function buildSnapshot(
   source: "postgres" | "mock",
   degraded: boolean,
   scope: GestorAccessScope,
+  operationalOverview: GestorDashboardSnapshot["operationalOverview"],
 ): GestorDashboardSnapshot {
   const configuration = getRiskEngineV2Configuration();
   const base = buildAdminDashboardSnapshot(relational, source, degraded, {
@@ -114,6 +115,7 @@ function buildSnapshot(
     ).length,
     averageScore,
     machinesAtRisk: machineRows.filter((row) => row.score >= 70).length,
+    operationalOverview,
   };
 }
 
@@ -123,12 +125,25 @@ async function loadUncached(
   scope: GestorAccessScope,
 ): Promise<GestorDashboardSnapshot> {
   try {
-    return buildSnapshot(await readScoped(primary, scope), "postgres", false, scope);
+    if (primary === postgresRepository) {
+      const [relational, operationalOverview] = await Promise.all([
+        readScoped(primary, scope),
+        listGestorOperationalOverview(scope.clientIds),
+      ]);
+      return buildSnapshot(relational, "postgres", false, scope, operationalOverview);
+    }
+    return buildSnapshot(await readScoped(primary, scope), "postgres", false, scope, {
+      maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+      activity: [],
+    });
   } catch (error) {
     console.error("[gestor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
-    return buildSnapshot(await readScoped(fallback, scope), "mock", true, scope);
+    return buildSnapshot(await readScoped(fallback, scope), "mock", true, scope, {
+      maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+      activity: [],
+    });
   }
 }
 
@@ -142,7 +157,7 @@ export async function loadGestorDashboardSnapshot(
   }
   const config = getRiskEngineV2Configuration();
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
-  const key = `gestor-dashboard:v3:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
+  const key = `gestor-dashboard:v4:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
   const pending = inFlight.get(key);
   if (pending) return pending;
   const request = cacheOrFetch(

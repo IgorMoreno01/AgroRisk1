@@ -37,14 +37,14 @@ describe("interface de alertas acionáveis", () => {
 
   test("as quatro personas renderizam sua seção persistente", () => {
     const routes = [
-      ["src/routes/operador.tsx", "alertas-operacao"],
-      ["src/routes/gestor.tsx", "alertas-gerenciais"],
-      ["src/routes/consultor.tsx", "alertas-cliente"],
-      ["src/routes/admin.tsx", "central-alertas"],
+      ["src/routes/operador.tsx", "alertas-operacao", "ActionableAlertsList"],
+      ["src/routes/gestor.tsx", "GestorOperationalOverview", "GestorOperationalOverview"],
+      ["src/routes/consultor.tsx", "alertas-cliente", "ActionableAlertsList"],
+      ["src/routes/admin.tsx", "central-alertas", "ActionableAlertsList"],
     ] as const;
-    for (const [path, sectionId] of routes) {
+    for (const [path, sectionId, componentName] of routes) {
       const source = read(path);
-      expect(source).toContain("ActionableAlertsList");
+      expect(source).toContain(componentName);
       expect(source).toContain(sectionId);
       expect(source).not.toContain("ProfileAlertsSection");
       expect(source).not.toContain("getProfileAlerts");
