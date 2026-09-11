@@ -14,7 +14,10 @@ import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.ser
 import {
   closePostgresRepository,
   getOperatorRelationalScope,
+  postgresRepository,
 } from "../src/lib/data/postgres-repository.server";
+import { mockRepository } from "../src/lib/data/mock-repository.server";
+import { testRiskExternalServices } from "./helpers/risk-external-services";
 
 const seed = loadAccountsSeed();
 const account = (profile: "admin" | "gestor" | "consultor" | "operador", index = 0) =>
@@ -120,7 +123,12 @@ describe("Autenticação PostgreSQL e autorização por escopo", () => {
   test("Gestor recebe somente os clientes vinculados", async () => {
     const candidate = account("gestor");
     const clientIds = await getAccountClientScope(candidate.id);
-    const snapshot = await loadGestorDashboardSnapshot({ userId: candidate.id, clientIds });
+    const snapshot = await loadGestorDashboardSnapshot(
+      { userId: candidate.id, clientIds },
+      postgresRepository,
+      mockRepository,
+      testRiskExternalServices,
+    );
     const visible = new Set(snapshot.clients.map((client) => client.id));
     expect(visible).toEqual(new Set(clientIds));
     expect(visible.has("CL-006")).toBe(false);
@@ -132,7 +140,12 @@ describe("Autenticação PostgreSQL e autorização por escopo", () => {
   test("Consultor recebe somente a carteira vinculada", async () => {
     const candidate = account("consultor");
     const clientIds = await getAccountClientScope(candidate.id);
-    const snapshot = await loadConsultorDashboardSnapshot({ userId: candidate.id, clientIds });
+    const snapshot = await loadConsultorDashboardSnapshot(
+      { userId: candidate.id, clientIds },
+      postgresRepository,
+      mockRepository,
+      testRiskExternalServices,
+    );
     const visible = new Set(snapshot.clients.map((view) => view.client.id));
     expect(visible).toEqual(new Set(clientIds));
     expect(visible.has("CL-002")).toBe(false);
@@ -147,7 +160,12 @@ describe("Autenticação PostgreSQL e autorização por escopo", () => {
     const authenticated = await authenticateAccount("operador", candidate.email, candidate.password);
     expect(authenticated.ok).toBe(true);
     if (!authenticated.ok || !authenticated.account.linkedOperatorId) return;
-    const snapshot = await loadOperadorDashboardSnapshot(authenticated.account.linkedOperatorId);
+    const snapshot = await loadOperadorDashboardSnapshot(
+      authenticated.account.linkedOperatorId,
+      postgresRepository,
+      mockRepository,
+      testRiskExternalServices,
+    );
     const other = await getOperatorRelationalScope("OPR-002");
     expect(snapshot.operator.id).toBe(candidate.id);
     expect(snapshot.operation.operatorId).toBe(candidate.id);
@@ -160,14 +178,29 @@ describe("Autenticação PostgreSQL e autorização por escopo", () => {
     const consultant = account("consultor");
     const operator = account("operador");
     const [admin, gestor, consultor, operador] = await Promise.all([
-      loadAdminDashboardSnapshot(),
+      loadAdminDashboardSnapshot(postgresRepository, mockRepository, testRiskExternalServices),
       getAccountClientScope(manager.id).then((clientIds) =>
-        loadGestorDashboardSnapshot({ userId: manager.id, clientIds })
+        loadGestorDashboardSnapshot(
+          { userId: manager.id, clientIds },
+          postgresRepository,
+          mockRepository,
+          testRiskExternalServices,
+        )
       ),
       getAccountClientScope(consultant.id).then((clientIds) =>
-        loadConsultorDashboardSnapshot({ userId: consultant.id, clientIds })
+        loadConsultorDashboardSnapshot(
+          { userId: consultant.id, clientIds },
+          postgresRepository,
+          mockRepository,
+          testRiskExternalServices,
+        )
       ),
-      loadOperadorDashboardSnapshot(operator.linked_operator_id!),
+      loadOperadorDashboardSnapshot(
+        operator.linked_operator_id!,
+        postgresRepository,
+        mockRepository,
+        testRiskExternalServices,
+      ),
     ]);
     for (const row of gestor.machineRows) {
       expect(row.score).toBe(admin.machineRows.find((item) => item.machine.id === row.machine.id)?.score);

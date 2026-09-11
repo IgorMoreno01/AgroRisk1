@@ -1,7 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { closePostgresRepository } from "../src/lib/data/postgres-repository.server";
+import {
+  closePostgresRepository,
+  postgresRepository,
+} from "../src/lib/data/postgres-repository.server";
+import { mockRepository } from "../src/lib/data/mock-repository.server";
 import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.server";
+import { testRiskExternalServices } from "./helpers/risk-external-services";
 
 afterAll(async () => {
   await closePostgresRepository();
@@ -9,7 +14,9 @@ afterAll(async () => {
 
 describe("Tela operacional simplificada", () => {
   test("mantém os mesmos dados centrais de Diego", async () => {
-    const snapshot = await loadOperadorDashboardSnapshot("OPR-010");
+    const snapshot = await loadOperadorDashboardSnapshot(
+      "OPR-010", postgresRepository, mockRepository, testRiskExternalServices,
+    );
     expect(snapshot.operator).toMatchObject({ id: "OPR-010", name: "Diego Nunes" });
     expect(snapshot.operation).toMatchObject({
       id: "OP-1200",

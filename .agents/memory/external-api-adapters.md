@@ -35,6 +35,15 @@ Nunca chamar APIs externas diretamente do frontend.
 - **Fix aplicado**: usar `outputFormat=AAIGrid` (ASCII puro, parseável) + bounding box mínima de `0.011°` em cada lado (total 0.022°). Box menor causa HTTP 400.
 - Parser AAIGrid implementado em `parseAAIGrid()` no mesmo arquivo.
 
+### Open-Meteo histórico para o Risk Engine V2
+- O Archive API não oferece média diária de `wind_speed_10m`; solicite vento horário e calcule a média de D-1 antes de converter km/h para m/s.
+- Para evitar leakage e dados parciais, só publique clima quando houver exatamente os 7/30 dias esperados e 24 horas finitas em D-1; caso contrário, mantenha `null`.
+- Cacheie a série por coordenada/ano e derive cada data localmente. Compartilhe requests em andamento e use TTL curto para falhas, evitando fan-out e 429 na carteira.
+
+**Why:** solicitar vento médio em `daily` causou HTTP 400, e uma chamada por operação gerou rate limit na carteira de 500 cenários.
+
+**How to apply:** novos consumidores de histórico devem reutilizar a série anual normalizada e nunca preencher janelas incompletas.
+
 ### openrouteservice
 - Perfil `driving-hgv` não encontra pontos roteáveis em áreas rurais/agrícolas (raio máximo 350m sem estrada HGV certificada).
 - **Fix aplicado**: usar perfil `driving-car` que cobre estradas rurais.

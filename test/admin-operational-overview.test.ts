@@ -12,7 +12,10 @@ import { createSession } from "../src/lib/auth-session.server";
 import {
   closePostgresRepository,
   listAdminOperationalOverview,
+  postgresRepository,
 } from "../src/lib/data/postgres-repository.server";
+import { mockRepository } from "../src/lib/data/mock-repository.server";
+import { testRiskExternalServices } from "./helpers/risk-external-services";
 
 const sql = postgres(process.env.DATABASE_URL!, { max: 2, prepare: false });
 const account = loadAccountsSeed().accounts.find((candidate) => candidate.profile === "admin")!;
@@ -120,7 +123,9 @@ describe("visão operacional global do Admin/Sompo", () => {
   });
 
   test("atividade e manutenção não alteram os scores existentes", async () => {
-    const before = await loadAdminDashboardSnapshot();
+    const before = await loadAdminDashboardSnapshot(
+      postgresRepository, mockRepository, testRiskExternalServices,
+    );
     const scoreFingerprint = before.machineRows.map((row) => [
       row.machine.id,
       row.score,
@@ -128,7 +133,9 @@ describe("visão operacional global do Admin/Sompo", () => {
       row.mainFactor,
     ]);
     expect(before.operationalOverview).toBeDefined();
-    const after = await loadAdminDashboardSnapshot();
+    const after = await loadAdminDashboardSnapshot(
+      postgresRepository, mockRepository, testRiskExternalServices,
+    );
     expect(after.machineRows.map((row) => [
       row.machine.id,
       row.score,

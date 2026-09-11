@@ -7,6 +7,7 @@ import { getRiskEngineV2Configuration } from "./risk-config.server";
 import {
   buildFallbackOperationRiskContext,
   evaluateOperationRiskV2,
+  type OperationRiskExternalServices,
   type OperationRiskRelationalContext,
 } from "./risk-engine-v2/operation-input.server";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
@@ -75,7 +76,24 @@ const newestOperation = (operations: readonly Operation[]): Operation | undefine
     );
   })[0];
 
-export function buildAdminDashboardSnapshot(
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (cursor < values.length) {
+      const index = cursor++;
+      results[index] = await mapper(values[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+export async function buildAdminDashboardSnapshot(
   relational: RelationalSnapshot,
   source: "postgres" | "mock",
   degraded: boolean,
@@ -84,7 +102,8 @@ export function buildAdminDashboardSnapshot(
     maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
     activity: [],
   },
-): AdminDashboardSnapshot {
+  externalServices?: OperationRiskExternalServices,
+): Promise<AdminDashboardSnapshot> {
   const clientById = new Map(relational.clients.map((client) => [client.id, client]));
   const areaById = new Map(relational.areas.map((area) => [area.id, area]));
   const machineById = new Map(relational.machines.map((machine) => [machine.id, machine]));
@@ -105,16 +124,20 @@ export function buildAdminDashboardSnapshot(
     ]);
   }
 
-  const operationRows: AdminOperationRow[] = relational.operations.map((operation) => {
-    const context = contextByOperationId.get(operation.id) ?? buildFallbackOperationRiskContext(
-      operation,
-      machineById.get(operation.machineId)!,
-      areaById.get(operation.areaId)!,
-      clientById.get(operation.clientId)!,
-    );
-    const evaluation = evaluateOperationRiskV2(context, weights);
-    return { operation, evaluation, ...toEntityRisk(evaluation.result) };
-  });
+  const operationRows: AdminOperationRow[] = await mapWithConcurrency(
+    relational.operations,
+    6,
+    async (operation) => {
+      const context = contextByOperationId.get(operation.id) ?? buildFallbackOperationRiskContext(
+        operation,
+        machineById.get(operation.machineId)!,
+        areaById.get(operation.areaId)!,
+        clientById.get(operation.clientId)!,
+      );
+      const evaluation = await evaluateOperationRiskV2(context, weights, externalServices);
+      return { operation, evaluation, ...toEntityRisk(evaluation.result) };
+    },
+  );
   const operationRiskById = new Map(operationRows.map((row) => [row.operation.id, row]));
 
   const machineRows: AdminMachineRow[] = relational.machines
@@ -228,6 +251,7 @@ const readRepository = async (repository: AgroRiskRepository): Promise<Relationa
 export async function loadAdminDashboardSnapshot(
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
+  externalServices?: OperationRiskExternalServices,
 ): Promise<AdminDashboardSnapshot> {
   const configuration = getRiskEngineV2Configuration();
   const weights = {
@@ -243,15 +267,19 @@ export async function loadAdminDashboardSnapshot(
           ? listAdminOperationalOverview()
           : Promise.resolve({ maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] }, activity: [] }),
       ]);
-      return buildAdminDashboardSnapshot(relational, "postgres", false, weights, operationalOverview);
+      return await buildAdminDashboardSnapshot(
+        relational, "postgres", false, weights, operationalOverview, externalServices,
+      );
     } catch (error) {
       console.error("[admin-dashboard] PostgreSQL indisponível; usando fallback mock.", {
         error: error instanceof Error ? error.message : "Erro desconhecido",
       });
-      return buildAdminDashboardSnapshot(await readRepository(fallback), "mock", true, weights);
+      return await buildAdminDashboardSnapshot(
+        await readRepository(fallback), "mock", true, weights, undefined, externalServices,
+      );
     }
   };
-  if (primary !== postgresRepository || fallback !== mockRepository) return load();
+  if (primary !== postgresRepository || fallback !== mockRepository || externalServices) return load();
   return cacheOrFetch(
     `admin-dashboard:v2:${configuration.mlWeight}:${configuration.operationalRulesWeight}`,
     15,

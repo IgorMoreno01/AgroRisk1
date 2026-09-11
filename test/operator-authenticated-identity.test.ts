@@ -5,8 +5,13 @@ import {
   authenticateAccount,
   closeAuthAccountRepository,
 } from "../src/lib/auth-account.server";
-import { closePostgresRepository } from "../src/lib/data/postgres-repository.server";
+import {
+  closePostgresRepository,
+  postgresRepository,
+} from "../src/lib/data/postgres-repository.server";
+import { mockRepository } from "../src/lib/data/mock-repository.server";
 import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.server";
+import { testRiskExternalServices } from "./helpers/risk-external-services";
 
 const operatorIds = ["OPR-010", "OPR-001", "OPR-021"];
 
@@ -32,7 +37,12 @@ describe("Identidade visual do Operador autenticado", () => {
       if (!authenticated.ok || !authenticated.account.linkedOperatorId) continue;
 
       const linkedOperatorId = authenticated.account.linkedOperatorId;
-      const snapshot = await loadOperadorDashboardSnapshot(linkedOperatorId);
+      const snapshot = await loadOperadorDashboardSnapshot(
+        linkedOperatorId,
+        postgresRepository,
+        mockRepository,
+        testRiskExternalServices,
+      );
       expect(linkedOperatorId).toBe(account.id);
       expect(snapshot.source).toBe("postgres");
       expect(snapshot.degraded).toBe(false);

@@ -10,6 +10,7 @@ import { buildAdminDashboardSnapshot } from "./admin-dashboard.server";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
+import type { OperationRiskExternalServices } from "./risk-engine-v2/operation-input.server";
 import type { GeneratedRecommendation, NextBestAction, RecCategory } from "./recommendations";
 import type {
   ConsultorClientView,
@@ -52,7 +53,7 @@ function recommendationFor(clientId: string, score: number, factor: string): Gen
 
 function buildClientView(
   client: Client,
-  base: ReturnType<typeof buildAdminDashboardSnapshot>,
+  base: Awaited<ReturnType<typeof buildAdminDashboardSnapshot>>,
   resultByMachine: Map<string, RiskEngineV2Result>,
   alerts: Alert[],
 ): ConsultorClientView {
@@ -125,7 +126,7 @@ async function readScope(repository: AgroRiskRepository, scope: ConsultorAccessS
   };
 }
 
-function buildSnapshot(
+async function buildSnapshot(
   relational: Awaited<ReturnType<typeof readScope>>,
   source: "postgres" | "mock",
   degraded: boolean,
@@ -135,8 +136,11 @@ function buildSnapshot(
     maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
     attentionPoints: [],
   },
+  externalServices?: OperationRiskExternalServices,
 ) {
-  const base = buildAdminDashboardSnapshot(relational, source, degraded, weights);
+  const base = await buildAdminDashboardSnapshot(
+    relational, source, degraded, weights, undefined, externalServices,
+  );
   const resultByMachine = new Map<string, RiskEngineV2Result>();
   base.machineRows.forEach((row) => {
     resultByMachine.set(row.machine.id, row.evaluation.result);
@@ -160,6 +164,7 @@ async function loadUncached(
   fallback: AgroRiskRepository,
   weights: RiskEngineV2Weights,
   scope: ConsultorAccessScope,
+  externalServices?: OperationRiskExternalServices,
 ): Promise<ConsultorDashboardSnapshot> {
   try {
     const [relational, preventiveOverview] = await Promise.all([
@@ -171,12 +176,16 @@ async function loadUncached(
             attentionPoints: [],
           }),
     ]);
-    return buildSnapshot(relational, "postgres", false, weights, scope, preventiveOverview);
+    return await buildSnapshot(
+      relational, "postgres", false, weights, scope, preventiveOverview, externalServices,
+    );
   } catch (error) {
     console.error("[consultor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
-    return buildSnapshot(await readScope(fallback, scope), "mock", true, weights, scope);
+    return await buildSnapshot(
+      await readScope(fallback, scope), "mock", true, weights, scope, undefined, externalServices,
+    );
   }
 }
 
@@ -184,11 +193,12 @@ export async function loadConsultorDashboardSnapshot(
   scope: ConsultorAccessScope,
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
+  externalServices?: OperationRiskExternalServices,
 ): Promise<ConsultorDashboardSnapshot> {
   const config = getRiskEngineV2Configuration();
   const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
-  if (primary !== postgresRepository || fallback !== mockRepository) {
-    return loadUncached(primary, fallback, weights, scope);
+  if (primary !== postgresRepository || fallback !== mockRepository || externalServices) {
+    return loadUncached(primary, fallback, weights, scope, externalServices);
   }
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
   const key = `consultor-dashboard:v3:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;

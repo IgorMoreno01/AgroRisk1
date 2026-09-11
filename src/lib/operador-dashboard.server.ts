@@ -14,6 +14,7 @@ import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/t
 import {
   buildFallbackOperationRiskContext,
   evaluateOperationRiskV2,
+  type OperationRiskExternalServices,
   type OperationRiskRelationalContext,
 } from "./risk-engine-v2/operation-input.server";
 import type { RiskResult } from "./risk-score";
@@ -251,7 +252,7 @@ async function readFallback(repository: AgroRiskRepository, operatorId: string) 
   };
 }
 
-function buildSnapshot(
+async function buildSnapshot(
   relational: Omit<Awaited<ReturnType<typeof getOperatorRelationalScope>>, "riskContexts"> & {
     riskContexts?: OperationRiskRelationalContext[];
   },
@@ -259,7 +260,8 @@ function buildSnapshot(
   degraded: boolean,
   engineWeights: RiskEngineV2Weights,
   operatorId: string,
-): OperadorDashboardSnapshot {
+  externalServices?: OperationRiskExternalServices,
+): Promise<OperadorDashboardSnapshot> {
   const operation = relational.operations[0];
   const machine = relational.machines[0];
   const area = relational.areas[0];
@@ -271,7 +273,7 @@ function buildSnapshot(
     : { ...area, condition: "Condição estável (demonstração)" };
   const context = relational.riskContexts?.find((item) => item.operation.id === operation.id)
     ?? buildFallbackOperationRiskContext(operation, machine, area, client);
-  const evaluation = evaluateOperationRiskV2(context, engineWeights);
+  const evaluation = await evaluateOperationRiskV2(context, engineWeights, externalServices);
   const result = evaluation.result;
   const risk = toPresentationRisk(result);
   const recommendation = centralRecommendation(operation, result);
@@ -333,18 +335,19 @@ async function loadUncached(
   fallback: AgroRiskRepository,
   weights: RiskEngineV2Weights,
   operatorId: string,
+  externalServices?: OperationRiskExternalServices,
 ) {
   try {
     const relational = primary === postgresRepository
       ? await getOperatorRelationalScope(operatorId)
       : await readFallback(primary, operatorId);
-    return buildSnapshot(relational, "postgres", false, weights, operatorId);
+    return await buildSnapshot(relational, "postgres", false, weights, operatorId, externalServices);
   } catch (error) {
     console.error("[operador-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
     const relational = await readFallback(fallback, operatorId);
-    return buildSnapshot(relational, "mock", true, weights, operatorId);
+    return await buildSnapshot(relational, "mock", true, weights, operatorId, externalServices);
   }
 }
 
@@ -352,11 +355,12 @@ export async function loadOperadorDashboardSnapshot(
   operatorId: string,
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
+  externalServices?: OperationRiskExternalServices,
 ): Promise<OperadorDashboardSnapshot> {
   const config = getRiskEngineV2Configuration();
   const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
-  if (primary !== postgresRepository || fallback !== mockRepository) {
-    return loadUncached(primary, fallback, weights, operatorId);
+  if (primary !== postgresRepository || fallback !== mockRepository || externalServices) {
+    return loadUncached(primary, fallback, weights, operatorId, externalServices);
   }
   const key = `operador-dashboard:v3:${operatorId}:${weights.ml}:${weights.operationalRules}`;
   const cached = cacheGet<OperadorDashboardSnapshot>(key);

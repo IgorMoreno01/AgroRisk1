@@ -84,6 +84,7 @@ export function PersonaV2RiskPanel({
   evaluation: OperationRiskEvaluation;
 }) {
   const copy = personaCopy[persona];
+  const quality = evaluation.provenance.external;
   const mlDriver = result.drivers.find((driver) => driver.source === "ml");
   const operationalDriver = result.drivers.find(
     (driver) => driver.source === "operational_rules",
@@ -110,8 +111,10 @@ export function PersonaV2RiskPanel({
             </p>
             {evaluation.hasIncompleteInputs && (
               <p className="mt-1 text-xs leading-relaxed text-warning-foreground">
-                Parte dos inputs está indisponível e usa imputação oficial; água e terreno ainda
-                usam fallback sintético demonstrativo.
+                Localização {quality.location === "geocoded" ? "geocodificada" : "indisponível"};
+                clima {quality.weather === "historical_api" ? "histórico real" : "imputado"};
+                altitude {quality.altitude === "elevation_api" ? "real" : "imputada"}.
+                COD_MOD e histórico de itens seguem imputados; água e terreno seguem sintéticos.
               </p>
             )}
           </div>

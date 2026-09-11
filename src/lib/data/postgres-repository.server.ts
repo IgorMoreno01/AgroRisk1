@@ -38,7 +38,8 @@ export async function listOperationRiskContexts(scope: {
   const rows = await sql`
     SELECT
       o.id AS "operationId", o.type AS "operationType", o.status AS "operationStatus",
-      o.scheduled_at::text AS "scheduledAt", o.start_label AS "startLabel",
+      to_char(o.scheduled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "scheduledAt",
+      o.start_label AS "startLabel",
       o.duration_label AS "durationLabel", o.operator_id AS "operatorId",
       m.id AS "machineId", m.code AS "machineCode", m.name AS "machineName",
       m.type AS "machineType", m.model AS "machineModel", m.status AS "machineStatus",
@@ -351,7 +352,8 @@ export async function getOperatorRelationalScope(operatorId: string) {
         json_build_object(
           'id', o.id, 'machineId', o.machine_id, 'machine', o.machine_id,
           'operatorId', o.operator_id, 'clientId', o.client_id, 'areaId', o.area_id,
-          'area', a.name, 'type', o.type, 'scheduledAt', o.scheduled_at::text,
+           'area', a.name, 'type', o.type, 'scheduledAt',
+           to_char(o.scheduled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
           'start', o.start_label, 'duration', o.duration_label, 'status', o.status,
           'score', 0, 'factors', coalesce((
             SELECT json_agg(orf.risk_factor_id ORDER BY orf.risk_factor_id)

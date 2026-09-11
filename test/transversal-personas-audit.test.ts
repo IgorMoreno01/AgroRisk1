@@ -5,6 +5,9 @@ import { loadConsultorDashboardSnapshot } from "../src/lib/consultor-dashboard.s
 import { closePostgresRepository } from "../src/lib/data/postgres-repository.server";
 import { loadGestorDashboardSnapshot } from "../src/lib/gestor-dashboard.server";
 import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.server";
+import { mockRepository } from "../src/lib/data/mock-repository.server";
+import { postgresRepository } from "../src/lib/data/postgres-repository.server";
+import { testRiskExternalServices as externalServices } from "./helpers/risk-external-services";
 
 const sql = postgres(process.env.DATABASE_URL!, { max: 2, prepare: false });
 
@@ -41,16 +44,18 @@ describe("auditoria transversal das quatro personas", () => {
       sql`SELECT client_id AS id FROM agrorisk.user_client_scopes WHERE user_id=${candidate.consultorId}`,
     ]);
     const [admin, gestor, consultor, operador] = await Promise.all([
-      loadAdminDashboardSnapshot(),
+      loadAdminDashboardSnapshot(postgresRepository, mockRepository, externalServices),
       loadGestorDashboardSnapshot({
         userId: candidate.gestorId,
         clientIds: gestorScopes.map((row) => String(row.id)),
-      }),
+      }, postgresRepository, mockRepository, externalServices),
       loadConsultorDashboardSnapshot({
         userId: candidate.consultorId,
         clientIds: consultorScopes.map((row) => String(row.id)),
-      }),
-      loadOperadorDashboardSnapshot(candidate.operatorId),
+      }, postgresRepository, mockRepository, externalServices),
+      loadOperadorDashboardSnapshot(
+        candidate.operatorId, postgresRepository, mockRepository, externalServices,
+      ),
     ]);
 
     const machineId = operador.machine.id;
@@ -102,10 +107,25 @@ describe("auditoria transversal das quatro personas", () => {
     const gestorClientIds = gestorScopes.map((row) => String(row.id));
     const consultorClientIds = consultorScopes.map((row) => String(row.id));
     const [admin, gestor, consultor, operador] = await Promise.all([
-      loadAdminDashboardSnapshot(),
-      loadGestorDashboardSnapshot({ userId: ids.gestorId, clientIds: gestorClientIds }),
-      loadConsultorDashboardSnapshot({ userId: ids.consultorId, clientIds: consultorClientIds }),
-      loadOperadorDashboardSnapshot(ids.operatorId),
+      loadAdminDashboardSnapshot(postgresRepository, mockRepository, externalServices),
+      loadGestorDashboardSnapshot(
+        { userId: ids.gestorId, clientIds: gestorClientIds },
+        postgresRepository,
+        mockRepository,
+        externalServices,
+      ),
+      loadConsultorDashboardSnapshot(
+        { userId: ids.consultorId, clientIds: consultorClientIds },
+        postgresRepository,
+        mockRepository,
+        externalServices,
+      ),
+      loadOperadorDashboardSnapshot(
+        ids.operatorId,
+        postgresRepository,
+        mockRepository,
+        externalServices,
+      ),
     ]);
 
     const allClientRows = await sql`SELECT id FROM agrorisk.clients ORDER BY id`;

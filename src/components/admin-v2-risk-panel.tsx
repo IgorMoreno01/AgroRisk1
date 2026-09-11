@@ -241,6 +241,7 @@ function ContributionTable({ result }: { result: RiskEngineV2Result }) {
 export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEvaluation }) {
   const [mlWeight, setMlWeight] = useState(evaluation.input.weights.ml);
   const [savedMlWeight, setSavedMlWeight] = useState(evaluation.input.weights.ml);
+  const quality = evaluation.provenance.external;
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
   );
@@ -326,7 +327,10 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             </p>
             {evaluation.hasIncompleteInputs && (
               <p className="mt-1 max-w-3xl text-xs text-warning-foreground">
-                Parte dos inputs usa imputação oficial; água e terreno ainda são sintéticos demonstrativos.
+                Localização {quality.location === "geocoded" ? "geocodificada" : "indisponível"};
+                clima {quality.weather === "historical_api" ? "histórico real" : "imputado"};
+                altitude {quality.altitude === "elevation_api" ? "real" : "imputada"}.
+                COD_MOD e histórico de itens seguem imputados; água e terreno seguem sintéticos.
               </p>
             )}
           </div>

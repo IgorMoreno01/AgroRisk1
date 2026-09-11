@@ -3,12 +3,19 @@
 // https://open-meteo.com/en/docs
 // ============================================================
 
-import { cacheOrFetch } from "../cache.server";
-import type { WeatherData, WeatherCondition, HourlyForecast } from "../external-data.types";
+import { cacheGet, cacheOrFetch, cacheSet } from "../cache.server";
+import type {
+  HistoricalWeatherFeatures,
+  WeatherData,
+  WeatherCondition,
+  HourlyForecast,
+} from "../external-data.types";
 
 const BASE_URL = "https://api.open-meteo.com/v1/forecast";
+const HISTORICAL_URL = "https://archive-api.open-meteo.com/v1/archive";
 const TIMEOUT_MS = 8_000;
 const CACHE_TTL_S = 10 * 60; // 10 minutos
+const historicalInFlight = new Map<string, Promise<OpenMeteoHistoricalResponse | null>>();
 
 // WMO weather codes → condição interna
 function wmoToCondition(code: number): WeatherCondition {
@@ -155,5 +162,153 @@ export async function getClimate(lat: number, lon: number): Promise<WeatherData>
   } catch (err) {
     console.warn("[ClimateAdapter] fallback para mock:", (err as Error).message);
     return mockWeatherData(lat, lon);
+  }
+}
+
+export interface OpenMeteoHistoricalResponse {
+  daily: {
+    time: string[];
+    precipitation_sum: Array<number | null>;
+    temperature_2m_mean: Array<number | null>;
+    temperature_2m_max: Array<number | null>;
+    temperature_2m_min: Array<number | null>;
+  };
+  hourly: {
+    time: string[];
+    relative_humidity_2m: Array<number | null>;
+    wind_speed_10m: Array<number | null>;
+  };
+}
+
+function shiftIsoDate(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+const sumFinite = (values: Array<number | null>): number | null => {
+  if (values.some((value) => value === null || !Number.isFinite(value))) return null;
+  return values.reduce<number>((total, value) => total + (value ?? 0), 0);
+};
+
+export function deriveHistoricalWeatherFeatures(
+  payload: OpenMeteoHistoricalResponse,
+  referenceDate: string,
+): HistoricalWeatherFeatures | null {
+  const d1 = shiftIsoDate(referenceDate, -1);
+  const d1Index = payload.daily.time.indexOf(d1);
+  if (d1Index < 0) return null;
+  const expectedDates = (days: number) =>
+    Array.from({ length: days }, (_, index) => shiftIsoDate(referenceDate, index - days));
+  const precipitationFor = (days: number) =>
+    expectedDates(days).map((date) => {
+      const index = payload.daily.time.indexOf(date);
+      return index < 0 ? null : payload.daily.precipitation_sum[index];
+    });
+  const rain7dMm = sumFinite(precipitationFor(7));
+  const rain30dMm = sumFinite(precipitationFor(30));
+  const expectedHours = new Set(
+    Array.from({ length: 24 }, (_, hour) => `${d1}T${String(hour).padStart(2, "0")}:00`),
+  );
+  const d1HourlyIndexes = payload.hourly.time.flatMap((time, index) =>
+    expectedHours.has(time) ? [index] : [],
+  );
+  if (d1HourlyIndexes.length !== 24) return null;
+  const humidityD1 = d1HourlyIndexes.map((index) => payload.hourly.relative_humidity_2m[index]);
+  const windD1Kmh = d1HourlyIndexes.map((index) => payload.hourly.wind_speed_10m[index]);
+  const [precipitationD1Mm, temperatureMeanD1C, temperatureMaxD1C, temperatureMinD1C] = [
+    payload.daily.precipitation_sum[d1Index],
+    payload.daily.temperature_2m_mean[d1Index],
+    payload.daily.temperature_2m_max[d1Index],
+    payload.daily.temperature_2m_min[d1Index],
+  ];
+  if (
+    rain7dMm === null || rain30dMm === null ||
+    humidityD1.some((value) => value === null || !Number.isFinite(value)) ||
+    windD1Kmh.some((value) => value === null || !Number.isFinite(value)) ||
+    [precipitationD1Mm, temperatureMeanD1C, temperatureMaxD1C, temperatureMinD1C]
+      .some((value) => value === null || !Number.isFinite(value))
+  ) return null;
+  return {
+    source: "open-meteo-historical",
+    referenceDate,
+    precipitationD1Mm: precipitationD1Mm!,
+    rain7dMm,
+    rain30dMm,
+    temperatureMeanD1C: temperatureMeanD1C!,
+    temperatureMaxD1C: temperatureMaxD1C!,
+    temperatureMinD1C: temperatureMinD1C!,
+    humidityMeanD1Pct:
+      humidityD1.reduce<number>((total, value) => total + (value ?? 0), 0) / humidityD1.length,
+    windMeanD1Ms:
+      (windD1Kmh.reduce<number>((total, value) => total + (value ?? 0), 0) / windD1Kmh.length) / 3.6,
+  };
+}
+
+async function fetchHistoricalClimateSeries(
+  lat: number,
+  lon: number,
+  startDate: string,
+  endDate: string,
+): Promise<OpenMeteoHistoricalResponse> {
+  const params = new URLSearchParams({
+    latitude: lat.toFixed(4),
+    longitude: lon.toFixed(4),
+    start_date: startDate,
+    end_date: endDate,
+    daily:
+      "precipitation_sum,temperature_2m_mean,temperature_2m_max,temperature_2m_min",
+    hourly: "relative_humidity_2m,wind_speed_10m",
+    timezone: "auto",
+    wind_speed_unit: "kmh",
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const response = await fetch(`${HISTORICAL_URL}?${params}`, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Open-Meteo Historical HTTP ${response.status}`);
+    return (await response.json()) as OpenMeteoHistoricalResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function getHistoricalClimate(
+  lat: number,
+  lon: number,
+  referenceDate: string,
+): Promise<HistoricalWeatherFeatures | null> {
+  const yesterday = shiftIsoDate(new Date().toISOString().slice(0, 10), -1);
+  if (referenceDate > shiftIsoDate(yesterday, 1)) return null;
+  const year = referenceDate.slice(0, 4);
+  const startDate = shiftIsoDate(`${year}-01-01`, -30);
+  const endDate = `${year}-12-31` < yesterday ? `${year}-12-31` : yesterday;
+  const key = `climate-history-series:${lat.toFixed(3)}:${lon.toFixed(3)}:${year}`;
+  const cached = cacheGet<OpenMeteoHistoricalResponse | null>(key);
+  if (cached !== undefined) {
+    return cached ? deriveHistoricalWeatherFeatures(cached, referenceDate) : null;
+  }
+  const pending = historicalInFlight.get(key);
+  if (pending) {
+    const series = await pending;
+    return series ? deriveHistoricalWeatherFeatures(series, referenceDate) : null;
+  }
+  const request: Promise<OpenMeteoHistoricalResponse | null> = (async () => {
+    try {
+      const series = await fetchHistoricalClimateSeries(lat, lon, startDate, endDate);
+      cacheSet(key, series, 24 * 60 * 60);
+      return series;
+    } catch (error) {
+      console.warn("[ClimateAdapter] histórico indisponível:", (error as Error).message);
+      cacheSet(key, null, 5 * 60);
+      return null;
+    }
+  })();
+  historicalInFlight.set(key, request);
+  try {
+    const series = await request;
+    return series ? deriveHistoricalWeatherFeatures(series, referenceDate) : null;
+  } finally {
+    historicalInFlight.delete(key);
   }
 }

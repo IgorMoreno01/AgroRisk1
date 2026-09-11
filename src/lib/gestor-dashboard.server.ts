@@ -8,6 +8,7 @@ import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
 import type { GeneratedRecommendation, RecCategory } from "./recommendations";
 import type { GestorDashboardSnapshot } from "./gestor-dashboard-types";
+import type { OperationRiskExternalServices } from "./risk-engine-v2/operation-input.server";
 
 export interface GestorAccessScope {
   userId: string;
@@ -73,18 +74,19 @@ async function readScoped(repository: AgroRiskRepository, scope: GestorAccessSco
   };
 }
 
-function buildSnapshot(
+async function buildSnapshot(
   relational: Awaited<ReturnType<typeof readScoped>>,
   source: "postgres" | "mock",
   degraded: boolean,
   scope: GestorAccessScope,
   operationalOverview: GestorDashboardSnapshot["operationalOverview"],
-): GestorDashboardSnapshot {
+  externalServices?: OperationRiskExternalServices,
+): Promise<GestorDashboardSnapshot> {
   const configuration = getRiskEngineV2Configuration();
-  const base = buildAdminDashboardSnapshot(relational, source, degraded, {
+  const base = await buildAdminDashboardSnapshot(relational, source, degraded, {
     ml: configuration.mlWeight,
     operationalRules: configuration.operationalRulesWeight,
-  });
+  }, undefined, externalServices);
   const scopedMachineIds = new Set(base.machines.map((machine) => machine.id));
   const scopedDemoAlerts = relational.alerts.filter((alert) => scopedMachineIds.has(alert.machineId));
   const machineRows = base.machineRows.map((row) => ({
@@ -123,6 +125,7 @@ async function loadUncached(
   primary: AgroRiskRepository,
   fallback: AgroRiskRepository,
   scope: GestorAccessScope,
+  externalServices?: OperationRiskExternalServices,
 ): Promise<GestorDashboardSnapshot> {
   try {
     if (primary === postgresRepository) {
@@ -130,20 +133,20 @@ async function loadUncached(
         readScoped(primary, scope),
         listGestorOperationalOverview(scope.clientIds),
       ]);
-      return buildSnapshot(relational, "postgres", false, scope, operationalOverview);
+      return await buildSnapshot(relational, "postgres", false, scope, operationalOverview, externalServices);
     }
-    return buildSnapshot(await readScoped(primary, scope), "postgres", false, scope, {
+    return await buildSnapshot(await readScoped(primary, scope), "postgres", false, scope, {
       maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
       activity: [],
-    });
+    }, externalServices);
   } catch (error) {
     console.error("[gestor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
-    return buildSnapshot(await readScoped(fallback, scope), "mock", true, scope, {
+    return await buildSnapshot(await readScoped(fallback, scope), "mock", true, scope, {
       maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
       activity: [],
-    });
+    }, externalServices);
   }
 }
 
@@ -151,9 +154,10 @@ export async function loadGestorDashboardSnapshot(
   scope: GestorAccessScope,
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
+  externalServices?: OperationRiskExternalServices,
 ): Promise<GestorDashboardSnapshot> {
-  if (primary !== postgresRepository || fallback !== mockRepository) {
-    return loadUncached(primary, fallback, scope);
+  if (primary !== postgresRepository || fallback !== mockRepository || externalServices) {
+    return loadUncached(primary, fallback, scope, externalServices);
   }
   const config = getRiskEngineV2Configuration();
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");

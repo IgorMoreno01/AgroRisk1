@@ -3,7 +3,7 @@
 // Fallback: Open-Elevation API (público, sem chave)
 // ============================================================
 
-import { cacheOrFetch } from "../cache.server";
+import { cacheGet, cacheOrFetch, cacheSet } from "../cache.server";
 import type { ElevationData, SlopeClass, SlopePoint } from "../external-data.types";
 
 const OPENTOPO_URL = "https://portal.opentopography.org/API/globaldem";
@@ -242,3 +242,44 @@ export async function getTerrain(lat: number, lon: number): Promise<ElevationDat
     return mockElevationData(lat, lon);
   }
 }
+
+export async function getElevationForRisk(
+  lat: number,
+  lon: number,
+): Promise<ElevationData | null> {
+  const key = `risk-elevation:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const cached = cacheGet<ElevationData | null>(key);
+  if (cached !== undefined) return cached;
+  const pending = riskElevationInFlight.get(key);
+  if (pending) return pending;
+  const apiKey = process.env["OPENTOPO_API_KEY"];
+  const request = (async () => {
+    try {
+      let elevation: ElevationData;
+      if (apiKey) {
+        try {
+          elevation = await fetchOpenTopography(lat, lon, apiKey);
+        } catch (error) {
+          console.warn(
+            "[TerrainAdapter] OpenTopography falhou, usando Open-Elevation:",
+            (error as Error).message,
+          );
+          elevation = await fetchElevationViaOpenElevation(lat, lon);
+        }
+      } else {
+        elevation = await fetchElevationViaOpenElevation(lat, lon);
+      }
+      if (!Number.isFinite(elevation.elevationM)) throw new Error("Elevação inválida");
+      cacheSet(key, elevation, CACHE_TTL_S);
+      return elevation;
+    } catch (error) {
+      console.warn("[TerrainAdapter] elevação indisponível:", (error as Error).message);
+      cacheSet(key, null, 5 * 60);
+      return null;
+    }
+  })();
+  riskElevationInFlight.set(key, request);
+  try { return await request; } finally { riskElevationInFlight.delete(key); }
+}
+
+const riskElevationInFlight = new Map<string, Promise<ElevationData | null>>();

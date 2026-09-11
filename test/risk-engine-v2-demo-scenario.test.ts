@@ -42,7 +42,7 @@ describe("Risk Engine V2 · cenário demonstrativo do Admin", () => {
     expect(panelSource).toContain('driver.source === "ml"');
     expect(panelSource).toContain('driver.source === "operational_rules"');
     expect(panelSource).toContain("Risk Engine V2 · operação avaliada");
-    expect(panelSource).toContain("imputação oficial");
+    expect(panelSource).toContain("clima {quality.weather");
     expect(panelSource).not.toContain("evaluateRiskEngineV2Demo");
     expect(panelSource.toLowerCase()).not.toContain("probabilidade calibrada");
   });

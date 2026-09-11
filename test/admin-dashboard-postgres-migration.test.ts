@@ -31,7 +31,7 @@ describe("Migração Admin/Sompo para dados relacionais", () => {
     }));
     const alerts = await mockRepository.listAlerts();
 
-    const snapshot = buildAdminDashboardSnapshot(
+    const snapshot = await buildAdminDashboardSnapshot(
       { clients, areas, machines, operations, alerts },
       "postgres",
       false,
@@ -77,7 +77,7 @@ describe("Migração Admin/Sompo para dados relacionais", () => {
       operations: await mockRepository.listOperations(),
       alerts: await mockRepository.listAlerts(),
     };
-    const snapshot = buildAdminDashboardSnapshot(relational, "postgres", false, weights);
+    const snapshot = await buildAdminDashboardSnapshot(relational, "postgres", false, weights);
     expect(snapshot.clients).toHaveLength(relational.clients.length);
     expect(snapshot.areas).toHaveLength(relational.areas.length);
     expect(snapshot.machines).toHaveLength(relational.machines.length);
@@ -86,8 +86,8 @@ describe("Migração Admin/Sompo para dados relacionais", () => {
     expect(snapshot.areaDistribution.total).toBe(relational.areas.length);
   });
 
-  test("trata um banco relacional vazio sem produzir valores inválidos", () => {
-    const snapshot = buildAdminDashboardSnapshot(
+  test("trata um banco relacional vazio sem produzir valores inválidos", async () => {
+    const snapshot = await buildAdminDashboardSnapshot(
       { clients: [], areas: [], machines: [], operations: [], alerts: [] },
       "postgres",
       false,
@@ -110,7 +110,7 @@ describe("Migração Admin/Sompo para dados relacionais", () => {
       operations: await mockRepository.listOperations(),
       alerts: await mockRepository.listAlerts(),
     };
-    const snapshot = buildAdminDashboardSnapshot(relational, "postgres", false, weights);
+    const snapshot = await buildAdminDashboardSnapshot(relational, "postgres", false, weights);
     const serialized = JSON.parse(JSON.stringify(snapshot));
     expect(serialized.clients).toHaveLength(relational.clients.length);
     expect(serialized.operationRows).toHaveLength(relational.operations.length);

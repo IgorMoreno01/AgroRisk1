@@ -33,7 +33,8 @@ describe("Risk Engine V2 · propagação entre personas", () => {
       expect(source).not.toContain("RISK_ENGINE_V2_DEMO_SCENARIOS");
       expect(source).not.toContain("Golden Vector");
     }
-    expect(componentSource).toContain("imputação oficial");
+    expect(componentSource).toContain('clima {quality.weather === "historical_api" ? "histórico real" : "imputado"}');
+    expect(componentSource).toContain('altitude {quality.altitude === "elevation_api" ? "real" : "imputada"}');
     expect(componentSource).toContain("evaluation.context.farm.name");
   });
 
