@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge } from "@/components/risk-badge";
 import { NextBestActionCard } from "@/components/next-best-action";
-import { RecentHistoryCard } from "@/components/operador-cards";
 import { CloudSun, Droplets, Mountain, Wind, type LucideIcon } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ProfileAlertsSection } from "@/components/profile-alerts-section";
@@ -199,16 +198,6 @@ function OperadorPage() {
         <OperationRegistrationCard />
       </div>
 
-      <section id="historico" className="mt-6 scroll-mt-20">
-        <RecentHistoryCard
-          operation={operation}
-          result={scoreContext}
-          area={area}
-          recommendation={snapshot.recommendation}
-          history={snapshot.history}
-          alerts={snapshot.alerts}
-        />
-      </section>
     </AppLayout>
   );
 }

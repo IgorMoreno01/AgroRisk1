@@ -50,7 +50,6 @@ const NAV_BY_PROFILE: Record<ProfileId, NavItem[]> = {
     { label: "Alertas",             icon: Bell,            href: "#alertas-operacao" },
     { label: "Recomendações",       icon: Lightbulb,       href: "#recomendacoes" },
     { label: "Registro da operação", icon: Wrench,         href: "#registro-operacao" },
-    { label: "Histórico recente",   icon: Layers,          href: "#historico" },
   ],
   gestor: [
     { label: "Dashboard",           icon: LayoutDashboard, to: "/gestor", href: "#topo" },

@@ -40,7 +40,6 @@ describe("Tela operacional simplificada", () => {
       "Clima e segurança",
       "ProfileAlertsSection",
       "OperationRegistrationCard",
-      "RecentHistoryCard",
       "machine.type",
       "machine.id",
       "scoreContext.finalScore",
@@ -61,10 +60,30 @@ describe("Tela operacional simplificada", () => {
       "TerrainSection",
       "SoilDemoSection",
       "RiskFactorsWithSources",
+      "RecentHistoryCard",
       "machine.model",
       "machine.name",
     ]) {
       expect(route).not.toContain(removed);
     }
+
+    const navigation = readFileSync(
+      new URL("../src/components/app-layout.tsx", import.meta.url),
+      "utf8",
+    );
+    const operatorNavigation = navigation.slice(
+      navigation.indexOf("operador: ["),
+      navigation.indexOf("gestor: ["),
+    );
+    expect(operatorNavigation).not.toContain("Histórico recente");
+
+    const registrationCard = readFileSync(
+      new URL("../src/components/operation-registration-card.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(registrationCard).toContain(".slice(0, 3)");
+    expect(registrationCard).not.toContain("RiskBadge");
+    expect(registrationCard).not.toContain("RecommendationCard");
+    expect(registrationCard).not.toContain("ProfileAlertsSection");
   });
 });

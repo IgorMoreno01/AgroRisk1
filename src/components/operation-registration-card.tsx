@@ -86,7 +86,9 @@ export function OperationRegistrationCard() {
   const active = snapshot?.activeLog ?? null;
   const latest = active ?? snapshot?.latestLog ?? null;
   const isCompleted = !active && latest?.status === "completed";
-  const history = (snapshot?.history ?? []).filter((log) => log.id !== active?.id);
+  const recentExecutionLogs = (snapshot?.history ?? [])
+    .filter((log) => log.id !== active?.id)
+    .slice(0, 3);
 
   return (
     <Card>
@@ -178,13 +180,13 @@ export function OperationRegistrationCard() {
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
       {notice && <p className="mt-3 text-sm text-success">{notice}</p>}
 
-      {history.length > 0 && (
+      {recentExecutionLogs.length > 0 && (
         <div className="mt-5 border-t border-border pt-4">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <History className="h-3.5 w-3.5" /> Registros recentes
           </div>
           <div className="space-y-2">
-            {history.map((log) => (
+            {recentExecutionLogs.map((log) => (
               <div key={log.id} className="flex items-start justify-between gap-3 text-sm">
                 <div className="min-w-0">
                   <div className="font-medium text-foreground">{log.status === "completed" ? "Operação concluída" : "Registro de operação"}</div>
