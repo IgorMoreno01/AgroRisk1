@@ -4,3 +4,4 @@
 - [Risco explicável](recommendation-origin.md) — recomendações e explicações compartilham score, componente e fator; inclinação permanece em telemetria separada.
 - [Fundação de dados](data-foundation.md) — PostgreSQL gerenciado fica atrás de repositórios compatíveis; mocks seguem como origem até uma migração explícita.
 - [Macrocomponentes de risco](risk-component-naming.md) — Sompo pondera Climático e Operacional; ML não é macrocomponente e será apenas fonte futura de probabilidades.
+- [Registro de execução do Operador](operator-execution-logs.md) — execução persiste separada de operações planejadas e não altera o cálculo de risco.

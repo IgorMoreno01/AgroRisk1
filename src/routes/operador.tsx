@@ -30,6 +30,7 @@ import { getStoredSessionToken } from "@/lib/auth";
 import { getOperadorDashboard } from "@/lib/api/operador-dashboard.functions";
 import type { OperadorDashboardSnapshot } from "@/lib/operador-dashboard-types";
 import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
+import { OperationRegistrationCard } from "@/components/operation-registration-card";
 import type { ProfileAlertsBundle } from "@/lib/profile-alerts";
 
 export const Route = createFileRoute("/operador")({
@@ -279,6 +280,10 @@ function OperadorPage() {
             </div>
           </div>
         </Card>
+      </div>
+
+      <div className="mt-6">
+        <OperationRegistrationCard />
       </div>
 
       {/* Meio: resumo + mini-mapa */}
