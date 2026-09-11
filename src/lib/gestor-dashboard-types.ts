@@ -20,6 +20,7 @@ export interface GestorOperationalOverview {
       client: string;
       nextDueAt: string;
       status: "due_soon" | "overdue";
+      source: "real" | "demo" | "synthetic";
     }>;
   };
   activity: Array<{

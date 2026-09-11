@@ -23,7 +23,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth, userFor, clientFor, profileLabels } from "@/lib/auth";
+import { profileLabels, useAuth } from "@/lib/auth";
 import type { ProfileId } from "@/lib/mock-data";
 import { HeaderAlerts, HeaderUserMenu } from "@/components/header-menus";
 import { CriticalAlertBanner } from "@/components/actionable-alerts";
@@ -136,11 +136,12 @@ export function AppLayout({
 
   const navItems = profile ? NAV_BY_PROFILE[profile] : [];
   const searchPlaceholder = profile ? SEARCH_BY_PROFILE[profile] : null;
-  const fallbackUser = profile && profile !== "operador" ? userFor(profile) : undefined;
-  const fallbackClient = clientFor(fallbackUser);
-  const user = account ? { name: account.name } : fallbackUser;
-  const clientName = account?.clientName ?? fallbackClient?.name;
-
+  const user = account
+    ? { name: account.name }
+    : profile
+      ? { name: profileLabels[profile] }
+      : undefined;
+  const clientName = account?.clientName;
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     const saved = typeof window !== "undefined" ? window.localStorage.getItem(SIDEBAR_KEY) : null;

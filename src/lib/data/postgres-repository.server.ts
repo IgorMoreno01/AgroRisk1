@@ -98,7 +98,7 @@ export async function listGestorOperationalOverview(
   const [maintenanceRows, activityRows] = await Promise.all([
     sql`
       SELECT r.id, m.client_id AS "clientId", r.machine_id AS "machineId", m.type AS "machineType",
-        c.name AS client, r.next_due_at::text AS "nextDueAt", r.status,
+        c.name AS client, r.next_due_at::text AS "nextDueAt", r.status, r.source,
         count(*) FILTER (WHERE r.status = 'overdue') OVER ()::int AS "overdueCount",
         count(*) FILTER (WHERE r.status = 'due_soon') OVER ()::int AS "dueSoonCount"
       FROM agrorisk.maintenance_records r
@@ -145,7 +145,7 @@ export async function listAdminOperationalOverview(): Promise<AdminOperationalOv
     sql`
       SELECT r.id, r.machine_id AS "machineId", m.type AS "machineType",
         c.name AS client, r.performed_at::text AS "lastPerformedAt",
-        r.next_due_at::text AS "nextDueAt", r.status,
+        r.next_due_at::text AS "nextDueAt", r.status, r.source,
         count(*) FILTER (WHERE r.status = 'overdue') OVER ()::int AS "overdueCount",
         count(*) FILTER (WHERE r.status = 'due_soon') OVER ()::int AS "dueSoonCount"
       FROM agrorisk.maintenance_records r
@@ -196,7 +196,7 @@ export async function listConsultorPreventiveOverview(
     sql`
       SELECT r.id, m.client_id AS "clientId", c.name AS client,
         r.machine_id AS "machineId", m.type AS "machineType",
-        r.next_due_at::text AS "nextDueAt", r.status,
+        r.next_due_at::text AS "nextDueAt", r.status, r.source,
         count(*) FILTER (WHERE r.status = 'overdue') OVER ()::int AS "overdueCount",
         count(*) FILTER (WHERE r.status = 'due_soon') OVER ()::int AS "dueSoonCount"
       FROM agrorisk.maintenance_records r

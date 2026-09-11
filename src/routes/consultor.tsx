@@ -87,7 +87,7 @@ function ConsultorPage() {
     return (
       <AppLayout title="Visão do Consultor" subtitle="Análise consolidada por cliente e recomendações preventivas">
         <Card>
-          <SectionTitle title="Carteira sem clientes" description="Nenhum cliente está associado ao escopo demonstrativo atual." />
+          <SectionTitle title="Carteira sem clientes" description="Nenhum cliente está associado ao escopo autorizado desta conta." />
         </Card>
       </AppLayout>
     );

@@ -35,6 +35,7 @@ export interface ConsultorPreventiveOverview {
       machineType: string;
       nextDueAt: string;
       status: "due_soon" | "overdue";
+      source: "real" | "demo" | "synthetic";
     }>;
   };
   attentionPoints: Array<{

@@ -11,11 +11,8 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  operations, machines, clients,
-  type ProfileId,
-} from "@/lib/mock-data";
-import { useAuth, profileLabels, userFor, clientFor } from "@/lib/auth";
+import { type ProfileId } from "@/lib/mock-data";
+import { useAuth, profileLabels } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { ActionableAlertRow } from "@/components/actionable-alerts";
 import { useActionableAlerts } from "@/lib/actionable-alerts";
@@ -151,16 +148,10 @@ function buildContext(profile: ProfileId, account?: HeaderAccountContext): Profi
       ],
     };
   }
-  const user = userFor(profile);
-  const client = clientFor(user);
   if (profile === "gestor") {
     return {
-      scope: "Visão gerencial da operação",
-      rows: [
-        { icon: Building2, label: "Cliente",  value: client?.name ?? "—" },
-        { icon: MapPin,    label: "Região",   value: client?.location ?? "—" },
-        { icon: Tractor,   label: "Frota",    value: `${client?.machines ?? 0} equipamentos` },
-      ],
+      scope: "Carteira autorizada pela sessão",
+      rows: [],
       permissions: [
         "Visualizar dashboard gerencial",
         "Visualizar ranking de risco",
@@ -171,14 +162,9 @@ function buildContext(profile: ProfileId, account?: HeaderAccountContext): Profi
     };
   }
   if (profile === "consultor") {
-    const selected = clients[0];
     return {
-      scope: "Análise consolidada por cliente",
-      rows: [
-        { icon: Briefcase, label: "Carteira",          value: `${clients.length} clientes` },
-        { icon: Building2, label: "Cliente atual",     value: selected?.name ?? "—" },
-        { icon: MapPin,    label: "Região",            value: selected?.location ?? "—" },
-      ],
+      scope: "Carteira autorizada pela sessão",
+      rows: [],
       permissions: [
         "Visualizar clientes",
         "Top equipamentos em risco",
@@ -190,19 +176,15 @@ function buildContext(profile: ProfileId, account?: HeaderAccountContext): Profi
   }
   // admin
   return {
-    scope: "Acesso total ao MVP",
-    rows: [
-      { icon: Briefcase, label: "Clientes",     value: `${clients.length}` },
-      { icon: Tractor,   label: "Equipamentos", value: `${machines.length}` },
-      { icon: Activity,  label: "Operações",    value: `${operations.length}` },
-    ],
+    scope: "Acesso global autorizado",
+    rows: [],
     permissions: [
       "Visualizar todos os clientes",
       "Visualizar todas as máquinas",
       "Visualizar todas as áreas",
       "Visualizar todos os alertas",
       "Scores, rankings e recomendações",
-      "Acessar todas as telas simuladas",
+      "Acessar a visão consolidada",
     ],
   };
 }
@@ -212,9 +194,7 @@ export function HeaderUserMenu({ account }: { account?: HeaderAccountContext }) 
   const navigate = useNavigate();
   const [accountOpen, setAccountOpen] = useState(false);
 
-  const fallbackUser = profile && profile !== "operador" ? userFor(profile) : undefined;
-  const fallbackClient = clientFor(fallbackUser);
-  const name = account?.name ?? fallbackUser?.name ?? "Usuário";
+  const name = account?.name ?? (profile ? profileLabels[profile] : "Usuário");
   const label = profile ? profileLabels[profile] : "—";
   const ctx = profile ? buildContext(profile, account) : null;
 
@@ -335,19 +315,17 @@ export function HeaderUserMenu({ account }: { account?: HeaderAccountContext }) 
           <div className="space-y-3 text-sm">
             <Row label="Nome" value={name} />
             <Row label="Perfil" value={label} />
-            <Row label="ID do usuário" value={account?.userId ?? fallbackUser?.id ?? "—"} />
-            {(account?.clientName || fallbackClient) && (
+            <Row label="ID do usuário" value={account?.userId ?? "—"} />
+            {account?.clientName && (
               <Row
                 label="Cliente / Fazenda"
-                value={account
-                  ? `${account.clientName ?? "—"} · ${account.clientLocation ?? "—"}`
-                  : `${fallbackClient!.name} · ${fallbackClient!.location}`}
+                value={`${account.clientName} · ${account.clientLocation ?? "—"}`}
               />
             )}
             <div>
               <div className="text-xs font-medium text-muted-foreground">Permissões principais</div>
               <div className="mt-1 flex flex-wrap gap-1">
-                {(ctx?.permissions ?? fallbackUser?.permissions ?? []).map((p) => (
+                {(ctx?.permissions ?? []).map((p) => (
                   <span key={p} className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-[11px] text-foreground">
                     <Eye className="h-3 w-3 text-muted-foreground" />
                     {p}

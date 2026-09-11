@@ -58,6 +58,7 @@ export interface AdminOperationalOverview {
       lastPerformedAt: string | null;
       nextDueAt: string;
       status: "due_soon" | "overdue";
+      source: "real" | "demo" | "synthetic";
     }>;
   };
   activity: Array<{

@@ -36,7 +36,7 @@ describe("Tela operacional simplificada", () => {
     for (const visible of [
       "Operação atual",
       "Risco agora",
-      "Próxima ação",
+      "Próxima melhor ação",
       "Clima e segurança",
       "PreventiveMaintenanceCard",
       "ActionableAlertsList",
@@ -67,6 +67,19 @@ describe("Tela operacional simplificada", () => {
     ]) {
       expect(route).not.toContain(removed);
     }
+
+    const order = [
+      "Operação atual",
+      "Risco agora",
+      "Próxima melhor ação",
+      "Clima e segurança",
+      "<ActionableAlertsList",
+      "<OperationRegistrationCard",
+      "<PreventiveMaintenanceCard",
+    ].map((label) => route.indexOf(label));
+    expect(order.every((position) => position >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((left, right) => left - right));
+    expect(route).toContain('label="Inclinação simulada"');
 
     const navigation = readFileSync(
       new URL("../src/components/app-layout.tsx", import.meta.url),

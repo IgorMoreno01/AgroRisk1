@@ -71,7 +71,10 @@ export function ConsultorPreventiveOverview({
                 <span>{item.status === "overdue" ? "Atrasada" : "Próxima"}</span>
               </div>
               <div className="text-muted-foreground">{item.client}</div>
-              <div className="text-muted-foreground">Próxima manutenção {date(item.nextDueAt)}</div>
+              <div className="text-muted-foreground">
+                Próxima manutenção {date(item.nextDueAt)}
+                {item.source === "synthetic" ? " · Dados sintéticos" : ""}
+              </div>
             </div>
           ))}
         </div>

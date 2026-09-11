@@ -52,7 +52,7 @@ export function GestorOperationalOverview({ overview }: { overview: GestorOperat
           {overview.maintenance.top.length === 0 && <p className="text-muted-foreground">Nenhuma manutenção pendente.</p>}
           {overview.maintenance.top.map((item) => (
             <div key={item.id} className="flex justify-between gap-2 rounded border px-2 py-1.5">
-              <span className="truncate">{item.machineType} · {item.machineId}<small className="block text-muted-foreground">{item.client}</small></span>
+              <span className="truncate">{item.machineType} · {item.machineId}<small className="block text-muted-foreground">{item.client}{item.source === "synthetic" ? " · Dados sintéticos" : ""}</small></span>
               <span className="shrink-0 text-right">{item.status === "overdue" ? "Vencida" : "Próxima"}<small className="block text-muted-foreground">{date(item.nextDueAt)}</small></span>
             </div>
           ))}

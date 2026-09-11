@@ -76,9 +76,13 @@ describe("Identidade visual do Operador autenticado", () => {
     expect(route).toContain("name: snapshot.operator.name");
     expect(route).toContain("userId: snapshot.operator.id");
     expect(route).toContain("clientName: client.name");
-    expect(layout).toContain('profile !== "operador" ? userFor(profile) : undefined');
+    expect(layout).not.toContain("userFor(");
+    expect(layout).not.toContain("clientFor(");
+    expect(layout).toContain("account.name");
     expect(layout).not.toContain("OP-1001");
     expect(menu).not.toContain("operations[0]");
     expect(menu).not.toContain("Carlos Mendes");
+    expect(menu).not.toContain("userFor(");
+    expect(menu).not.toContain("clientFor(");
   });
 });

@@ -156,7 +156,7 @@ function OperadorPage() {
 
       <div id="recomendacoes" className="mt-6 grid scroll-mt-20 gap-4 lg:grid-cols-2">
         <Card>
-          <SectionTitle title="Próxima ação" description="Prioridade para a operação atual" />
+          <SectionTitle title="Próxima melhor ação" description="Prioridade para a operação atual" />
           <NextBestActionCard action={nextAction} />
         </Card>
         <Card>
@@ -167,15 +167,11 @@ function OperadorPage() {
             <QuickStatus icon={Wind} label="Vento" value={climate.wind} />
             <QuickStatus
               icon={Mountain}
-              label="Inclinação"
+              label="Inclinação simulada"
               value={`${snapshot.telemetry.inclinationDegrees.toFixed(1)}° · ${snapshot.telemetry.inclinationStatus}`}
             />
           </div>
         </Card>
-      </div>
-
-      <div className="mt-6">
-        <PreventiveMaintenanceCard />
       </div>
 
       <div className="mt-6">
@@ -184,6 +180,10 @@ function OperadorPage() {
 
       <div id="registro-operacao" className="mt-6 scroll-mt-20">
         <OperationRegistrationCard />
+      </div>
+
+      <div className="mt-6">
+        <PreventiveMaintenanceCard />
       </div>
 
     </AppLayout>

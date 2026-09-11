@@ -113,7 +113,10 @@ export function PreventiveMaintenanceCard() {
             Última manutenção
           </div>
           <div className="mt-1 text-sm font-semibold text-foreground">{formatDate(record.performedAt)}</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">{record.maintenanceType}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {record.maintenanceType}
+            {record.source === "synthetic" ? " · Dados sintéticos" : ""}
+          </div>
         </div>
         <div className="rounded-lg border border-border bg-muted/30 p-3">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

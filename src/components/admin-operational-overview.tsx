@@ -72,6 +72,7 @@ export function AdminOperationalOverview({ overview }: { overview: AdminOperatio
               <div className="text-muted-foreground">{item.client}</div>
               <div className="text-muted-foreground">
                 Última {date(item.lastPerformedAt)} · Próxima {date(item.nextDueAt)}
+                {item.source === "synthetic" ? " · Dados sintéticos" : ""}
               </div>
             </div>
           ))}
