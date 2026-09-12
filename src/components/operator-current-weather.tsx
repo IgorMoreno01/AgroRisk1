@@ -1,9 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { CloudSun, Droplets, Wind, type LucideIcon } from "lucide-react";
 import { Card, SectionTitle } from "@/components/app-layout";
 import { getStoredSessionToken } from "@/lib/auth";
 import { getWeather } from "@/lib/api/weather.functions";
 import type { WeatherData } from "@/lib/external-data.types";
+
+const WEATHER_TIMEOUT_MS = 18_000;
+const weatherRequests = new Map<string, Promise<WeatherData>>();
+
+export function requestOperatorCurrentWeather(
+  key: string,
+  request: () => Promise<WeatherData>,
+  timeoutMs = WEATHER_TIMEOUT_MS,
+): Promise<WeatherData> {
+  const pending = weatherRequests.get(key);
+  if (pending) return pending;
+  const promise = new Promise<WeatherData>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Tempo limite do clima excedido.")), timeoutMs);
+    void request().then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+  weatherRequests.set(key, promise);
+  void promise.finally(() => {
+    if (weatherRequests.get(key) === promise) weatherRequests.delete(key);
+  }).catch(() => undefined);
+  return promise;
+}
 
 export function OperatorCurrentWeather({
   municipality,
@@ -14,26 +35,32 @@ export function OperatorCurrentWeather({
 }) {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [unavailable, setUnavailable] = useState(false);
-  const requestKey = useRef("");
 
   useEffect(() => {
     const key = `${municipality.trim().toLowerCase()}:${state.trim().toLowerCase()}`;
-    if (!municipality || !state || requestKey.current === key) return;
-    requestKey.current = key;
     let cancelled = false;
+    if (!municipality.trim() || !state.trim()) {
+      setWeather(null);
+      setUnavailable(true);
+      return;
+    }
     const token = getStoredSessionToken();
     if (!token) {
+      setWeather(null);
       setUnavailable(true);
       return;
     }
     setWeather(null);
     setUnavailable(false);
-    void getWeather({ data: { token, municipality, state } })
-      .then((result) => {
-        if (cancelled) return;
-        if (!result.ok) return setUnavailable(true);
-        setWeather(result.weather);
-      })
+    void requestOperatorCurrentWeather(key, async () => {
+      const result = await getWeather({ data: { token, municipality, state } });
+      if (!result.ok) throw new Error("Clima indisponível.");
+      return result.weather;
+    }).then((result) => {
+      if (cancelled) return;
+      setWeather(result);
+      setUnavailable(false);
+    })
       .catch(() => {
         if (!cancelled) setUnavailable(true);
       });
