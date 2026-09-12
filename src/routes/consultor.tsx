@@ -14,6 +14,8 @@ import {
   getConsultorPreventiveData,
 } from "@/lib/api/consultor-dashboard.functions";
 import type { ConsultorDashboardSnapshot } from "@/lib/consultor-dashboard-types";
+import type { GeneratedRecommendation } from "@/lib/recommendations";
+import type { RiskEngineV2Result } from "@/lib/risk-engine-v2/types";
 import { ConsultorPreventiveOverview } from "@/components/consultor-preventive-overview";
 import { selectConsultorPriorityOperationIds } from "@/lib/consultor-risk-selection";
 
@@ -33,12 +35,15 @@ function ConsultorPage() {
   const [attempt, setAttempt] = useState(0);
   const [riskAttempt, setRiskAttempt] = useState(0);
   const [riskErrorByClient, setRiskErrorByClient] = useState<Record<string, string>>({});
+  const [riskLoadingByClient, setRiskLoadingByClient] = useState<Record<string, boolean>>({});
   const [preventiveOverview, setPreventiveOverview] = useState<ConsultorDashboardSnapshot["preventiveOverview"] | null>(null);
   const [preventiveLoading, setPreventiveLoading] = useState(false);
   const [preventiveError, setPreventiveError] = useState<string | null>(null);
   const requestedClients = useRef(new Set<string>());
   const priorityPublishedClients = useRef(new Set<string>());
   const priorityGeneration = useRef(0);
+  const priorityRequestByClient = useRef<Record<string, number>>({});
+  const priorityOperationByClient = useRef<Record<string, string>>({});
   const secondaryGeneration = useRef(0);
   const [priorityPublished, setPriorityPublished] = useState(false);
 
@@ -72,7 +77,18 @@ function ConsultorPage() {
   const clientMachines = selected?.machines ?? [];
   const clientAreas = selected?.areas ?? [];
   const recommendations = selected?.recommendation ? [selected.recommendation] : [];
-  const topMachine = clientMachines[0];
+  const topMachine = clientMachines.find(
+    (row) => row.operation?.id === priorityOperationByClient.current[selected?.client.id ?? ""],
+  ) ?? clientMachines[0];
+  const priorityArea = clientAreas.find((row) => row.area.id === topMachine?.machine.areaId);
+  const priorityResult = topMachine?.evaluation.result;
+  const priorityLoading = Boolean(riskLoadingByClient[selected?.client.id ?? ""]);
+  const priorityMlContribution = priorityResult?.contributions.find(
+    (item) => item.component === "ml",
+  )?.weightedContribution ?? 0;
+  const priorityOperationalContribution = priorityResult?.contributions.find(
+    (item) => item.component === "operational_rules",
+  )?.weightedContribution ?? 0;
 
   const loadMoreVisible = () => {
     if (!selected) return;
@@ -136,6 +152,8 @@ function ConsultorPage() {
     // currently visible client after the selection changes.
     priorityGeneration.current += 1;
     secondaryGeneration.current += 1;
+    requestedClients.current.delete(clientId);
+    setRiskLoadingByClient((current) => ({ ...current, [clientId]: false }));
     setPriorityPublished(priorityPublishedClients.current.has(clientId));
   }, [clientId]);
 
@@ -150,12 +168,16 @@ function ConsultorPage() {
       evaluatedOperationIds: selected.evaluatedOperationIds,
       limit: 1,
     });
-    const timer = window.setTimeout(() => {
-      requestedClients.current.add(selected.client.id);
-      const generation = priorityGeneration.current;
-      void evaluateConsultorRiskBatch({
+    if (operationIds.length === 0) return;
+    priorityOperationByClient.current[selected.client.id] = operationIds[0]!;
+    requestedClients.current.add(selected.client.id);
+    setRiskLoadingByClient((current) => ({ ...current, [selected.client.id]: true }));
+    const generation = priorityGeneration.current;
+    const requestId = (priorityRequestByClient.current[selected.client.id] ?? 0) + 1;
+    priorityRequestByClient.current[selected.client.id] = requestId;
+    void evaluateConsultorRiskBatch({
         data: { token, clientId: selected.client.id, operationIds, limit: 1 },
-      }).then((result) => {
+    }).then((result) => {
         if (generation !== priorityGeneration.current) {
           requestedClients.current.delete(selected.client.id);
           return;
@@ -177,16 +199,18 @@ function ConsultorPage() {
           priorityPublishedClients.current.add(selected.client.id);
           setPriorityPublished(true);
         }
-      }).catch(() => {
+    }).catch(() => {
         if (generation !== priorityGeneration.current) return;
         requestedClients.current.delete(selected.client.id);
         setRiskErrorByClient((current) => ({
           ...current,
           [selected.client.id]: "Não foi possível calcular os scores deste cliente.",
         }));
-      });
-    }, 75);
-    return () => window.clearTimeout(timer);
+    }).finally(() => {
+      if (priorityRequestByClient.current[selected.client.id] === requestId) {
+        setRiskLoadingByClient((current) => ({ ...current, [selected.client.id]: false }));
+      }
+    });
   }, [snapshot, selected, clientId, riskAttempt]);
 
   if (loadError) {
@@ -258,6 +282,7 @@ function ConsultorPage() {
           persona="consultor"
           result={topMachine.evaluation.result}
           evaluation={topMachine.evaluation}
+          recommendation={selected.recommendation}
         />
       )}
 
@@ -271,11 +296,11 @@ function ConsultorPage() {
             <div className="flex-1">
               <div className="text-lg font-semibold text-foreground">{client?.name ?? "Carregando…"}</div>
               <div className="text-sm text-muted-foreground">{client ? `${client.location} · ID ${client.id}` : "Aguarde um instante"}</div>
-              <div className="mt-3 grid grid-cols-4 gap-4">
-                 <Stat label="Máquinas" value={String(selected.machinesData.length)} />
-                 <Stat label="Score médio" value={cs ? String(cs.score) : "Calculando..."} />
-                 <Stat label="Máq. risco alto" value={cs ? String(cs.machinesHigh) : "Calculando..."} />
-                 <Stat label="Área crítica" value={cs?.topAreaName ?? "Calculando..."} />
+               <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <Stat label="Máquinas monitoradas" value={String(selected.machinesData.length)} />
+                  <Stat label="Áreas monitoradas" value={String(selected.areasData.length)} />
+                  <Stat label="Operações monitoradas" value={String(selected.operations.length)} />
+                  <Stat label="Alertas do cliente" value={String(selected.alerts.length)} />
               </div>
             </div>
           </div>
@@ -284,10 +309,16 @@ function ConsultorPage() {
         <Card>
           <SectionTitle title="Status geral" />
           <div className="flex flex-col items-center gap-2 py-2">
-             <div className="text-5xl font-semibold tabular-nums text-foreground">{cs?.score ?? "—"}</div>
-            {cs && <RiskBadge score={cs.score} />}
+             <div className="text-5xl font-semibold tabular-nums text-foreground">
+               {priorityLoading ? "Calculando..." : priorityResult?.finalScore ?? "—"}
+             </div>
+            {priorityResult && <RiskBadge level={priorityResult.level} />}
             <p className="text-center text-xs text-muted-foreground">
-               Fator consolidado: <span className="font-medium text-foreground">{cs?.mainFactor ?? "Calculando..."}</span>
+               {priorityResult
+                 ? <>Nível da operação prioritária: <span className="font-medium text-foreground">{priorityResult.level}</span></>
+                 : riskErrorByClient[selected.client.id]
+                   ? "Não disponível"
+                   : "Aguardando análise da operação prioritária"}
             </p>
           </div>
         </Card>
@@ -297,25 +328,14 @@ function ConsultorPage() {
         <section id="equipamentos-risco" className="scroll-mt-20">
         <Card>
           <SectionTitle
-            title="Top 3 equipamentos com maior risco"
-            description="Ordenado por score calculado"
+            title="Equipamento em análise"
+            description="Resultado da operação prioritária"
           />
           <div className="space-y-2">
-            {clientMachines.length === 0 && selected.machinesData.slice(0, 3).map((machine, i) => (
-              <div key={machine.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">{i + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-foreground">{machine.name}</div>
-                  <div className="text-xs text-muted-foreground">{machine.id} · {machine.area}</div>
-                </div>
-                <span className="text-sm text-muted-foreground">Calculando...</span>
-              </div>
-            ))}
-            {clientMachines.slice(0, 3).map((row, i) => (
+            {priorityLoading && <p className="text-sm text-muted-foreground">Calculando...</p>}
+            {!priorityLoading && !topMachine && <p className="text-sm text-muted-foreground">{riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</p>}
+            {clientMachines.slice(0, 1).map((row) => (
               <div key={row.machine.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                <span className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums ${
-                  i === 0 ? "bg-danger/15 text-danger" : "bg-muted text-muted-foreground"
-                }`}>{i + 1}</span>
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-foreground">{row.machine.name}</div>
                   <div className="text-xs text-muted-foreground">{row.machine.id} · {row.machine.area} · {row.mainFactor}</div>
@@ -336,25 +356,14 @@ function ConsultorPage() {
         <section id="areas-criticas" className="scroll-mt-20">
         <Card>
           <SectionTitle
-            title="Top 3 áreas mais críticas"
-            description="Score médio por área do cliente"
+             title="Área da operação analisada"
+             description="Resultado da operação prioritária"
           />
           <ul className="space-y-2">
-            {clientAreas.length === 0 && selected.areasData.slice(0, 3).map((area, i) => (
-              <li key={area.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">{i + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-foreground">{area.name}</div>
-                  <div className="text-xs text-muted-foreground">{area.condition}</div>
-                </div>
-                <span className="text-sm text-muted-foreground">Calculando...</span>
-              </li>
-            ))}
-            {clientAreas.slice(0, 3).map((row, i) => (
+            {priorityLoading && <li className="text-sm text-muted-foreground">Calculando...</li>}
+            {!priorityLoading && clientAreas.length === 0 && <li className="text-sm text-muted-foreground">{riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</li>}
+            {[priorityArea].filter((row): row is NonNullable<typeof row> => Boolean(row)).map((row) => (
               <li key={row.area.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                <span className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums ${
-                  i === 0 ? "bg-danger/15 text-danger" : "bg-muted text-muted-foreground"
-                }`}>{i + 1}</span>
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-foreground">{row.area.name}</div>
                   <div className="text-xs text-muted-foreground">{row.area.condition} · fator: {row.mainFactor}</div>
@@ -372,22 +381,23 @@ function ConsultorPage() {
       <div className="mt-6 grid gap-4 xl:grid-cols-2">
         <Card>
           <SectionTitle
-            title="Composição do score do cliente"
-             description="Fatores internos consolidados pelo Risk Engine"
+             title="Composição do score da operação"
+              description="Contribuições locais da operação prioritária"
           />
-           {selected.composition ? (
+            {priorityResult ? (
              <div className="space-y-3">
-               <CompositionRow label="Climático" score={selected.composition.climateScore} contribution={selected.composition.climateContribution} weight={snapshot!.weights.ml} />
-               <CompositionRow label="Operacional" score={selected.composition.operationalScore} contribution={selected.composition.operationalContribution} weight={snapshot!.weights.operationalRules} />
+                <CompositionRow label="Score ML" score={priorityResult.ml.mlRelativeScore} contribution={priorityMlContribution} weight={priorityResult.weights.ml} />
+                <CompositionRow label="Score operacional" score={priorityResult.operationalRules.operationalRulesScore} contribution={priorityOperationalContribution} weight={priorityResult.weights.operationalRules} />
+                <CompositionRow label="Score final" score={priorityResult.finalScore} contribution={priorityResult.finalScore} weight={100} />
                <div className="text-xs text-muted-foreground">
-                 Componente dominante: <span className="font-medium text-foreground">{componentLabel(selected.composition.dominantComponent)}</span>
+                  Componente dominante: <span className="font-medium text-foreground">{riskComponentLabel(priorityResult.dominantComponent)}</span>
                </div>
                <div className="text-xs text-muted-foreground">
-                 Fatores recorrentes: <span className="font-medium text-foreground">{selected.recurringFactors.slice(0, 3).map((item) => `${item.factor} (${item.count})`).join(", ") || "nenhum"}</span>
+                  Drivers da operação: <span className="font-medium text-foreground">{priorityResult.drivers.slice(0, 3).map((driver) => driver.label).join(", ") || "nenhum"}</span>
                </div>
              </div>
            ) : (
-             <p className="text-sm text-muted-foreground">Sem dados suficientes para compor o score.</p>
+              <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</p>
            )}
         </Card>
 
@@ -396,14 +406,14 @@ function ConsultorPage() {
             title="Origem do risco"
             description="Explicação preventiva baseada no resultado central"
           />
-           {selected.summary && selected.composition && selected.recommendation ? (
+            {priorityResult && topMachine ? (
              <ConsultorExplanation
-               summary={selected.summary}
-               composition={selected.composition}
+                result={priorityResult}
+                mainFactor={topMachine.mainFactor}
                recommendation={selected.recommendation}
              />
           ) : (
-            <p className="text-sm text-muted-foreground">Sem dados suficientes para explicar o risco.</p>
+             <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</p>
           )}
         </Card>
       </div>
@@ -413,11 +423,13 @@ function ConsultorPage() {
         <Card>
           <SectionTitle
             title="Recomendações preventivas"
-            description="Geradas a partir do score, ranking e fatores do cliente"
+            description="Geradas a partir do score e dos fatores da operação prioritária"
           />
           <div className="space-y-3">
-             {recommendations.length === 0 && (
-               <p className="text-sm text-muted-foreground">Calculando...</p>
+              {recommendations.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : "Nenhuma recomendação ativa para esta operação."}
+                </p>
             )}
             {recommendations.map((r) => (
               <RecommendationCard key={r.id} rec={r} />
@@ -437,10 +449,14 @@ function ConsultorPage() {
               </button>
             }
           />
-          {selected.explanation ? (
-            <p className="text-sm leading-relaxed text-foreground">{selected.explanation}</p>
+          {priorityResult && topMachine ? (
+            <ConsultorExplanation
+              result={priorityResult}
+              mainFactor={topMachine.mainFactor}
+              recommendation={selected.recommendation}
+            />
           ) : (
-            <p className="text-sm text-muted-foreground">Sem dados suficientes para explicar o risco.</p>
+            <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</p>
           )}
           {topMachine && (
             <p className="mt-3 text-sm text-muted-foreground">
@@ -469,8 +485,8 @@ function ConsultorPage() {
       </div>
 
       <section className="mt-6">
-        {preventiveOverview ? (
-          <ConsultorPreventiveOverview overview={preventiveOverview} />
+          {preventiveOverview ? (
+          <ConsultorPreventiveOverview overview={preventiveOverview} clientId={selected.client.id} clientName={selected.client.name} />
         ) : (
           <Card>
             <SectionTitle title="Análise preventiva da carteira" description="Dados preventivos são carregados somente quando solicitados." />
@@ -485,8 +501,8 @@ function ConsultorPage() {
   );
 }
 
-function componentLabel(component: "climate" | "operational" | "balanced") {
-  return component === "climate" ? "Climático" : component === "operational" ? "Operacional" : "Balanceado";
+function riskComponentLabel(component: "ml" | "operational_rules" | "balanced") {
+  return component === "ml" ? "ML" : component === "operational_rules" ? "Operacional" : "Balanceado";
 }
 
 function CompositionRow({ label, score, contribution, weight }: { label: string; score: number; contribution: number; weight: number }) {
@@ -504,21 +520,25 @@ function CompositionRow({ label, score, contribution, weight }: { label: string;
 }
 
 function ConsultorExplanation({
-  summary,
-  composition,
+  result,
+  mainFactor,
   recommendation,
 }: {
-  summary: NonNullable<ConsultorDashboardSnapshot["clients"][number]["summary"]>;
-  composition: NonNullable<ConsultorDashboardSnapshot["clients"][number]["composition"]>;
-  recommendation: NonNullable<ConsultorDashboardSnapshot["clients"][number]["recommendation"]>;
+  result: RiskEngineV2Result;
+  mainFactor: string;
+  recommendation?: GeneratedRecommendation;
 }) {
   return (
     <div className="space-y-3 text-sm leading-relaxed">
-      <p>O score consolidado é <strong>{summary.score}/100</strong>, classificado como <strong>risco {summary.level}</strong>.</p>
+      <p>O score da operação é <strong>{result.finalScore}/100</strong>, classificado como <strong>risco {result.level}</strong>.</p>
       <p className="text-muted-foreground">
-        A principal origem é {componentLabel(composition.dominantComponent).toLowerCase()}, com maior recorrência de {summary.mainFactor.toLowerCase()}.
+        A principal origem é {riskComponentLabel(result.dominantComponent)}, com atenção em {mainFactor.toLowerCase()}.
       </p>
-      <p>Orientação preventiva: <strong>{recommendation.title.toLowerCase()}</strong>. {recommendation.rationale}</p>
+      {recommendation ? (
+        <p>Orientação preventiva: <strong>{recommendation.title.toLowerCase()}</strong>. {recommendation.rationale}</p>
+      ) : (
+        <p className="text-muted-foreground">Nenhuma recomendação ativa para esta operação.</p>
+      )}
     </div>
   );
 }

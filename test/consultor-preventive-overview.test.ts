@@ -136,11 +136,13 @@ describe("visão preventiva PostgreSQL do Consultor", () => {
     const component = readFileSync("src/components/consultor-preventive-overview.tsx", "utf8");
     expect(route.indexOf("<PersonaV2RiskPanel")).toBeLessThan(route.indexOf("<RecommendationCard"));
     expect(route.indexOf("<RecommendationCard")).toBeLessThan(route.indexOf("<ConsultorPreventiveOverview"));
-    expect(component.indexOf("Alertas da carteira")).toBeLessThan(
-      component.indexOf("Manutenção preventiva dos clientes"),
+    expect(component.indexOf("Alertas de")).toBeLessThan(
+      component.indexOf("Manutenção preventiva de"),
     );
-    expect(component.indexOf("Manutenção preventiva dos clientes")).toBeLessThan(
-      component.indexOf("Pontos de atenção recentes"),
+    expect(component.indexOf("Manutenção preventiva de")).toBeLessThan(
+      component.indexOf("Pontos de atenção de"),
     );
+    expect(component).toContain("alert.clientId === clientId");
+    expect(component).toContain("item.clientId === clientId");
   });
 });

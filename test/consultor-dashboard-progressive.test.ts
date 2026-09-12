@@ -94,7 +94,7 @@ describe("carregamento progressivo do Consultor", () => {
     expect(actual!.level).toBe(expected.level);
   });
 
-  test("frontend prioriza cliente selecionado, agenda o batch e mostra loading local", () => {
+  test("frontend prioriza cliente selecionado, faz batch unitário e mostra loading local", () => {
     const route = readFileSync("src/routes/consultor.tsx", "utf8");
     const repository = readFileSync("src/lib/data/postgres-repository.server.ts", "utf8");
     const phaseA = repository.slice(
@@ -104,15 +104,35 @@ describe("carregamento progressivo do Consultor", () => {
     expect(route).toContain("evaluateConsultorRiskBatch");
     expect(route).toContain("selected.client.id");
     expect(route).toContain("selectConsultorPriorityOperationIds");
-    expect(route).toContain("}, 75)");
+    expect(route).toContain("limit: 1");
     expect(route).toContain("Calculando...");
     expect(route).not.toContain("Consultando clientes e riscos calculados");
     expect(route).not.toContain("setInterval");
-    expect(route.indexOf("window.setTimeout")).toBeLessThan(
-      route.indexOf("requestedClients.current.add(selected.client.id)"),
-    );
+    expect(route).not.toContain("window.setTimeout");
     expect(phaseA).not.toContain("listOperationRiskContexts");
     expect(phaseA).not.toContain("listConsultorPreventiveOverview");
+  });
+
+  test("visão inicial usa relações e apresenta apenas a operação prioritária", () => {
+    const route = readFileSync("src/routes/consultor.tsx", "utf8");
+    const panel = readFileSync("src/components/persona-v2-risk-panel.tsx", "utf8");
+
+    expect(route).toContain('label="Máquinas monitoradas"');
+    expect(route).toContain('label="Áreas monitoradas"');
+    expect(route).toContain('label="Operações monitoradas"');
+    expect(route).toContain('label="Alertas do cliente"');
+    expect(route).not.toContain('label="Score médio"');
+    expect(route).not.toContain('label="Máq. risco alto"');
+    expect(route).not.toContain('label="Área crítica"');
+    expect(route).toContain('title="Equipamento em análise"');
+    expect(route).toContain('title="Área da operação analisada"');
+    expect(route).not.toContain("Top 3 equipamentos");
+    expect(route).not.toContain("Top 3 áreas");
+    expect(route).toContain('title="Composição do score da operação"');
+    expect(route).toContain("priorityResult.drivers");
+    expect(route).toContain("Nenhuma recomendação ativa para esta operação.");
+    expect(panel).toContain('persona === "consultor" ? "Score ML"');
+    expect(panel).toContain('"Fatores estruturais que elevam/reduzem o risco relativo."');
   });
 
   test("operação ativa tem prioridade mesmo fora dos primeiros cards visíveis", () => {

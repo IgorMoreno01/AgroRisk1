@@ -89,6 +89,13 @@ export function PersonaV2RiskPanel({
   const operationalDriver = result.drivers.find(
     (driver) => driver.source === "operational_rules",
   );
+  const dominantLabel = persona === "consultor"
+    ? result.dominantComponent === "ml"
+      ? "ML"
+      : result.dominantComponent === "operational_rules"
+        ? "Operacional"
+        : "ML e operacional equilibrados"
+    : dominantLabels[result.dominantComponent];
 
   return (
     <section
@@ -111,17 +118,21 @@ export function PersonaV2RiskPanel({
             </p>
             {evaluation.hasIncompleteInputs && (
               <p className="mt-1 text-xs leading-relaxed text-warning-foreground">
-                Localização {quality.location === "geocoded" ? "geocodificada" : "indisponível"};
-                clima {quality.weather === "historical_api" ? "histórico real" : "imputado"};
-                altitude {quality.altitude === "elevation_api" ? "real" : "imputada"}.
-                Água {quality.water === "hydrography_api" ? "real" : "sintética"};
-                terreno {quality.terrain === "synthetic_demo" ? "sintético" : "validado"}.
-                COD_MOD e histórico de itens seguem imputados.
+                {persona === "consultor"
+                  ? "Qualidade dos dados: parte dos sinais utiliza valores de referência do modelo por indisponibilidade de dados locais."
+                  : <>
+                    Localização {quality.location === "geocoded" ? "geocodificada" : "indisponível"};
+                    clima {quality.weather === "historical_api" ? "histórico real" : "imputado"};
+                    altitude {quality.altitude === "elevation_api" ? "real" : "imputada"}.
+                    Água {quality.water === "hydrography_api" ? "real" : "sintética"};
+                    terreno {quality.terrain === "synthetic_demo" ? "sintético" : "validado"}.
+                    COD_MOD e histórico de itens seguem imputados.
+                  </>}
               </p>
             )}
           </div>
           <span className="w-fit shrink-0 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
-             Engine {result.engineVersion} · Climático {result.weights.ml}% / Operacional{" "}
+             Engine {result.engineVersion} · {persona === "consultor" ? "ML" : "Climático"} {result.weights.ml}% / Operacional{" "}
             {result.weights.operationalRules}%
           </span>
         </div>
@@ -138,7 +149,7 @@ export function PersonaV2RiskPanel({
             <ScoreMetric label="Score final" value={result.finalScore} />
             {persona !== "operador" && (
               <ScoreMetric
-                 label="Score climático"
+                 label={persona === "consultor" ? "Score ML" : "Score climático"}
                 value={result.ml.mlRelativeScore.toFixed(2)}
               />
             )}
@@ -162,7 +173,7 @@ export function PersonaV2RiskPanel({
             <Activity className="h-4 w-4 shrink-0 text-primary" />
             <span className="text-muted-foreground">Componente dominante:</span>
             <strong className="text-foreground">
-              {dominantLabels[result.dominantComponent]}
+              {dominantLabel}
             </strong>
           </div>
         </Card>
@@ -173,7 +184,9 @@ export function PersonaV2RiskPanel({
             {mlDriver && (
               <DriverCard
                 label={mlDriver.label}
-                description={`Sinal climático que ${directionLabel(mlDriver.direction)}.`}
+                description={persona === "consultor" && mlDriver.label.toLowerCase().includes("estrutura")
+                  ? "Fatores estruturais que elevam/reduzem o risco relativo."
+                  : `${persona === "consultor" ? "Fator do modelo ML" : "Sinal climático"} que ${directionLabel(mlDriver.direction)}.`}
               />
             )}
             {operationalDriver && (

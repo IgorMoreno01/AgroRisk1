@@ -12,24 +12,33 @@ const date = (value: string | null) => value
 
 export function ConsultorPreventiveOverview({
   overview,
+  clientId,
+  clientName,
 }: {
   overview: ConsultorPreventiveOverview;
+  clientId: string;
+  clientName: string;
 }) {
   const { snapshot, acknowledge } = useActionableAlerts();
-  const topAlerts = snapshot.alerts.slice(0, 5);
+  const clientAlerts = snapshot.alerts.filter((alert) => alert.clientId === clientId);
+  const topAlerts = clientAlerts.slice(0, 5);
+  const maintenance = overview.maintenance.top.filter((item) => item.clientId === clientId);
+  const attentionPoints = overview.attentionPoints.filter((item) => item.clientId === clientId);
+  const overdueCount = maintenance.filter((item) => item.status === "overdue").length;
+  const dueSoonCount = maintenance.filter((item) => item.status === "due_soon").length;
   const counts = {
-    critical: snapshot.alerts.filter((alert) => alert.severity === "critical").length,
-    high: snapshot.alerts.filter((alert) => alert.severity === "high").length,
-    medium: snapshot.alerts.filter((alert) => alert.severity === "medium").length,
-    new: snapshot.alerts.filter((alert) => alert.status === "new").length,
-    acknowledged: snapshot.alerts.filter((alert) => alert.status === "acknowledged").length,
+    critical: clientAlerts.filter((alert) => alert.severity === "critical").length,
+    high: clientAlerts.filter((alert) => alert.severity === "high").length,
+    medium: clientAlerts.filter((alert) => alert.severity === "medium").length,
+    new: clientAlerts.filter((alert) => alert.status === "new").length,
+    acknowledged: clientAlerts.filter((alert) => alert.status === "acknowledged").length,
   };
 
   return (
     <div className="mt-6 grid gap-4 xl:grid-cols-3">
       <section id="alertas-cliente" className="scroll-mt-20">
         <Card className="h-full">
-          <SectionTitle title="Alertas da carteira" description="Prioridade e reconhecimento" />
+          <SectionTitle title={`Alertas de ${clientName}`} description="Prioridade e reconhecimento" />
           <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
             <span>Críticos <b className="text-foreground">{counts.critical}</b></span>
             <span>Altos <b className="text-foreground">{counts.high}</b></span>
@@ -53,18 +62,18 @@ export function ConsultorPreventiveOverview({
 
       <Card>
         <SectionTitle
-          title="Manutenção preventiva dos clientes"
+          title={`Manutenção preventiva de ${clientName}`}
           description="Itens atrasados e próximos"
         />
         <div className="mb-3 flex gap-4 text-sm">
-          <span>Atrasadas <b className="text-danger">{overview.maintenance.overdueCount}</b></span>
-          <span>Próximas <b className="text-warning-foreground">{overview.maintenance.dueSoonCount}</b></span>
+          <span>Atrasadas <b className="text-danger">{overdueCount}</b></span>
+          <span>Próximas <b className="text-warning-foreground">{dueSoonCount}</b></span>
         </div>
         <div className="space-y-2 text-xs">
-          {overview.maintenance.top.length === 0 && (
+          {maintenance.length === 0 && (
             <p className="text-muted-foreground">Nenhuma manutenção pendente.</p>
           )}
-          {overview.maintenance.top.map((item) => (
+          {maintenance.map((item) => (
             <div key={item.id} className="rounded border px-2 py-1.5">
               <div className="flex justify-between gap-2 font-medium">
                 <span>{item.machineType} · {item.machineId}</span>
@@ -82,14 +91,14 @@ export function ConsultorPreventiveOverview({
 
       <Card>
         <SectionTitle
-          title="Pontos de atenção recentes"
+            title={`Pontos de atenção de ${clientName}`}
           description="Ocorrências úteis para orientação preventiva"
         />
         <div className="space-y-2 text-xs">
-          {overview.attentionPoints.length === 0 && (
+          {attentionPoints.length === 0 && (
             <p className="text-muted-foreground">Nenhuma ocorrência relevante recente.</p>
           )}
-          {overview.attentionPoints.map((item) => (
+          {attentionPoints.map((item) => (
             <div key={item.id} className="rounded border px-2 py-1.5">
               <div className="flex justify-between gap-2 font-medium">
                 <span>{item.machineType} · {item.machineId}</span>
