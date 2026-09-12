@@ -66,12 +66,16 @@ describe("Migração do Gestor para PostgreSQL", () => {
     expect(peak).toBe(4);
   });
 
-  test("usa fallback integral quando o PostgreSQL falha", async () => {
-    const snapshot = await loadGestorDashboardSnapshot(scope, failingRepository, mockRepository);
+  test("propaga falha PostgreSQL sem trocar para mock", async () => {
+    await expect(loadGestorDashboardSnapshot(scope, failingRepository, mockRepository))
+      .rejects.toThrow("database unavailable");
+  });
+
+  test("modo mock explícito preserva proveniência demonstrativa", async () => {
+    const snapshot = await loadGestorDashboardSnapshot(scope, mockRepository, mockRepository);
     expect(snapshot.source).toBe("mock");
     expect(snapshot.degraded).toBe(true);
-    expect(snapshot.machineRows.length).toBeGreaterThan(0);
-    expect(snapshot.alerts.length).toBeGreaterThan(0);
+    expect(snapshot.alertsSource).toBe("demo");
   });
 
   test("mantém score, pesos, dominante e causa iguais ao Admin para máquina compartilhada", async () => {

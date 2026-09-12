@@ -255,7 +255,7 @@ describe("Pesos efetivos nas avaliações das personas", () => {
     );
   });
 
-  test("falha ao resolver pesos no primário degrada para o repository fallback", async () => {
+  test("falha ao resolver pesos no primário não pode virar mock", async () => {
     const primaryBase = createMockRepository();
     const fallback = createMockRepository();
     const { phaseA } = await selectOperatorAndSecondClient(fallback);
@@ -266,7 +266,7 @@ describe("Pesos efetivos nas avaliações das personas", () => {
       },
     } satisfies AgroRiskRepository;
 
-    const [admin, gestor, consultor, operador] = await Promise.all([
+    const attempts = [
       loadAdminDashboardSnapshot(primary, fallback),
       loadGestorDashboardSnapshot(
         { userId: "fallback-gestor", clientIds: null },
@@ -279,12 +279,16 @@ describe("Pesos efetivos nas avaliações das personas", () => {
         fallback,
       ),
       loadOperadorDashboardPhaseA(phaseA.operator.id, primary, fallback),
-    ]);
-    expect(admin.degraded).toBe(true);
-    expect(gestor.degraded).toBe(true);
-    expect(consultor.degraded).toBe(true);
-    expect(operador.degraded).toBe(true);
-    expect(admin.weights).toEqual({ ml: 70, operationalRules: 30 });
+    ];
+    const settled = await Promise.allSettled(attempts);
+    expect(settled).toHaveLength(4);
+    for (const result of settled) {
+      expect(result.status).toBe("rejected");
+      if (result.status === "rejected") {
+        expect(result.reason).toBeInstanceOf(Error);
+        expect(result.reason.message).toBe("database unavailable during weight resolution");
+      }
+    }
   });
 
   test("configuração efetiva malformada falha explicitamente na fronteira", async () => {

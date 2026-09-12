@@ -74,12 +74,18 @@ describe("Migração do Operador para PostgreSQL", () => {
     expect(snapshot.recommendation.factor).not.toBe("Inclinação");
   });
 
-  test("faz fallback integral para o repositório mock", async () => {
-    const snapshot = await loadOperadorDashboardSnapshot("USR-OP-1", failingRepository, mockRepository);
+  test("propaga falha PostgreSQL sem trocar para mock", async () => {
+    await expect(
+      loadOperadorDashboardSnapshot("USR-OP-1", failingRepository, mockRepository),
+    ).rejects.toThrow("database unavailable");
+  });
+
+  test("modo mock explícito preserva proveniência demonstrativa", async () => {
+    const snapshot = await loadOperadorDashboardSnapshot(
+      "USR-OP-1", mockRepository, mockRepository,
+    );
     expect(snapshot.source).toBe("mock");
     expect(snapshot.degraded).toBe(true);
-    expect(snapshot.operator.id).toBe("USR-OP-1");
-    expect(snapshot.operation.operatorId).toBe(snapshot.operator.id);
     expect(snapshot.alertsSource).toBe("demo");
     expect(snapshot.historySource).toBe("demo");
   });

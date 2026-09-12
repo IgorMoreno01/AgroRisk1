@@ -71,16 +71,16 @@ describe("Migração do Consultor/Corretor para PostgreSQL", () => {
     expect(peak).toBe(4);
   });
 
-  test("usa fallback integral para mock e identifica alertas demonstrativos", async () => {
-    const snapshot = await loadConsultorDashboardSnapshot(scope, failingRepository, mockRepository);
+  test("propaga falha PostgreSQL sem trocar para mock", async () => {
+    await expect(loadConsultorDashboardSnapshot(scope, failingRepository, mockRepository))
+      .rejects.toThrow("database unavailable");
+  });
+
+  test("modo mock explícito preserva alertas demonstrativos", async () => {
+    const snapshot = await loadConsultorDashboardSnapshot(scope, mockRepository, mockRepository);
     expect(snapshot.source).toBe("mock");
     expect(snapshot.degraded).toBe(true);
     expect(snapshot.alertsSource).toBe("demo");
-    expect(snapshot.clients.length).toBeGreaterThan(0);
-    expect(snapshot.preventiveOverview).toEqual({
-      maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
-      attentionPoints: [],
-    });
   });
 
   test("mantém score, pesos, fator e origem da recomendação iguais ao Admin", async () => {

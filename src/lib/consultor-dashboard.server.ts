@@ -239,49 +239,27 @@ export async function buildConsultorRelationalSnapshot(
 
 async function loadUncached(
   primary: AgroRiskRepository,
-  fallback: AgroRiskRepository,
+  _fallback: AgroRiskRepository,
   scope: ConsultorAccessScope,
 ): Promise<ConsultorDashboardSnapshot> {
-  const progressive = primary === postgresRepository && fallback === mockRepository;
-  try {
-    const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
-    const weights = globalConfiguration.weights;
-    if (progressive) {
-      const relational = await listConsultorRelationalPhaseA(scope.clientIds);
-      return await buildConsultorRelationalSnapshot(
-        relational, "postgres", false, weights, scope,
-      );
-    }
-    const [relational, preventiveOverview] = await Promise.all([
-      readScope(primary, scope),
-      primary === postgresRepository
-        ? listConsultorPreventiveOverview(scope.clientIds)
-        : Promise.resolve({
-            maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
-            attentionPoints: [],
-          }),
-    ]);
-    return await buildSnapshot(
-      relational, "postgres", false, weights, scope, primary, preventiveOverview,
+  const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
+  const weights = globalConfiguration.weights;
+  if (primary === postgresRepository) {
+    const relational = await listConsultorRelationalPhaseA(scope.clientIds);
+    return await buildConsultorRelationalSnapshot(
+      relational, "postgres", false, weights, scope,
     );
-  } catch (error) {
-    if (error instanceof RangeError) throw error;
-    console.error("[consultor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
-      error: error instanceof Error ? error.message : "Erro desconhecido",
-    });
-    let relational = await readScope(fallback, scope);
-    const fallbackConfiguration = await resolveRiskEngineV2Weights(undefined, fallback);
-    const weights = fallbackConfiguration.weights;
-    if (progressive) {
-      relational = {
-        ...relational,
-        riskContexts: [],
-      };
-    }
-    return progressive
-      ? await buildConsultorRelationalSnapshot(relational, "mock", true, weights, scope)
-      : await buildSnapshot(relational, "mock", true, weights, scope, fallback);
   }
+  const explicitMockMode = primary === mockRepository;
+  const relational = await readScope(primary, scope);
+  return await buildSnapshot(
+    relational,
+    explicitMockMode ? "mock" : "postgres",
+    explicitMockMode,
+    weights,
+    scope,
+    primary,
+  );
 }
 
 export async function loadConsultorDashboardSnapshot(
@@ -289,16 +267,10 @@ export async function loadConsultorDashboardSnapshot(
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
 ): Promise<ConsultorDashboardSnapshot> {
-  if (primary !== postgresRepository || fallback !== mockRepository) {
+  if (primary !== postgresRepository) {
     return loadUncached(primary, fallback, scope);
   }
-  let globalConfiguration;
-  try {
-    globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
-  } catch (error) {
-    if (error instanceof RangeError) throw error;
-    return loadUncached(primary, fallback, scope);
-  }
+  const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
   const key = `consultor-dashboard:v5:${scope.userId}:${scopeKey}:${globalConfiguration.cacheSignature}`;
   const pending = inFlight.get(key);

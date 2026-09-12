@@ -434,73 +434,46 @@ const readRepository = async (
 
 export async function loadAdminDashboardSnapshot(
   primary: AgroRiskRepository = postgresRepository,
-  fallback: AgroRiskRepository = mockRepository,
+  _fallback: AgroRiskRepository = mockRepository,
 ): Promise<AdminDashboardSnapshot> {
   const load = async () => {
-    try {
-      const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
-      const weights = globalConfiguration.weights;
-      const useProgressiveAdminLoad =
-        primary === postgresRepository && fallback === mockRepository;
-      const [relational, operationalOverview] = await Promise.all([
-        readRepository(primary, !useProgressiveAdminLoad),
-        primary === postgresRepository
-          ? listAdminOperationalOverview()
-          : Promise.resolve({ maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] }, activity: [] }),
-      ]);
-      // Explicit service injection is retained for integrations/tests that
-      // need the complete legacy snapshot. Production Admin loads relational
-      // data first and evaluates only through the authenticated batch API.
-      const effectiveByClientId = useProgressiveAdminLoad
-        ? new Map()
-        : new Map(
-            [...(await resolveWeightsByClientId(
-              relational.operations.map((operation) => operation.clientId),
-              primary,
-            )).entries()].map(([clientId, resolved]) => [clientId, resolved.weights]),
-          );
-      return useProgressiveAdminLoad
-        ? await buildAdminDashboardRelationalSnapshot(
-            relational, "postgres", false, weights, operationalOverview,
-          )
-        : await buildAdminDashboardSnapshot(
-            relational, "postgres", false, weights, operationalOverview, effectiveByClientId,
-          );
-    } catch (error) {
-      if (error instanceof RangeError) throw error;
-      console.error("[admin-dashboard] PostgreSQL indisponível; usando fallback mock.", {
-        error: error instanceof Error ? error.message : "Erro desconhecido",
-      });
-      // Custom repositories/services retain the legacy contract. Only the
-      // production postgres+mock path uses the relational Phase A fallback.
-      if (primary !== postgresRepository || fallback !== mockRepository) {
-        const relational = await readRepository(fallback);
-        const fallbackGlobal = await resolveRiskEngineV2Weights(undefined, fallback);
-        const effectiveByClientId = new Map(
+    const explicitMockMode = primary === mockRepository;
+    const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
+    const weights = globalConfiguration.weights;
+    const useProgressiveAdminLoad = primary === postgresRepository;
+    const [relational, operationalOverview] = await Promise.all([
+      readRepository(primary, !useProgressiveAdminLoad),
+      primary === postgresRepository
+        ? listAdminOperationalOverview()
+        : Promise.resolve({ maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] }, activity: [] }),
+    ]);
+    // Explicit service injection is retained for integrations/tests that
+    // need the complete legacy snapshot. Production Admin loads relational
+    // data first and evaluates only through the authenticated batch API.
+    const effectiveByClientId = useProgressiveAdminLoad
+      ? new Map()
+      : new Map(
           [...(await resolveWeightsByClientId(
             relational.operations.map((operation) => operation.clientId),
-            fallback,
+            primary,
           )).entries()].map(([clientId, resolved]) => [clientId, resolved.weights]),
         );
-        return await buildAdminDashboardSnapshot(
-          relational, "mock", true, fallbackGlobal.weights, undefined, effectiveByClientId,
+    return useProgressiveAdminLoad
+      ? await buildAdminDashboardRelationalSnapshot(
+          relational, "postgres", false, weights, operationalOverview,
+        )
+      : await buildAdminDashboardSnapshot(
+          relational,
+          explicitMockMode ? "mock" : "postgres",
+          explicitMockMode,
+          weights,
+          operationalOverview,
+          effectiveByClientId,
         );
-      }
-      const fallbackGlobal = await resolveRiskEngineV2Weights(undefined, fallback);
-      return await buildAdminDashboardRelationalSnapshot(
-        await readRepository(fallback), "mock", true, fallbackGlobal.weights,
-      );
-    }
   };
-  if (primary !== postgresRepository || fallback !== mockRepository) return load();
+  if (primary !== postgresRepository) return load();
 
-  let globalConfiguration;
-  try {
-    globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
-  } catch (error) {
-    if (error instanceof RangeError) throw error;
-    return load();
-  }
+  const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
   const cacheKey = `admin-dashboard:v3:${globalConfiguration.cacheSignature}:postgres:relational`;
   const existing = adminSnapshotInFlight.get(cacheKey);
   if (existing) return existing;

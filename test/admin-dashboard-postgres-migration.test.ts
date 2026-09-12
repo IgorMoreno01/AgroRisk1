@@ -45,7 +45,7 @@ describe("Migração Admin/Sompo para dados relacionais", () => {
     expect(snapshot.machineRows.every((row) => row.score !== row.machine.score)).toBe(true);
   });
 
-  test("usa fallback integral para mock quando PostgreSQL falha", async () => {
+  test("propaga falha PostgreSQL sem trocar para mock", async () => {
     const failure = async () => {
       throw new Error("database unavailable");
     };
@@ -62,11 +62,14 @@ describe("Migração Admin/Sompo para dados relacionais", () => {
       getOperation: failure,
     };
 
-    const snapshot = await loadAdminDashboardSnapshot(failingRepository, mockRepository);
+    await expect(loadAdminDashboardSnapshot(failingRepository, mockRepository))
+      .rejects.toThrow("database unavailable");
+  });
+
+  test("modo mock explícito preserva proveniência demonstrativa", async () => {
+    const snapshot = await loadAdminDashboardSnapshot(mockRepository, mockRepository);
     expect(snapshot.source).toBe("mock");
     expect(snapshot.degraded).toBe(true);
-    expect(snapshot.clients.length).toBeGreaterThan(0);
-    expect(snapshot.machines.length).toBeGreaterThan(0);
   });
 
   test("preserva as contagens e relações recebidas do repositório", async () => {

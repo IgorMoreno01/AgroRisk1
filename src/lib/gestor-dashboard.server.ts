@@ -276,52 +276,29 @@ async function buildSnapshot(
 
 async function loadUncached(
   primary: AgroRiskRepository,
-  fallback: AgroRiskRepository,
+  _fallback: AgroRiskRepository,
   scope: GestorAccessScope,
 ): Promise<GestorDashboardSnapshot> {
-  const progressive = primary === postgresRepository && fallback === mockRepository;
-  try {
-    if (progressive) {
-      const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
-      const relational = await readGestorPhaseA(primary, scope);
-      return await buildGestorRelationalSnapshot(
-        relational, "postgres", false, scope, globalConfiguration.weights,
-        emptyOperationalOverview, "postgres",
-      );
-    }
-    if (primary === postgresRepository) {
-      const [relational, operationalOverview] = await Promise.all([
-        readScoped(primary, scope),
-        listGestorOperationalOverview(scope.clientIds),
-      ]);
-      return await buildSnapshot(relational, "postgres", false, scope, operationalOverview, primary);
-    }
-    return await buildSnapshot(await readScoped(primary, scope), "postgres", false, scope, {
-      maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
-      activity: [],
-      }, primary);
-  } catch (error) {
-    if (error instanceof RangeError) throw error;
-    console.error("[gestor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
-      error: error instanceof Error ? error.message : "Erro desconhecido",
-    });
-    if (progressive) {
-      const fallbackConfiguration = await resolveRiskEngineV2Weights(undefined, fallback);
-      return await buildGestorRelationalSnapshot(
-        await readGestorPhaseA(fallback, scope),
-        "mock",
-        true,
-        scope,
-        fallbackConfiguration.weights,
-        emptyOperationalOverview,
-        "demo",
-      );
-    }
-    return await buildSnapshot(await readScoped(fallback, scope), "mock", true, scope, {
-      maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
-      activity: [],
-    }, fallback);
+  if (primary === postgresRepository) {
+    const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
+    const relational = await readGestorPhaseA(primary, scope);
+    return await buildGestorRelationalSnapshot(
+      relational, "postgres", false, scope, globalConfiguration.weights,
+      emptyOperationalOverview, "postgres",
+    );
   }
+  const explicitMockMode = primary === mockRepository;
+  return await buildSnapshot(
+    await readScoped(primary, scope),
+    explicitMockMode ? "mock" : "postgres",
+    explicitMockMode,
+    scope,
+    {
+      maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+      activity: [],
+    },
+    primary,
+  );
 }
 
 export async function loadGestorDashboardSnapshot(
@@ -329,17 +306,11 @@ export async function loadGestorDashboardSnapshot(
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
 ): Promise<GestorDashboardSnapshot> {
-  if (primary !== postgresRepository || fallback !== mockRepository) {
+  if (primary !== postgresRepository) {
     return loadUncached(primary, fallback, scope);
   }
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
-  let globalConfiguration;
-  try {
-    globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
-  } catch (error) {
-    if (error instanceof RangeError) throw error;
-    return loadUncached(primary, fallback, scope);
-  }
+  const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
   const key = `gestor-dashboard:v6:phase-a:${scope.userId}:${scopeKey}:${globalConfiguration.cacheSignature}`;
   const pending = inFlight.get(key);
   if (pending) return pending;

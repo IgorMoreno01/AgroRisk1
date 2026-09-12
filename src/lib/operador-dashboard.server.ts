@@ -260,7 +260,7 @@ type OperadorRelationalData = Omit<Awaited<ReturnType<typeof getOperatorRelation
 async function resolveOperatorSource(
   operatorId: string,
   primary: AgroRiskRepository,
-  fallback: AgroRiskRepository,
+  _fallback: AgroRiskRepository,
   includeRiskContext = true,
 ): Promise<{
   relational: OperadorRelationalData;
@@ -268,35 +268,19 @@ async function resolveOperatorSource(
   degraded: boolean;
   configuration: Awaited<ReturnType<typeof resolveRiskEngineV2Weights>>;
 }> {
-  try {
-    const relational = primary === postgresRepository
-      ? await getOperatorRelationalScope(operatorId, includeRiskContext)
-      : await readFallback(primary, operatorId);
-    const operation = relational.operations[0];
-    if (!operation) throw new Error("Operador sem operação autorizada.");
-    const configuration = await resolveRiskEngineV2Weights(operation.clientId, primary);
-    return {
-      relational,
-      source: "postgres" as const,
-      degraded: false,
-      configuration,
-    };
-  } catch (error) {
-    if (error instanceof RangeError) throw error;
-    console.error("[operador-dashboard] PostgreSQL indisponível; usando fallback mock.", {
-      error: error instanceof Error ? error.message : "Erro desconhecido",
-    });
-    const relational = await readFallback(fallback, operatorId);
-    const operation = relational.operations[0];
-    if (!operation) throw new Error("Operador sem operação autorizada.");
-    const configuration = await resolveRiskEngineV2Weights(operation.clientId, fallback);
-    return {
-      relational,
-      source: "mock" as const,
-      degraded: true,
-      configuration,
-    };
-  }
+  const relational = primary === postgresRepository
+    ? await getOperatorRelationalScope(operatorId, includeRiskContext)
+    : await readFallback(primary, operatorId);
+  const operation = relational.operations[0];
+  if (!operation) throw new Error("Operador sem operação autorizada.");
+  const configuration = await resolveRiskEngineV2Weights(operation.clientId, primary);
+  const explicitMockMode = primary === mockRepository;
+  return {
+    relational,
+    source: explicitMockMode ? "mock" as const : "postgres" as const,
+    degraded: explicitMockMode,
+    configuration,
+  };
 }
 
 /**
@@ -485,7 +469,7 @@ export async function loadOperadorDashboardSnapshot(
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
 ): Promise<OperadorDashboardSnapshot> {
-  if (primary !== postgresRepository || fallback !== mockRepository) {
+  if (primary !== postgresRepository) {
     return loadUncached(primary, fallback, operatorId);
   }
   const resolved = await resolveOperatorSource(operatorId, primary, fallback);
