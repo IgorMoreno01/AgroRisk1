@@ -288,17 +288,16 @@ export async function listConsultorRelationalPhaseA(clientIds: readonly string[]
     GROUP BY c.id ORDER BY c.id
   `;
   const clients = parseClients([...clientRows]);
-  const selectedId = clients[0]?.id;
-  if (!selectedId) {
+  if (clients.length === 0) {
     return { clients, areas: [], machines: [], operations: [], alerts: [], riskContexts: [] };
   }
-  const [areaRows, machineRows, operationRows] = await Promise.all([
+  const [areaRows, machineRows, operationRows, alertRows] = await Promise.all([
     sql`
       SELECT a.id, a.name, a.client_id AS "clientId", c.name AS client,
         a.type, a.condition, a.near_water AS "nearWater",
         a.environmental_risk AS "envRisk", a.score, a.crop, a.hectares::float8 AS hectares
       FROM agrorisk.areas a JOIN agrorisk.clients c ON c.id = a.client_id
-      WHERE a.client_id = ${selectedId}
+      ${ids === null ? sql`` : sql`WHERE a.client_id = ANY(${ids})`}
       ORDER BY a.id
     `,
     sql`
@@ -312,7 +311,7 @@ export async function listConsultorRelationalPhaseA(clientIds: readonly string[]
       JOIN agrorisk.clients c ON c.id = m.client_id
       JOIN agrorisk.areas a ON a.id = m.area_id
       JOIN agrorisk.users u ON u.id = m.operator_id
-      WHERE m.client_id = ${selectedId}
+      ${ids === null ? sql`` : sql`WHERE m.client_id = ANY(${ids})`}
       ORDER BY m.id
     `,
     sql`
@@ -326,8 +325,19 @@ export async function listConsultorRelationalPhaseA(clientIds: readonly string[]
       FROM agrorisk.operations o
       JOIN agrorisk.areas a ON a.id = o.area_id
       LEFT JOIN agrorisk.operation_risk_factors orf ON orf.operation_id = o.id
-      WHERE o.client_id = ${selectedId}
+      ${ids === null ? sql`` : sql`WHERE o.client_id = ANY(${ids})`}
       GROUP BY o.id, a.name ORDER BY o.id
+    `,
+    sql`
+      SELECT al.id, al.machine_id AS "machineId", al.machine_id AS machine,
+        al.operation_id AS "operationId", al.type, al.criticality,
+        al.risk_level AS level, al.message,
+        coalesce(al.main_factor_id, '') AS "mainFactor",
+        al.status, al.occurred_at::text AS datetime, al.time_label AS time
+      FROM agrorisk.alerts al
+      JOIN agrorisk.machines m ON m.id = al.machine_id
+      ${ids === null ? sql`` : sql`WHERE m.client_id = ANY(${ids})`}
+      ORDER BY al.occurred_at DESC, al.id
     `,
   ]);
   return {
@@ -335,7 +345,7 @@ export async function listConsultorRelationalPhaseA(clientIds: readonly string[]
     areas: parseAreas([...areaRows]),
     machines: parseMachines([...machineRows]),
     operations: parseOperations([...operationRows]),
-    alerts: [],
+    alerts: parseAlerts([...alertRows]),
     riskContexts: [],
   };
 }

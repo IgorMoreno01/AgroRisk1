@@ -260,12 +260,8 @@ async function loadUncached(
     });
     let relational = await readScope(fallback, scope);
     if (progressive) {
-      const firstClientId = relational.clients[0]?.id;
       relational = {
         ...relational,
-        areas: relational.areas.filter((area) => area.clientId === firstClientId),
-        machines: relational.machines.filter((machine) => machine.clientId === firstClientId),
-        operations: relational.operations.filter((operation) => operation.clientId === firstClientId),
         riskContexts: [],
       };
     }
@@ -286,7 +282,7 @@ export async function loadConsultorDashboardSnapshot(
     return loadUncached(primary, fallback, weights, scope);
   }
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
-  const key = `consultor-dashboard:v3:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
+  const key = `consultor-dashboard:v4:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
   const pending = inFlight.get(key);
   if (pending) return pending;
   const request = cacheOrFetch(key, 15, () => loadUncached(primary, fallback, weights, scope));

@@ -89,6 +89,41 @@ function ConsultorPage() {
   const priorityOperationalContribution = priorityResult?.contributions.find(
     (item) => item.component === "operational_rules",
   )?.weightedContribution ?? 0;
+  const hasNoOperations = selected?.operations.length === 0;
+  const noOperationsMessage = "Este cliente não possui operações monitoradas disponíveis.";
+
+  const selectClient = (nextClientId: string) => {
+    if (nextClientId === clientId) return;
+    priorityGeneration.current += 1;
+    secondaryGeneration.current += 1;
+    requestedClients.current.delete(nextClientId);
+    priorityPublishedClients.current.delete(nextClientId);
+    delete priorityOperationByClient.current[nextClientId];
+    setPriorityPublished(false);
+    setRiskErrorByClient((current) => {
+      const next = { ...current };
+      delete next[nextClientId];
+      return next;
+    });
+    setRiskLoadingByClient((current) => ({ ...current, [nextClientId]: false }));
+    setSnapshot((current) => current ? {
+      ...current,
+      clients: current.clients.map((item) => item.client.id === nextClientId ? {
+        ...item,
+        evaluatedOperationIds: [],
+        riskErrorsByOperationId: {},
+        summary: undefined,
+        machines: [],
+        areas: [],
+        recurringFactors: [],
+        composition: undefined,
+        recommendation: undefined,
+        nextAction: undefined,
+        explanation: undefined,
+      } : item),
+    } : current);
+    setClientId(nextClientId);
+  };
 
   const loadMoreVisible = () => {
     if (!selected) return;
@@ -158,7 +193,7 @@ function ConsultorPage() {
   }, [clientId]);
 
   useEffect(() => {
-    if (!snapshot || !selected || selected.summary || requestedClients.current.has(selected.client.id)) return;
+    if (!snapshot || !selected || requestedClients.current.has(selected.client.id)) return;
     const token = getStoredSessionToken();
     if (!token) return;
     const operationIds = selectConsultorPriorityOperationIds({
@@ -260,7 +295,7 @@ function ConsultorPage() {
           return (
             <button
               key={c.id}
-              onClick={() => setClientId(c.id)}
+              onClick={() => selectClient(c.id)}
               className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
                 active
                   ? "border-primary bg-primary text-primary-foreground"
@@ -318,7 +353,9 @@ function ConsultorPage() {
                  ? <>Nível da operação prioritária: <span className="font-medium text-foreground">{priorityResult.level}</span></>
                  : riskErrorByClient[selected.client.id]
                    ? "Não disponível"
-                   : "Aguardando análise da operação prioritária"}
+                   : hasNoOperations
+                     ? noOperationsMessage
+                     : "Aguardando análise da operação prioritária"}
             </p>
           </div>
         </Card>
@@ -333,7 +370,7 @@ function ConsultorPage() {
           />
           <div className="space-y-2">
             {priorityLoading && <p className="text-sm text-muted-foreground">Calculando...</p>}
-            {!priorityLoading && !topMachine && <p className="text-sm text-muted-foreground">{riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</p>}
+            {!priorityLoading && !topMachine && <p className="text-sm text-muted-foreground">{riskErrorByClient[selected.client.id] ? "Não disponível" : hasNoOperations ? noOperationsMessage : "Análise ainda não solicitada."}</p>}
             {clientMachines.slice(0, 1).map((row) => (
               <div key={row.machine.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
                 <div className="min-w-0 flex-1">
@@ -361,7 +398,7 @@ function ConsultorPage() {
           />
           <ul className="space-y-2">
             {priorityLoading && <li className="text-sm text-muted-foreground">Calculando...</li>}
-            {!priorityLoading && clientAreas.length === 0 && <li className="text-sm text-muted-foreground">{riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</li>}
+            {!priorityLoading && clientAreas.length === 0 && <li className="text-sm text-muted-foreground">{riskErrorByClient[selected.client.id] ? "Não disponível" : hasNoOperations ? noOperationsMessage : "Análise ainda não solicitada."}</li>}
             {[priorityArea].filter((row): row is NonNullable<typeof row> => Boolean(row)).map((row) => (
               <li key={row.area.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
                 <div className="min-w-0 flex-1">
@@ -397,7 +434,7 @@ function ConsultorPage() {
                </div>
              </div>
            ) : (
-              <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</p>
+              <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : hasNoOperations ? noOperationsMessage : "Análise ainda não solicitada."}</p>
            )}
         </Card>
 
@@ -413,7 +450,7 @@ function ConsultorPage() {
                recommendation={selected.recommendation}
              />
           ) : (
-             <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</p>
+             <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : hasNoOperations ? noOperationsMessage : "Análise ainda não solicitada."}</p>
           )}
         </Card>
       </div>
@@ -428,7 +465,7 @@ function ConsultorPage() {
           <div className="space-y-3">
               {recommendations.length === 0 && (
                 <p className="text-sm text-muted-foreground">
-                  {priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : "Nenhuma recomendação ativa para esta operação."}
+                   {priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : hasNoOperations ? noOperationsMessage : "Nenhuma recomendação ativa para esta operação."}
                 </p>
             )}
             {recommendations.map((r) => (
@@ -456,7 +493,7 @@ function ConsultorPage() {
               recommendation={selected.recommendation}
             />
           ) : (
-            <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : "Análise ainda não solicitada."}</p>
+            <p className="text-sm text-muted-foreground">{priorityLoading ? "Calculando..." : riskErrorByClient[selected.client.id] ? "Não disponível" : hasNoOperations ? noOperationsMessage : "Análise ainda não solicitada."}</p>
           )}
           {topMachine && (
             <p className="mt-3 text-sm text-muted-foreground">
