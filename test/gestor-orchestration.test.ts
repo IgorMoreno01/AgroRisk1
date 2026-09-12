@@ -28,6 +28,18 @@ const operation = (id: string, scheduledAt: string): Operation => ({
 });
 
 describe("orquestração estabilizada do Gestor", () => {
+  test("KPIs do topo usam apenas contagens relacionais definitivas", () => {
+    const source = readFileSync("src/routes/gestor.tsx", "utf8");
+
+    expect(source).toContain('label="Máquinas monitoradas"');
+    expect(source).toContain('label="Operações ativas"');
+    expect(source).toContain('label="Áreas monitoradas"');
+    expect(source).toContain('label="Alertas críticos"');
+    expect(source).toContain('operation.status === "Em andamento"');
+    expect(source).not.toContain('label="Operações em risco"');
+    expect(source).not.toContain('label="Score médio da frota"');
+  });
+
   test("publica uma resposta bem-sucedida e libera a tentativa", async () => {
     const controller = createGestorRequestController<string>();
     const request = controller.start(async () => "ok");

@@ -1,0 +1,264 @@
+Ajuste SOMENTE a tela do GESTOR.
+
+NÃO alterar:
+- Risk Engine
+- ML
+- fórmula
+- thresholds
+- pesos Sompo
+- prepared inputs
+- APIs
+- banco/schema
+- Vite
+- Admin
+- Consultor
+- Operador
+
+NÃO executar Git mutável.
+
+OBJETIVO:
+
+Adequar os KPIs do topo do Dashboard do Gestor à nova arquitetura
+de carregamento progressivo.
+
+Hoje existem dois cards que dependem de cobertura parcial de risco:
+
+- Operações em risco
+- Score médio da frota
+
+Esses dois cards exibem "Parcial" porque a carteira inteira não é mais
+avaliada automaticamente no load.
+
+Isso é tecnicamente correto, porém visualmente parece que o sistema
+não terminou de carregar.
+
+Queremos REMOVER esses dois cards da visão principal.
+
+==================================================
+1. REMOVER
+==================================================
+
+Remover do topo:
+
+- Operações em risco
+- Score médio da frota
+
+Não esconder com CSS.
+
+Remover corretamente da renderização da visão principal.
+
+NÃO remover a capacidade de cálculo desses dados do sistema caso
+eles sejam utilizados em outras telas, rankings, scores ou análises
+sob demanda.
+
+A alteração é apenas na VISÃO PRINCIPAL do Gestor.
+
+==================================================
+2. SUBSTITUIR POR DADOS RELACIONAIS
+==================================================
+
+No lugar dos dois cards removidos, usar dados relacionais já disponíveis
+no PostgreSQL e que NÃO dependem do Risk Engine.
+
+A grade final deve possuir:
+
+1. Máquinas monitoradas
+2. Operações ativas
+3. Áreas monitoradas
+4. Alertas críticos
+
+IMPORTANTE:
+
+- usar contagens reais do snapshot relacional atual;
+- NÃO inventar valores;
+- NÃO chamar Risk Engine para preencher esses cards;
+- NÃO disparar novas avaliações;
+- NÃO adicionar APIs externas.
+
+==================================================
+3. DEFINIÇÃO DOS CARDS
+==================================================
+
+Máquinas monitoradas
+→ manter comportamento atual.
+
+Operações ativas
+→ quantidade de operações pertencentes ao escopo autorizado do Gestor
+que estiverem consideradas ativas pelo critério JÁ EXISTENTE no sistema.
+
+Se não existir distinção explícita ativo/inativo no modelo atual,
+usar a contagem de operações disponíveis no escopo e ajustar o label
+para "Operações monitoradas".
+
+NÃO criar regra nova de negócio apenas para chamar de "ativas".
+
+Áreas monitoradas
+→ quantidade de áreas do escopo autorizado.
+
+Alertas críticos
+→ manter comportamento atual.
+
+==================================================
+4. NÃO USAR "PARCIAL" NESTES CARDS
+==================================================
+
+Esses quatro cards devem ser exclusivamente relacionais.
+
+Não usar:
+
+- Parcial
+- Calculando...
+- cobertura parcial
+
+para esses quatro KPIs.
+
+Se o dado relacional estiver disponível, mostrar o número diretamente.
+
+==================================================
+5. RISK ENGINE ABAIXO
+==================================================
+
+Preservar completamente o bloco atual:
+
+"Risk Engine V2 · visão gerencial"
+
+Não alterar nesta etapa:
+
+- operação prioritária
+- score
+- nível de risco
+- ML
+- operacional
+- drivers
+- recomendações
+- proveniência
+- loading local
+- retry
+- prepared inputs
+
+O cálculo prioritário continua independente dos KPIs superiores.
+
+==================================================
+6. RESPONSIVIDADE
+==================================================
+
+Manter o mesmo padrão visual atual dos cards.
+
+Desktop:
+4 cards na mesma linha, quando houver espaço.
+
+Mobile/tablet:
+usar o comportamento responsivo já existente.
+
+Não redesenhar o dashboard.
+
+==================================================
+7. LIMPEZA
+==================================================
+
+Remover apenas referências de UI que ficaram sem uso após retirar:
+
+- Operações em risco
+- Score médio da frota
+
+NÃO remover tipos, campos ou lógica de backend se eles ainda forem
+utilizados por:
+
+- Ranking
+- Scores
+- filtros
+- recomendações
+- análises sob demanda
+- testes de cobertura
+
+Evitar refactor amplo.
+
+==================================================
+8. VALIDAÇÃO
+==================================================
+
+Validar na rota autenticada /gestor:
+
+Topo deve mostrar:
+
+- Máquinas monitoradas: número
+- Operações ativas OU Operações monitoradas: número
+- Áreas monitoradas: número
+- Alertas críticos: número
+
+Nenhum dos quatro deve mostrar "Parcial".
+
+O Risk Engine abaixo deve continuar funcionando como antes.
+
+Confirmar que:
+
+- Fase A continua rápida;
+- zero APIs externas no runtime;
+- primeiro score continua funcionando;
+- nenhuma outra persona foi alterada.
+
+==================================================
+9. TESTES
+==================================================
+
+Ajustar apenas os testes necessários da tela do Gestor.
+
+Rodar testes focados do Gestor.
+
+Depois:
+
+bun run build
+
+Não alterar testes não relacionados apenas para deixá-los verdes.
+
+==================================================
+10. RELATÓRIO FINAL
+==================================================
+
+Responder:
+
+A. arquivos alterados
+
+B. cards removidos:
+- Operações em risco
+- Score médio da frota
+
+C. novos cards:
+- Máquinas monitoradas
+- Operações ativas/monitoradas
+- Áreas monitoradas
+- Alertas críticos
+
+D. algum desses quatro depende de Risk Engine?
+esperado: NÃO
+
+E. algum mostra "Parcial"?
+esperado: NÃO
+
+F. Risk Engine abaixo foi alterado?
+esperado: NÃO
+
+G. APIs externas runtime:
+esperado: 0
+
+H. outras personas alteradas?
+esperado: NÃO
+
+I. testes focados:
+PASS/FAIL
+
+J. build:
+PASS/FAIL
+
+K. modelo/fórmula/thresholds alterados?
+NÃO
+
+L. banco/schema alterados?
+NÃO
+
+PARE AO FINAL.
+
+Não faça nenhuma melhoria adicional.
+Não redesenhe a tela.
+O objetivo é SOMENTE substituir os dois KPIs parciais por KPIs
+relacionais definitivos.

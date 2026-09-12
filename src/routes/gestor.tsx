@@ -9,7 +9,7 @@ import { riskTrend, type Machine, type Area, type OperationType, type RiskLevel 
 import { opTypeOptions, levelOptions } from "@/lib/ranking";
 import { RecommendationCard } from "@/components/recommendation-card";
 import {
-  Tractor, AlertTriangle, Activity, Gauge,
+  Tractor, AlertTriangle, Activity,
   TrendingUp, TrendingDown, Flame, Filter as FilterIcon, ArrowUpDown, MapPin,
   Database,
 } from "lucide-react";
@@ -676,6 +676,10 @@ function GestorPage() {
         : "Resultado parcial: priorização dos equipamentos visíveis."
       : "Carregando carteira do Gestor...";
   const monitored = snapshot?.machines.length ?? 0;
+  const activeOperations = snapshot?.operations.filter(
+    (operation) => operation.status === "Em andamento",
+  ).length ?? 0;
+  const monitoredAreas = snapshot?.areas.length ?? 0;
   const avg = snapshot?.averageScore ?? 0;
   const trendData = useMemo(() => {
     const history = riskTrend.slice(0, 6);
@@ -700,25 +704,6 @@ function GestorPage() {
   const primaryRiskError = priorityOperationId
     ? priorityError ?? snapshot?.riskErrorsByOperationId?.[priorityOperationId]
     : null;
-  const aggregateCoverageLabel = snapshot?.riskCoverageComplete ? "completa" : "parcial";
-  const riskValue = !snapshot
-    ? loadError ? "Não disponível" : "Calculando..."
-    : snapshot.riskCoverageComplete
-      ? String(snapshot.machinesAtRisk)
-      : snapshot.operationRows.length > 0
-        ? "Parcial"
-        : priorityError
-          ? "Não disponível"
-          : "Parcial";
-  const scoreValue = !snapshot
-    ? loadError ? "Não disponível" : "Calculando..."
-    : snapshot.riskCoverageComplete
-      ? String(avg)
-      : snapshot.operationRows.length > 0
-        ? "Parcial"
-        : priorityError
-          ? "Não disponível"
-          : "Parcial";
   const retryPriorityRisk = (id: string) => {
     completedOperationIds.current.delete(id);
     requestedOperationIds.current.delete(id);
@@ -737,20 +722,18 @@ function GestorPage() {
       <div id="topo" className="grid scroll-mt-20 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Kpi label="Máquinas monitoradas" value={String(monitored)} hint="Frota ativa hoje" icon={Tractor} tone="default" />
         <Kpi
-          label="Operações em risco"
-          value={riskValue}
-          hint={`Score ≥ 70 · cobertura ${aggregateCoverageLabel}`}
+          label="Operações ativas"
+          value={String(activeOperations)}
+          hint="Em andamento na carteira"
           icon={Activity}
-          tone="warning"
-          trend={snapshot?.riskCoverageComplete ? { dir: "up", value: "+12%" } : undefined}
+          tone="success"
         />
         <Kpi
-          label="Score médio da frota"
-          value={scoreValue}
-          hint={`Escala 0–100 · cobertura ${aggregateCoverageLabel}`}
-          icon={Gauge}
-          tone="success"
-          trend={snapshot?.riskCoverageComplete ? { dir: "down", value: "-3%" } : undefined}
+          label="Áreas monitoradas"
+          value={String(monitoredAreas)}
+          hint="Áreas da carteira autorizada"
+          icon={MapPin}
+          tone="default"
         />
         <Kpi
           label="Alertas críticos"
