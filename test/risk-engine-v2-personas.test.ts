@@ -20,7 +20,7 @@ const runtimeSources = [
 describe("Risk Engine V2 · propagação entre personas", () => {
   test("Gestor e Consultor recebem resultado/contexto central; Operador usa o snapshot", () => {
     expect(routeSources[0]).toContain('persona="gestor"');
-    expect(routeSources[0]).toContain("evaluation={snapshot.operationRows[0].evaluation}");
+    expect(routeSources[0]).toMatch(/evaluation=\{(?:snapshot\.operationRows\[0\]|primaryRiskRow)\.evaluation\}/);
     expect(routeSources[1]).toContain("scoreContext.finalScore");
     expect(routeSources[1]).toContain("snapshot.nextAction");
     expect(routeSources[2]).toContain('persona="consultor"');

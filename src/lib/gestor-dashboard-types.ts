@@ -48,6 +48,10 @@ export interface GestorDashboardSnapshot {
   scopeRule: string;
   weights: { ml: number; operationalRules: number };
   clients: Client[];
+  /** Relational Phase A data is available before any risk evaluation. */
+  areas: import("./mock-data").Area[];
+  machines: import("./mock-data").Machine[];
+  operations: import("./mock-data").Operation[];
   machineRows: GestorMachineRow[];
   areaRows: AdminAreaRow[];
   operationRows: AdminOperationRow[];
@@ -59,6 +63,18 @@ export interface GestorDashboardSnapshot {
   averageScore: number;
   machinesAtRisk: number;
   operationalOverview: GestorOperationalOverview;
+  primaryOperation?: import("./mock-data").Operation;
+  alertCountsByMachine?: Record<string, number>;
+  /** False while only a visible/selected batch has been evaluated. */
+  riskCoverageComplete?: boolean;
+  evaluatedOperationIds?: string[];
+  relationalCounts?: {
+    clients: number;
+    areas: number;
+    machines: number;
+    operations: number;
+    alerts: number;
+  };
 }
 
 export interface GestorFilters {

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -18,9 +18,14 @@ import { RequireProfile } from "@/components/require-profile";
 import { GestorOperationalOverview } from "@/components/gestor-operational-overview";
 import { getStoredSessionToken } from "@/lib/auth";
 import { useActionableAlerts } from "@/lib/actionable-alerts";
-import { getGestorDashboard } from "@/lib/api/gestor-dashboard.functions";
+import {
+  evaluateGestorRiskBatch,
+  getGestorDashboard,
+  getGestorOperationalOverview,
+} from "@/lib/api/gestor-dashboard.functions";
 import type { GestorDashboardSnapshot } from "@/lib/gestor-dashboard-types";
 import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
+import { selectGestorPriorityOperationIds } from "@/lib/gestor-risk-selection";
 
 export const Route = createFileRoute("/gestor")({
   head: () => ({ meta: [{ title: "AgroRisk · Dashboard do Gestor" }] }),
@@ -175,6 +180,36 @@ function GestorPage() {
 
   const [snapshot, setSnapshot] = useState<GestorDashboardSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const requestedOperationIds = useRef(new Set<string>());
+  const firstBatchScheduled = useRef(false);
+
+  const requestBatch = (operationIds: string[]) => {
+    const token = getStoredSessionToken();
+    if (!token || operationIds.length === 0) return;
+    const ids = operationIds.filter((id) => !requestedOperationIds.current.has(id)).slice(0, 12);
+    if (ids.length === 0) return;
+    ids.forEach((id) => requestedOperationIds.current.add(id));
+    setBatchLoading(true);
+    void evaluateGestorRiskBatch({ data: { token, operationIds: ids, limit: Math.min(ids.length, 12) } })
+      .then((result) => {
+        if (!result.ok) {
+          ids.forEach((id) => requestedOperationIds.current.delete(id));
+          setLoadError(result.error);
+          return;
+        }
+        setSnapshot((previous) => previous
+          ? { ...result.snapshot, operationalOverview: previous.operationalOverview }
+          : result.snapshot);
+        result.snapshot.evaluatedOperationIds?.forEach((id) =>
+          requestedOperationIds.current.add(id));
+      })
+      .catch(() => {
+        ids.forEach((id) => requestedOperationIds.current.delete(id));
+        setLoadError("Não foi possível calcular o risco selecionado.");
+      })
+      .finally(() => setBatchLoading(false));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +226,61 @@ function GestorPage() {
       });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!snapshot || firstBatchScheduled.current) return;
+    const visibleMachineIds = new Set(snapshot.machines.slice(0, 3).map((machine) => machine.id));
+    const visibleIds = selectGestorPriorityOperationIds(
+      snapshot.operations,
+      snapshot.operations
+        .filter((operation) => visibleMachineIds.has(operation.machineId))
+        .map((operation) => operation.id),
+      12,
+    );
+    // Let the relational Phase A paint before starting external risk services.
+    const timer = window.setTimeout(() => {
+      firstBatchScheduled.current = true;
+      requestBatch(visibleIds);
+    }, 75);
+    return () => window.clearTimeout(timer);
+  }, [snapshot]);
+
+  useEffect(() => {
+    const token = getStoredSessionToken();
+    if (!token) return;
+    const timer = window.setTimeout(() => {
+      void getGestorOperationalOverview({ data: { token } })
+        .then((result) => {
+          if (result.ok) {
+            setSnapshot((previous) => previous
+              ? { ...previous, operationalOverview: result.overview }
+              : previous);
+          }
+        })
+        .catch(() => {
+          // Operational overview is secondary; the relational dashboard remains usable.
+        });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleRankingTabChange = (tab: string) => {
+    if (!snapshot) return;
+    const filtered = snapshot.operations.filter((operation) =>
+      (clientId === "all" || operation.clientId === clientId) &&
+      (areaId === "all" || operation.areaId === areaId) &&
+      (operationType === "all" || operation.type === operationType));
+    const pendingIds = filtered
+      .map((operation) => operation.id)
+      .filter((id) => !requestedOperationIds.current.has(id));
+    const page = selectGestorPriorityOperationIds(
+      snapshot.operations,
+      pendingIds,
+      12,
+      false,
+    );
+    requestBatch(page);
+  };
 
   const machineRows = useMemo(() => (snapshot?.machineRows ?? []).filter((row) =>
     (clientId === "all" || row.machine.clientId === clientId) &&
@@ -235,9 +325,9 @@ function GestorPage() {
     baixo: machineRows.filter((row) => row.level === "baixo").length,
   }), [machineRows]);
   const headline = machineRows[0]
-    ? `Priorize ${machineRows[0].machine.code}, com score ${machineRows[0].score} e atenção principal em ${machineRows[0].mainFactor.toLowerCase()}.`
-    : "Nenhum equipamento atende aos filtros atuais.";
-  const monitored = snapshot?.machineRows.length ?? 0;
+    ? `${snapshot?.riskCoverageComplete ? "" : "Resultado parcial: "}Priorize ${machineRows[0].machine.code}, com score ${machineRows[0].score} e atenção principal em ${machineRows[0].mainFactor.toLowerCase()}.`
+    : snapshot ? "Calculando priorização dos equipamentos visíveis..." : "Carregando carteira do Gestor...";
+  const monitored = snapshot?.machines.length ?? 0;
   const avg = snapshot?.averageScore ?? 0;
   const trendData = useMemo(() => {
     const history = riskTrend.slice(0, 6);
@@ -249,44 +339,90 @@ function GestorPage() {
   ], [snapshot]);
   const areaOptions = useMemo(() => [
     { id: "all", name: "Todas as áreas" },
-    ...(snapshot?.areaRows ?? []).map((row) => ({ id: row.area.id, name: row.area.name })),
+    ...(snapshot?.areas ?? []).map((area) => ({ id: area.id, name: area.name })),
   ], [snapshot]);
   const selectedMachineRow = snapshot?.machineRows.find((row) => row.machine.id === selectedMachine?.id);
   const selectedAreaRow = snapshot?.areaRows.find((row) => row.area.id === selectedArea?.id);
+  const primaryRiskRow = snapshot?.operationRows.find(
+    (row) => row.operation.id === snapshot.primaryOperation?.id,
+  ) ?? snapshot?.operationRows[0];
+  const aggregateCoverageLabel = snapshot?.riskCoverageComplete ? "completa" : "parcial";
 
   return (
     <AppLayout title="Dashboard do Gestor" subtitle="Visão consolidada da frota e risco operacional">
       <div id="topo" className="grid scroll-mt-20 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Kpi label="Máquinas monitoradas" value={String(monitored)} hint="Frota ativa hoje" icon={Tractor} tone="default" />
-        <Kpi label="Operações em risco" value={snapshot ? String(snapshot.machinesAtRisk) : "…"} hint="Score ≥ 70" icon={Activity} tone="warning" trend={{ dir: "up", value: "+12%" }} />
-        <Kpi label="Score médio da frota" value={snapshot ? String(avg) : "…"} hint="Escala 0–100 (Risk Engine V2)" icon={Gauge} tone="success" trend={{ dir: "down", value: "-3%" }} />
-        <Kpi label="Alertas críticos" value={String(actionableAlerts.alerts.filter((alert) => alert.severity === "critical").length)} hint="Persistentes e ativos" icon={AlertTriangle} tone="danger" />
+        <Kpi
+          label="Operações em risco"
+          value={!snapshot?.operationRows.length ? "Calculando..." : String(snapshot.machinesAtRisk)}
+          hint={`Score ≥ 70 · cobertura ${aggregateCoverageLabel}`}
+          icon={Activity}
+          tone="warning"
+          trend={snapshot?.riskCoverageComplete ? { dir: "up", value: "+12%" } : undefined}
+        />
+        <Kpi
+          label="Score médio da frota"
+          value={!snapshot?.operationRows.length ? "Calculando..." : String(avg)}
+          hint={`Escala 0–100 · cobertura ${aggregateCoverageLabel}`}
+          icon={Gauge}
+          tone="success"
+          trend={snapshot?.riskCoverageComplete ? { dir: "down", value: "-3%" } : undefined}
+        />
+        <Kpi
+          label="Alertas críticos"
+          value={snapshot ? String(snapshot.criticalAlerts) : String(actionableAlerts.alerts.filter((alert) => alert.severity === "critical").length)}
+          hint={snapshot
+            ? `Alertas ${snapshot.alertsSource === "postgres" ? "persistentes" : "demonstrativos"} filtrados pela carteira`
+            : "Persistentes e ativos"}
+          icon={AlertTriangle}
+          tone="danger"
+        />
       </div>
       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Database className="h-3.5 w-3.5" />
         {loadError ?? (snapshot
-          ? `${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas persistentes`
-          : "Carregando carteira do Gestor…")}
+          ? `${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas ${snapshot.alertsSource === "postgres" ? "persistentes" : "demonstrativos"}`
+          : batchLoading ? "Calculando..." : "Carregando carteira do Gestor…")}
       </div>
 
-      {snapshot?.operationRows[0] && (
+      {primaryRiskRow && (
         <PersonaV2RiskPanel
           persona="gestor"
-          result={snapshot.operationRows[0].evaluation.result}
-          evaluation={snapshot.operationRows[0].evaluation}
-          recommendation={snapshot.machineRows.find(
-            (row) => row.machine.id === snapshot.operationRows[0].operation.machineId,
+          result={primaryRiskRow.evaluation.result}
+          evaluation={primaryRiskRow.evaluation}
+          recommendation={snapshot?.machineRows.find(
+            (row) => row.machine.id === primaryRiskRow.operation.machineId,
           )?.recommendation}
         />
       )}
 
       {snapshot && <GestorOperationalOverview overview={snapshot.operationalOverview} />}
 
+      {snapshot && snapshot.alerts.length > 0 && (
+        <Card className="mt-4">
+          <SectionTitle
+            title="Alertas da carteira"
+            description={`Alertas ${snapshot.alertsSource === "postgres" ? "persistentes" : "demonstrativos"} filtrados pelas máquinas monitoradas`}
+          />
+          <div className="grid gap-2 md:grid-cols-2">
+            {snapshot.alerts.slice(0, 5).map((alert) => (
+              <div key={alert.id} className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-foreground">{alert.type}</span>
+                  <RiskBadge score={alert.level === "alto" ? 80 : alert.level === "medio" ? 55 : 25} />
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">{alert.machineId} · {alert.message}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <div className="mt-6 grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <SectionTitle
             title="Evolução do risco — últimos 7 dias"
-            description="Histórico demonstrativo · hoje com score V2 da frota PostgreSQL"
+            description={`Histórico demonstrativo · hoje com score V2 ${snapshot?.riskCoverageComplete ? "completo" : "parcial"} da frota`}
           />
           <TrendChart data={trendData} />
         </Card>
@@ -294,7 +430,7 @@ function GestorPage() {
         <Card className="border-secondary/40 bg-secondary/5">
           <SectionTitle
             title="Resumo de priorização"
-            description="Onde concentrar a atenção hoje"
+            description={snapshot?.riskCoverageComplete ? "Onde concentrar a atenção hoje" : "Cobertura parcial — calculando demais equipamentos"}
           />
           <p className="text-sm leading-relaxed text-foreground">{headline}</p>
           <div className="mt-4">
@@ -311,7 +447,9 @@ function GestorPage() {
       <Card>
         <SectionTitle
           title="Recomendações Prioritárias"
-          description="Top ações para os equipamentos mais críticos do ranking atual"
+          description={snapshot?.riskCoverageComplete
+            ? "Top ações para os equipamentos mais críticos do ranking atual"
+            : "Recomendações parciais dos equipamentos já avaliados"}
           
         />
         {(() => {
@@ -359,7 +497,12 @@ function GestorPage() {
       {/* Tabs de Ranking */}
       <section id="ranking" className="mt-6 block scroll-mt-20">
       <Card>
-        <Tabs defaultValue="machines">
+        <Tabs defaultValue="machines" onValueChange={handleRankingTabChange}>
+          {snapshot && !snapshot.riskCoverageComplete && (
+            <p className="mb-3 text-xs font-medium text-warning-foreground">
+              Ranking parcial — carregando somente itens visíveis, até 12 por solicitação.
+            </p>
+          )}
           <TabsList className="mb-4">
             <TabsTrigger value="machines">Ranking por Equipamento</TabsTrigger>
             <TabsTrigger value="areas">Ranking por Área</TabsTrigger>
@@ -386,7 +529,9 @@ function GestorPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {machineRows.length === 0 && (
-                    <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-muted-foreground">Nenhum equipamento atende aos filtros.</td></tr>
+                    <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                      {snapshot && !snapshot.riskCoverageComplete ? "Calculando ranking dos equipamentos visíveis..." : "Nenhum equipamento atende aos filtros."}
+                    </td></tr>
                   )}
                   {machineRows.map((r, i) => {
                     const isHigh = r.level === "alto";
@@ -463,7 +608,9 @@ function GestorPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {areaRows.length === 0 && (
-                    <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-muted-foreground">Nenhuma área atende aos filtros.</td></tr>
+                    <tr><td colSpan={9} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                      {snapshot && !snapshot.riskCoverageComplete ? "Calculando ranking das áreas selecionadas..." : "Nenhuma área atende aos filtros."}
+                    </td></tr>
                   )}
                   {areaRows.map((r, i) => {
                     const isPriority = r.score >= 80;
@@ -509,7 +656,7 @@ function GestorPage() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {opTypeRows.length === 0 && (
                 <div className="col-span-full rounded-lg border border-border p-6 text-center text-sm text-muted-foreground">
-                  Nenhum tipo de operação atende aos filtros.
+                  {snapshot && !snapshot.riskCoverageComplete ? "Calculando visão por tipo de operação..." : "Nenhum tipo de operação atende aos filtros."}
                 </div>
               )}
               {opTypeRows.map((r) => (

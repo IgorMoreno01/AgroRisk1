@@ -34,10 +34,13 @@ export async function closePostgresRepository(): Promise<void> {
 export async function listOperationRiskContexts(scope: {
   clientIds?: readonly string[] | null;
   operatorId?: string;
+  operationIds?: readonly string[];
 }): Promise<OperationRiskRelationalContext[]> {
   const sql = db();
   const ids = scope.clientIds === null ? null : scope.clientIds ? [...scope.clientIds] : undefined;
+  const operationIds = scope.operationIds ? [...scope.operationIds] : undefined;
   if (ids?.length === 0) return [];
+  if (operationIds?.length === 0) return [];
   const rows = await sql`
     SELECT
       o.id AS "operationId", o.type AS "operationType", o.status AS "operationStatus",
@@ -66,6 +69,7 @@ export async function listOperationRiskContexts(scope: {
     WHERE true
       ${scope.operatorId ? sql`AND o.operator_id=${scope.operatorId}` : sql``}
       ${ids === null || ids === undefined ? sql`` : sql`AND o.client_id=ANY(${ids})`}
+      ${operationIds === undefined ? sql`` : sql`AND o.id=ANY(${operationIds})`}
     ORDER BY o.id
   `;
   return rows.map((row) => ({
@@ -164,6 +168,83 @@ export async function listClientRelationalScope(clientIds: readonly string[] | n
     machines: parseMachines([...machineRows]),
     operations: parseOperations([...operationRows]),
     riskContexts,
+  };
+}
+
+/**
+ * Gestor Phase A intentionally reads only the relational portfolio.  Do not
+ * add risk contexts here: those are fetched by the authenticated risk batch
+ * after the user opens a ranking or a visible item.
+ */
+export async function listGestorRelationalPhaseA(clientIds: readonly string[] | null) {
+  const sql = db();
+  const ids = clientIds === null ? null : [...clientIds];
+  const [clientRows, areaRows, machineRows, operationRows, alertRows] = await Promise.all([
+    sql`
+      SELECT c.id, c.name, c.municipality AS city, c.state,
+        c.municipality || ' / ' || c.state AS location,
+        c.main_operation AS "mainOperation",
+        count(m.id)::int AS "machineCount", count(m.id)::int AS machines,
+        c.avg_score AS "avgScore", c.risk_level AS level
+      FROM agrorisk.clients c
+      LEFT JOIN agrorisk.machines m ON m.client_id = c.id
+      ${ids === null ? sql`` : sql`WHERE c.id = ANY(${ids})`}
+      GROUP BY c.id ORDER BY c.id
+    `,
+    sql`
+      SELECT a.id, a.name, a.client_id AS "clientId", c.name AS client,
+        a.type, a.condition, a.near_water AS "nearWater",
+        a.environmental_risk AS "envRisk", a.score, a.crop, a.hectares::float8 AS hectares
+      FROM agrorisk.areas a JOIN agrorisk.clients c ON c.id = a.client_id
+      ${ids === null ? sql`` : sql`WHERE a.client_id = ANY(${ids})`}
+      ORDER BY a.id
+    `,
+    sql`
+      SELECT m.id, m.code, m.name, m.model, m.type,
+        m.client_id AS "clientId", c.name AS client,
+        m.area_id AS "areaId", a.name AS area,
+        m.operator_id AS "operatorId", u.name AS operator,
+        m.status, m.score, m.risk_level AS level,
+        m.last_alert AS "lastAlert", m.last_update AS "lastUpdate"
+      FROM agrorisk.machines m
+      JOIN agrorisk.clients c ON c.id = m.client_id
+      JOIN agrorisk.areas a ON a.id = m.area_id
+      JOIN agrorisk.users u ON u.id = m.operator_id
+      ${ids === null ? sql`` : sql`WHERE m.client_id = ANY(${ids})`}
+      ORDER BY m.id
+    `,
+    sql`
+      SELECT o.id, o.machine_id AS "machineId", o.machine_id AS machine,
+        o.operator_id AS "operatorId", o.client_id AS "clientId",
+        o.area_id AS "areaId", a.name AS area, o.type,
+        o.scheduled_at::text AS "scheduledAt", o.start_label AS start,
+        o.duration_label AS duration, o.status, o.score,
+        coalesce(array_agg(orf.risk_factor_id) FILTER (WHERE orf.risk_factor_id IS NOT NULL), '{}') AS factors,
+        coalesce(o.recommendation_id, '') AS "recommendationId"
+      FROM agrorisk.operations o
+      JOIN agrorisk.areas a ON a.id = o.area_id
+      LEFT JOIN agrorisk.operation_risk_factors orf ON orf.operation_id = o.id
+      ${ids === null ? sql`` : sql`WHERE o.client_id = ANY(${ids})`}
+      GROUP BY o.id, a.name ORDER BY o.id
+    `,
+    sql`
+      SELECT al.id, al.machine_id AS "machineId", al.machine_id AS machine,
+        al.operation_id AS "operationId", al.type, al.criticality,
+        al.risk_level AS level, al.message,
+        coalesce(al.main_factor_id, '') AS "mainFactor",
+        al.status, al.occurred_at::text AS datetime, al.time_label AS time
+      FROM agrorisk.alerts al
+      JOIN agrorisk.machines m ON m.id = al.machine_id
+      ${ids === null ? sql`` : sql`WHERE m.client_id = ANY(${ids})`}
+      ORDER BY al.occurred_at DESC, al.id
+    `,
+  ]);
+  return {
+    clients: parseClients([...clientRows]),
+    areas: parseAreas([...areaRows]),
+    machines: parseMachines([...machineRows]),
+    operations: parseOperations([...operationRows]),
+    alerts: parseAlerts([...alertRows]),
   };
 }
 
