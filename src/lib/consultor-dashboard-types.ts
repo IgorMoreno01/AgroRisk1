@@ -63,7 +63,7 @@ export interface ConsultorDashboardSnapshot {
   loadedAt: string;
   scopeRule: string;
   weights: { ml: number; operationalRules: number };
-  alertsSource: "demo";
+  alertsSource: "postgres" | "demo";
   clients: ConsultorClientView[];
   preventiveOverview: ConsultorPreventiveOverview;
 }

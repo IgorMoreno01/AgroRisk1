@@ -33,9 +33,9 @@ const personaCopy = {
 } as const;
 
 const dominantLabels = {
-  ml: "Climático",
+  ml: "Modelo ML",
   operational_rules: "Operacional",
-  balanced: "Climático e operacional equilibrados",
+  balanced: "ML e operacional equilibrados",
 } as const;
 
 const directionLabel = (direction?: "increase" | "decrease" | "neutral") => {
@@ -132,7 +132,7 @@ export function PersonaV2RiskPanel({
             )}
           </div>
           <span className="w-fit shrink-0 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
-             Engine {result.engineVersion} · {persona === "consultor" ? "ML" : "Climático"} {result.weights.ml}% / Operacional{" "}
+             Engine {result.engineVersion} · ML {result.weights.ml}% / Operacional{" "}
             {result.weights.operationalRules}%
           </span>
         </div>
@@ -149,7 +149,7 @@ export function PersonaV2RiskPanel({
             <ScoreMetric label="Score final" value={result.finalScore} />
             {persona !== "operador" && (
               <ScoreMetric
-                 label={persona === "consultor" ? "Score ML" : "Score climático"}
+                 label="Score ML"
                 value={result.ml.mlRelativeScore.toFixed(2)}
               />
             )}
@@ -186,7 +186,7 @@ export function PersonaV2RiskPanel({
                 label={mlDriver.label}
                 description={persona === "consultor" && mlDriver.label.toLowerCase().includes("estrutura")
                   ? "Fatores estruturais que elevam/reduzem o risco relativo."
-                  : `${persona === "consultor" ? "Fator do modelo ML" : "Sinal climático"} que ${directionLabel(mlDriver.direction)}.`}
+                  : `Sinal do modelo ML que ${directionLabel(mlDriver.direction)}.`}
               />
             )}
             {operationalDriver && (
@@ -208,7 +208,7 @@ export function PersonaV2RiskPanel({
       {persona !== "operador" && (
         <Card>
           <SectionTitle
-             title={persona === "gestor" ? "Decomposição resumida do componente climático" : "Como os fatores atuam"}
+             title={persona === "gestor" ? "Decomposição resumida do componente do modelo ML" : "Como os fatores atuam"}
             description="Contribuições locais no logit; não são percentuais e não precisam somar 100."
           />
           <div className="grid gap-2 sm:grid-cols-3">

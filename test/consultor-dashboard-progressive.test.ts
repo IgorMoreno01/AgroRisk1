@@ -131,7 +131,7 @@ describe("carregamento progressivo do Consultor", () => {
     expect(route).toContain('title="Composição do score da operação"');
     expect(route).toContain("priorityResult.drivers");
     expect(route).toContain("Nenhuma recomendação ativa para esta operação.");
-    expect(panel).toContain('persona === "consultor" ? "Score ML"');
+    expect(panel).toContain('label="Score ML"');
     expect(panel).toContain('"Fatores estruturais que elevam/reduzem o risco relativo."');
   });
 

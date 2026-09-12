@@ -63,7 +63,7 @@ describe("Admin · hierarquia executiva do Risk Engine V2", () => {
   });
 
   test("identifica inputs incompletos e mantém semântica sem probabilidade real", () => {
-    expect(panelSource).toContain("evaluation.hasIncompleteInputs");
+    expect(panelSource).toContain("activeEvaluation.hasIncompleteInputs");
     expect(panelSource).toContain("Detalhes da disponibilidade dos dados");
     expect(panelSource).toContain("Parte dos sinais necessários para a avaliação");
     expect(panelSource).not.toContain("quality.weather");

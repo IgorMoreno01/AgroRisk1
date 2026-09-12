@@ -338,7 +338,7 @@ function ConsultorPage() {
       </div>
       <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
         <Database className="h-3.5 w-3.5" />
-        {`${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas persistentes`}
+        {`${snapshot.source === "postgres" ? "PostgreSQL" : "Dados demonstrativos"} · ${snapshot.scopeRule} · alertas ${snapshot.alertsSource === "postgres" ? "persistentes" : "demonstrativos"}`}
       </div>
 
       {topMachine && (

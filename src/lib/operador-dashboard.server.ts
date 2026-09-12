@@ -54,7 +54,7 @@ function toPresentationRisk(result: RiskEngineV2Result): RiskResult {
       level: result.level,
       mainFactor,
       parts: [
-        { category: "Clima", label: "Score climático", detail: "Resultado do componente climático", points: climateScore, max: 100 },
+        { category: "ML", label: "Score ML", detail: "Resultado do componente do modelo ML", points: climateScore, max: 100 },
         { category: "Operacional", label: "Score operacional", detail: "Resultado do componente operacional", points: operationalScore, max: 100 },
       ],
     },

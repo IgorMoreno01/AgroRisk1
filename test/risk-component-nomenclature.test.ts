@@ -9,9 +9,11 @@ const adminPresentationSource = [
   .join("\n");
 const otherPersonaPresentationSource = [
   "../src/components/persona-v2-risk-panel.tsx",
+  "../src/components/risk-explanation.tsx",
   "../src/components/machine-detail-dialog.tsx",
   "../src/components/area-detail-dialog.tsx",
   "../src/routes/consultor.tsx",
+  "../src/lib/operador-dashboard.server.ts",
 ]
   .map((file) => readFileSync(new URL(file, import.meta.url), "utf8"))
   .join("\n");
@@ -29,21 +31,21 @@ describe("nomenclatura dos macrocomponentes de risco", () => {
     expect(adminPresentationSource).not.toContain("Climático");
   });
 
-  test("outras personas preservam Climático e Operacional sem aliases antigos", () => {
-    expect(otherPersonaPresentationSource).toContain("Score climático");
+  test("outras personas apresentam ML e Operacional sem aliases climáticos", () => {
+    expect(otherPersonaPresentationSource).toContain("Score ML");
     expect(otherPersonaPresentationSource).toContain("Score operacional");
-    expect(otherPersonaPresentationSource).toContain("Climático");
+    expect(otherPersonaPresentationSource).toContain("ML");
     expect(otherPersonaPresentationSource).toContain("Operacional");
 
-    for (const obsoleteLabel of [
-      "Modelo ML",
-      "Score ML",
-      "Peso ML",
-      "Regras operacionais",
-      "Configuração ativa: ML",
-      "Pesos Sompo: ML",
+    for (const climaticAlias of [
+      "Score climático",
+      "Peso climático",
+      "Pesos Sompo: Climático",
+      "Contribuição climática",
+      "Sinal climático",
+      "componente climático",
     ]) {
-      expect(otherPersonaPresentationSource).not.toContain(obsoleteLabel);
+      expect(otherPersonaPresentationSource).not.toContain(climaticAlias);
     }
   });
 

@@ -21,9 +21,9 @@ export function RiskExplanation({
     return (
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Metric label="Score climático" value={`${result.climateScore} / 100`} detail={`Peso Sompo: ${weights.climate}%`} />
+          <Metric label="Score ML" value={`${result.climateScore} / 100`} detail={`Peso Sompo: ML ${weights.climate}%`} />
           <Metric label="Score operacional" value={`${result.operationalScore} / 100`} detail={`Peso Sompo: ${weights.operational}%`} />
-          <Metric label="Contribuição climática" value={result.climateContribution.toFixed(1)} detail={`${result.climateScore} × ${weights.climate}%`} />
+          <Metric label="Contribuição ML" value={result.climateContribution.toFixed(1)} detail={`${result.climateScore} × ${weights.climate}%`} />
           <Metric label="Contribuição operacional" value={result.operationalContribution.toFixed(1)} detail={`${result.operationalScore} × ${weights.operational}%`} />
         </div>
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
@@ -114,7 +114,7 @@ export function RiskExplanation({
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <Metric label="Contribuição climática" value={result.climateContribution.toFixed(1)} />
+        <Metric label="Contribuição ML" value={result.climateContribution.toFixed(1)} />
         <Metric label="Contribuição operacional" value={result.operationalContribution.toFixed(1)} />
       </div>
       <p className="text-sm text-muted-foreground">

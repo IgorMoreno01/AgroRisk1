@@ -99,6 +99,8 @@ export async function buildGestorRelationalSnapshot(
   scope: GestorAccessScope,
   weights: RiskEngineV2Weights = { ml: 70, operationalRules: 30 },
   operationalOverview: GestorDashboardSnapshot["operationalOverview"] = emptyOperationalOverview,
+  alertsSource: GestorDashboardSnapshot["alertsSource"] =
+    source === "postgres" ? "postgres" : "demo",
 ): Promise<GestorDashboardSnapshot> {
   const counts = alertCounts(relational.alerts);
   return {
@@ -119,7 +121,7 @@ export async function buildGestorRelationalSnapshot(
     operationTypeRows: [],
     machineDistribution: { alto: 0, medio: 0, baixo: 0, total: 0 },
     alerts: relational.alerts,
-    alertsSource: source === "postgres" ? "postgres" : "demo",
+    alertsSource,
     criticalAlerts: relational.alerts.filter(
       (alert) => alert.level === "alto" && alert.status !== "resolvido",
     ).length,
@@ -284,6 +286,7 @@ async function loadUncached(
       const relational = await readGestorPhaseA(primary, scope);
       return await buildGestorRelationalSnapshot(
         relational, "postgres", false, scope, globalConfiguration.weights,
+        emptyOperationalOverview, "postgres",
       );
     }
     if (primary === postgresRepository) {
@@ -310,6 +313,8 @@ async function loadUncached(
         true,
         scope,
         fallbackConfiguration.weights,
+        emptyOperationalOverview,
+        "demo",
       );
     }
     return await buildSnapshot(await readScoped(fallback, scope), "mock", true, scope, {
@@ -409,6 +414,7 @@ export async function evaluateGestorRiskBatch(
   const run = async () => {
     const relationalSnapshot = await buildGestorRelationalSnapshot(
       relational, source, false, scope, globalConfiguration.weights,
+      emptyOperationalOverview, source === "postgres" ? "postgres" : "demo",
     );
     const adminBase = await buildAdminDashboardRelationalSnapshot(
       relational, source, false, globalConfiguration.weights,
