@@ -25,15 +25,12 @@ describe("abertura dos dashboards sem APIs externas", () => {
     }
   });
 
-  test("Operador exibe clima somente do input preparado do Risk Engine", () => {
+  test("Operador delega clima atual sem misturá-lo ao input preparado do Risk Engine", () => {
     const source = readFileSync(resolve("src/routes/operador.tsx"), "utf8");
-    expect(source).toContain("riskSnapshot?.evaluationContext.input.mlInput");
-    expect(source).toContain("TEMP_MEDIA_D1_C");
-    expect(source).toContain("PRECIPITACAO_D1_MM");
-    expect(source).toContain("VENTO_D1_MS");
-    expect(source).toContain("Dados históricos preparados");
-    expect(source).toContain("Dados indisponíveis");
-    expect(source).not.toContain("WeatherData");
-    expect(source).not.toContain("loadingWeather");
+    expect(source).toContain("OperatorCurrentWeather");
+    expect(source).not.toContain("evaluationContext.input.mlInput");
+    expect(source).not.toContain("TEMP_MEDIA_D1_C");
+    expect(source).not.toContain("PRECIPITACAO_D1_MM");
+    expect(source).not.toContain("VENTO_D1_MS");
   });
 });

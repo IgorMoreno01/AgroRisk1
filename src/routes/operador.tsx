@@ -3,7 +3,6 @@ import { useState, useEffect, useRef } from "react";
 import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge } from "@/components/risk-badge";
 import { NextBestActionCard } from "@/components/next-best-action";
-import { CloudSun, Droplets, Mountain, Wind, type LucideIcon } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { getStoredSessionToken } from "@/lib/auth";
@@ -14,6 +13,7 @@ import type {
 } from "@/lib/operador-dashboard-types";
 import { OperationRegistrationCard } from "@/components/operation-registration-card";
 import { PreventiveMaintenanceCard } from "@/components/preventive-maintenance-card";
+import { OperatorCurrentWeather } from "@/components/operator-current-weather";
 
 export const Route = createFileRoute("/operador")({
   head: () => ({ meta: [{ title: "AgroRisk · Operador" }] }),
@@ -109,28 +109,6 @@ function OperadorPage() {
   const score = scoreContext?.finalScore;
   const level = scoreContext?.level;
   const nextAction = riskSnapshot?.nextAction;
-  const preparedClimate = riskSnapshot?.evaluationContext.input.mlInput;
-  const hasPreparedClimate = preparedClimate && (
-    preparedClimate.TEMP_MEDIA_D1_C !== null ||
-    preparedClimate.PRECIPITACAO_D1_MM !== null ||
-    preparedClimate.VENTO_D1_MS !== null
-  );
-  const climate = {
-    condition: hasPreparedClimate ? "Dados históricos preparados" : "Dados indisponíveis",
-    temperature: preparedClimate?.TEMP_MEDIA_D1_C !== null &&
-      preparedClimate?.TEMP_MEDIA_D1_C !== undefined
-      ? `${Math.round(preparedClimate.TEMP_MEDIA_D1_C)}°C`
-      : "—",
-    precipitation: preparedClimate?.PRECIPITACAO_D1_MM !== null &&
-      preparedClimate?.PRECIPITACAO_D1_MM !== undefined
-      ? `${preparedClimate.PRECIPITACAO_D1_MM.toFixed(1)} mm`
-      : "—",
-    wind: preparedClimate?.VENTO_D1_MS !== null &&
-      preparedClimate?.VENTO_D1_MS !== undefined
-      ? `${preparedClimate.VENTO_D1_MS.toFixed(1)} m/s`
-      : "—",
-  };
-
   return (
     <AppLayout
       title="Painel do Operador"
@@ -182,6 +160,10 @@ function OperadorPage() {
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Fator principal</div>
                   <div className="mt-1 font-medium text-foreground">{nextAction?.factor}</div>
                 </div>
+                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                  Principal influência: {nextAction?.factor}. O resultado combina o risco estimado
+                  pelo ML com os fatores operacionais desta operação.
+                </p>
               </>
             ) : (
               <div className="py-12 text-center text-sm text-muted-foreground">
@@ -208,19 +190,7 @@ function OperadorPage() {
             <p className="text-sm text-muted-foreground">{riskError ?? "Calculando..."}</p>
           )}
         </Card>
-        <Card>
-          <SectionTitle title="Clima e segurança" description={climate.condition} />
-          <div className="grid grid-cols-2 gap-3">
-            <QuickStatus icon={CloudSun} label="Temperatura" value={climate.temperature} />
-            <QuickStatus icon={Droplets} label="Precipitação" value={climate.precipitation} />
-            <QuickStatus icon={Wind} label="Vento" value={climate.wind} />
-            <QuickStatus
-              icon={Mountain}
-              label="Inclinação simulada"
-              value={`${snapshot.telemetry.inclinationDegrees.toFixed(1)}° · ${snapshot.telemetry.inclinationStatus}`}
-            />
-          </div>
-        </Card>
+        <OperatorCurrentWeather municipality={client.city} state={client.state} />
       </div>
 
       <div className="mt-6">
@@ -236,25 +206,6 @@ function OperadorPage() {
       </div>
 
     </AppLayout>
-  );
-}
-
-function QuickStatus({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/30 p-3">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        <Icon className="h-3.5 w-3.5" /> {label}
-      </div>
-      <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
-    </div>
   );
 }
 

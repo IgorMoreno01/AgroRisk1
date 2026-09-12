@@ -16,6 +16,7 @@ const HISTORICAL_URL = "https://archive-api.open-meteo.com/v1/archive";
 const TIMEOUT_MS = 8_000;
 const CACHE_TTL_S = 10 * 60; // 10 minutos
 const historicalInFlight = new Map<string, Promise<OpenMeteoHistoricalResponse | null>>();
+const currentInFlight = new Map<string, Promise<WeatherData>>();
 
 // WMO weather codes → condição interna
 function wmoToCondition(code: number): WeatherCondition {
@@ -162,6 +163,28 @@ export async function getClimate(lat: number, lon: number): Promise<WeatherData>
   } catch (err) {
     console.warn("[ClimateAdapter] fallback para mock:", (err as Error).message);
     return mockWeatherData(lat, lon);
+  }
+}
+
+/**
+ * Retorna somente clima atual real. Falhas são propagadas para que a interface
+ * nunca apresente o fallback demonstrativo como condição observada.
+ */
+export async function getCurrentClimate(lat: number, lon: number): Promise<WeatherData> {
+  const key = `climate-current-strict:${lat.toFixed(2)}:${lon.toFixed(2)}`;
+  const cached = cacheGet<WeatherData>(key);
+  if (cached !== undefined) return cached;
+  const pending = currentInFlight.get(key);
+  if (pending) return pending;
+  const request = fetchFromOpenMeteo(lat, lon).then((weather) => {
+    cacheSet(key, weather, CACHE_TTL_S);
+    return weather;
+  });
+  currentInFlight.set(key, request);
+  try {
+    return await request;
+  } finally {
+    currentInFlight.delete(key);
   }
 }
 
