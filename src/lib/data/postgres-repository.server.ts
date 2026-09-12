@@ -15,6 +15,7 @@ import type {
   OperationRiskRelationalContext,
   SerializableJson,
 } from "../risk-engine-v2/operation-input.server";
+import type { PreparedOperationRiskInput } from "../risk-engine-v2/prepared-input";
 
 let client: ReturnType<typeof postgres> | undefined;
 
@@ -57,7 +58,12 @@ export async function listOperationRiskContexts(scope: {
       f.id AS "farmId", f.name AS "farmName", f.municipality AS "farmMunicipality",
       f.state AS "farmState",
       c.id AS "clientId", c.name AS "clientName", c.municipality AS "clientMunicipality",
-      c.state AS "clientState", c.main_operation AS "mainOperation"
+      c.state AS "clientState", c.main_operation AS "mainOperation",
+      ris.reference_date AS "riskReferenceDate", ris.ml_input AS "riskMlInput",
+      ris.operational_rules_input AS "riskOperationalRulesInput",
+      ris.latitude AS "riskLatitude", ris.longitude AS "riskLongitude",
+      ris.provenance AS "riskProvenance", ris.generated_at AS "riskGeneratedAt",
+      ris.updated_at AS "riskUpdatedAt", ris.version AS "riskVersion"
     FROM agrorisk.operations o
     JOIN agrorisk.machines m
       ON m.id=o.machine_id AND m.area_id=o.area_id AND m.client_id=o.client_id
@@ -66,6 +72,8 @@ export async function listOperationRiskContexts(scope: {
     JOIN agrorisk.areas a ON a.id=o.area_id AND a.client_id=o.client_id
     JOIN agrorisk.farms f ON f.id=a.farm_id AND f.client_id=a.client_id
     JOIN agrorisk.clients c ON c.id=o.client_id
+    LEFT JOIN agrorisk.operation_risk_input_snapshots ris
+      ON ris.operation_id = o.id
     WHERE true
       ${scope.operatorId ? sql`AND o.operator_id=${scope.operatorId}` : sql``}
       ${ids === null || ids === undefined ? sql`` : sql`AND o.client_id=ANY(${ids})`}
@@ -99,6 +107,20 @@ export async function listOperationRiskContexts(scope: {
       municipality: String(row.farmMunicipality), state: String(row.farmState),
     },
     terrainContext: row.terrainContext as SerializableJson,
+    preparedInput: row.riskVersion
+      ? {
+          operationId: String(row.operationId),
+          referenceDate: String(row.riskReferenceDate),
+          mlInput: row.riskMlInput,
+          operationalRulesInput: row.riskOperationalRulesInput,
+          latitude: row.riskLatitude === null ? null : Number(row.riskLatitude),
+          longitude: row.riskLongitude === null ? null : Number(row.riskLongitude),
+          provenance: (row.riskProvenance ?? {}) as Record<string, unknown>,
+          generatedAt: String(row.riskGeneratedAt),
+          updatedAt: String(row.riskUpdatedAt),
+          version: String(row.riskVersion),
+        }
+      : undefined,
     client: {
       id: String(row.clientId), name: String(row.clientName),
       city: String(row.clientMunicipality), state: String(row.clientState),
@@ -666,6 +688,61 @@ async function queryHistory() {
   return parseHistory([...rows]);
 }
 
+export async function getOperationRiskInputSnapshot(
+  operationId: string,
+): Promise<PreparedOperationRiskInput | undefined> {
+  const [row] = await db()`
+    SELECT operation_id AS "operationId", reference_date::text AS "referenceDate",
+      ml_input AS "mlInput", operational_rules_input AS "operationalRulesInput",
+      latitude, longitude, provenance, generated_at::text AS "generatedAt",
+      updated_at::text AS "updatedAt", version
+    FROM agrorisk.operation_risk_input_snapshots
+    WHERE operation_id = ${operationId}
+  `;
+  if (!row) return undefined;
+  return {
+    operationId: String(row.operationId),
+    referenceDate: String(row.referenceDate),
+    mlInput: row.mlInput,
+    operationalRulesInput: row.operationalRulesInput,
+    latitude: row.latitude === null ? null : Number(row.latitude),
+    longitude: row.longitude === null ? null : Number(row.longitude),
+    provenance: (row.provenance ?? {}) as Record<string, unknown>,
+    generatedAt: String(row.generatedAt),
+    updatedAt: String(row.updatedAt),
+    version: String(row.version),
+  } as PreparedOperationRiskInput;
+}
+
+export async function upsertOperationRiskInputSnapshot(
+  snapshot: PreparedOperationRiskInput,
+): Promise<void> {
+  const sql = db();
+  await sql`
+    INSERT INTO agrorisk.operation_risk_input_snapshots (
+      operation_id, reference_date, ml_input, operational_rules_input,
+      latitude, longitude, provenance, generated_at, updated_at, version
+    ) VALUES (
+      ${snapshot.operationId}, ${snapshot.referenceDate},
+      ${sql.json(JSON.parse(JSON.stringify(snapshot.mlInput)))},
+      ${sql.json(JSON.parse(JSON.stringify(snapshot.operationalRulesInput)))},
+      ${snapshot.latitude}, ${snapshot.longitude},
+      ${sql.json(JSON.parse(JSON.stringify(snapshot.provenance)))},
+      ${snapshot.generatedAt}, ${snapshot.updatedAt}, ${snapshot.version}
+    )
+    ON CONFLICT (operation_id) DO UPDATE SET
+      reference_date = excluded.reference_date,
+      ml_input = excluded.ml_input,
+      operational_rules_input = excluded.operational_rules_input,
+      latitude = excluded.latitude,
+      longitude = excluded.longitude,
+      provenance = excluded.provenance,
+      generated_at = excluded.generated_at,
+      updated_at = now(),
+      version = excluded.version
+  `;
+}
+
 export const postgresRepository: AgroRiskRepository = {
   listClients: () => queryClients(),
   listAreas: () => queryAreas(),
@@ -677,4 +754,6 @@ export const postgresRepository: AgroRiskRepository = {
   async getArea(id) { return (await queryAreas(id))[0]; },
   async getMachine(id) { return (await queryMachines(id))[0]; },
   async getOperation(id) { return (await queryOperations(id))[0]; },
+  getOperationRiskInputSnapshot,
+  upsertOperationRiskInputSnapshot,
 };

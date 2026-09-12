@@ -1,13 +1,16 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import postgres from "postgres";
-import { loadAdminDashboardSnapshot } from "../src/lib/admin-dashboard.server";
+import {
+  evaluateAdminDashboardRiskBatch,
+  loadAdminDashboardSnapshot,
+} from "../src/lib/admin-dashboard.server";
 import { loadConsultorDashboardSnapshot } from "../src/lib/consultor-dashboard.server";
 import { closePostgresRepository } from "../src/lib/data/postgres-repository.server";
-import { loadGestorDashboardSnapshot } from "../src/lib/gestor-dashboard.server";
+import { evaluateGestorRiskBatch, loadGestorDashboardSnapshot } from "../src/lib/gestor-dashboard.server";
+import { evaluateConsultorRiskBatch } from "../src/lib/consultor-dashboard.server";
 import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.server";
 import { mockRepository } from "../src/lib/data/mock-repository.server";
 import { postgresRepository } from "../src/lib/data/postgres-repository.server";
-import { testRiskExternalServices as externalServices } from "./helpers/risk-external-services";
 
 const sql = postgres(process.env.DATABASE_URL!, { max: 2, prepare: false });
 
@@ -43,61 +46,63 @@ describe("auditoria transversal das quatro personas", () => {
       sql`SELECT client_id AS id FROM agrorisk.user_client_scopes WHERE user_id=${candidate.gestorId}`,
       sql`SELECT client_id AS id FROM agrorisk.user_client_scopes WHERE user_id=${candidate.consultorId}`,
     ]);
-    const [admin, gestor, consultor, operador] = await Promise.all([
-      loadAdminDashboardSnapshot(postgresRepository, mockRepository, externalServices),
-      loadGestorDashboardSnapshot({
+    const operador = await loadOperadorDashboardSnapshot(
+      candidate.operatorId,
+      postgresRepository,
+      mockRepository,
+    );
+    const operationId = operador.operation.id;
+    const managerClientIds = gestorScopes.map((row) => String(row.id));
+    const consultantClientIds = consultorScopes.map((row) => String(row.id));
+    expect(managerClientIds).toContain(operador.operation.clientId);
+    expect(consultantClientIds).toContain(operador.operation.clientId);
+    const [adminRows, gestor, consultor] = await Promise.all([
+      evaluateAdminDashboardRiskBatch([operationId], 1),
+      evaluateGestorRiskBatch({
         userId: candidate.gestorId,
-        clientIds: gestorScopes.map((row) => String(row.id)),
-      }, postgresRepository, mockRepository, externalServices),
-      loadConsultorDashboardSnapshot({
+        clientIds: managerClientIds,
+      }, [operationId], 1),
+      evaluateConsultorRiskBatch({
         userId: candidate.consultorId,
-        clientIds: consultorScopes.map((row) => String(row.id)),
-      }, postgresRepository, mockRepository, externalServices),
-      loadOperadorDashboardSnapshot(
-        candidate.operatorId, postgresRepository, mockRepository, externalServices,
-      ),
+        clientIds: consultantClientIds,
+      }, operador.operation.clientId, [operationId], 1),
     ]);
-
-    const machineId = operador.machine.id;
-    const adminMachine = admin.machineRows.find((row) => row.machine.id === machineId);
-    const gestorMachine = gestor.machineRows.find((row) => row.machine.id === machineId);
-    const consultorMachine = consultor.clients
-      .flatMap((view) => view.machines)
-      .find((row) => row.machine.id === machineId);
-
-    expect(adminMachine).toBeDefined();
-    expect(gestorMachine).toBeDefined();
-    expect(consultorMachine).toBeDefined();
-    const signatures = [adminMachine, gestorMachine, consultorMachine].map((row) => ({
+    const adminRow = adminRows.find((row) => row.operation.id === operationId);
+    const gestorRow = gestor.operationRows.find((row) => row.operation.id === operationId);
+    const consultorRow = consultor.machines.find((row) => row.operation?.id === operationId);
+    expect(adminRow).toBeDefined();
+    expect(gestorRow).toBeDefined();
+    expect(consultorRow).toBeDefined();
+    const signatures = [adminRow, gestorRow, consultorRow].map((row) => ({
       score: row!.score,
       level: row!.level,
       factor: row!.mainFactor,
     }));
     expect(new Set(signatures.map((item) => JSON.stringify(item))).size).toBe(1);
-    expect(operador.risk.finalScore).toBe(adminMachine!.score);
-    expect(operador.risk.level).toBe(adminMachine!.level);
-    expect(operador.mainFactor).toBe(adminMachine!.mainFactor);
+    expect(operador.risk.finalScore).toBe(adminRow!.score);
+    expect(operador.risk.level).toBe(adminRow!.level);
+    expect(operador.mainFactor).toBe(adminRow!.mainFactor);
     const sharedInputs = [
-      adminMachine!.evaluation.input,
-      gestorMachine!.evaluation.input,
-      consultorMachine!.evaluation.input,
-      operador.evaluationContext.input,
-    ];
+       adminRow!.evaluation.input,
+       gestorRow!.evaluation.input,
+       consultorRow!.evaluation.input,
+       operador.evaluationContext.input,
+     ];
     expect(new Set(sharedInputs.map((input) => JSON.stringify(input))).size).toBe(1);
     const sharedOperationalProvenance = [
-      adminMachine!.evaluation.provenance.operationalRules,
-      gestorMachine!.evaluation.provenance.operationalRules,
-      consultorMachine!.evaluation.provenance.operationalRules,
+       adminRow!.evaluation.provenance.operationalRules,
+       gestorRow!.evaluation.provenance.operationalRules,
+       consultorRow!.evaluation.provenance.operationalRules,
       operador.evaluationContext.provenance.operationalRules,
     ];
     expect(new Set(
       sharedOperationalProvenance.map((provenance) => JSON.stringify(provenance)),
     ).size).toBe(1);
-    expect(admin.weights).toEqual(gestor.weights);
-    expect(admin.weights).toEqual(consultor.weights);
+    expect(gestorRow!.evaluation.result.weights).toEqual(adminRow!.evaluation.result.weights);
+    expect(consultorRow!.evaluation.result.weights).toEqual(adminRow!.evaluation.result.weights);
     expect(operador.weights).toEqual({
-      climate: admin.weights.ml,
-      operational: admin.weights.operationalRules,
+      climate: adminRow!.evaluation.result.weights.ml,
+      operational: adminRow!.evaluation.result.weights.operationalRules,
     });
   }, 30_000);
 
@@ -116,24 +121,21 @@ describe("auditoria transversal das quatro personas", () => {
     const gestorClientIds = gestorScopes.map((row) => String(row.id));
     const consultorClientIds = consultorScopes.map((row) => String(row.id));
     const [admin, gestor, consultor, operador] = await Promise.all([
-      loadAdminDashboardSnapshot(postgresRepository, mockRepository, externalServices),
+       loadAdminDashboardSnapshot(postgresRepository, mockRepository),
       loadGestorDashboardSnapshot(
         { userId: ids.gestorId, clientIds: gestorClientIds },
         postgresRepository,
-        mockRepository,
-        externalServices,
+         mockRepository,
       ),
       loadConsultorDashboardSnapshot(
         { userId: ids.consultorId, clientIds: consultorClientIds },
         postgresRepository,
-        mockRepository,
-        externalServices,
+         mockRepository,
       ),
       loadOperadorDashboardSnapshot(
         ids.operatorId,
         postgresRepository,
-        mockRepository,
-        externalServices,
+         mockRepository,
       ),
     ]);
 

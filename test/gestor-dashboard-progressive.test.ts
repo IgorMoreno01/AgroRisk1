@@ -6,19 +6,11 @@ import {
   loadGestorDashboardSnapshot,
 } from "../src/lib/gestor-dashboard.server";
 import { mockRepository } from "../src/lib/data/mock-repository.server";
-import type { OperationRiskExternalServices } from "../src/lib/risk-engine-v2/operation-input.server";
 import { selectGestorPriorityOperationIds } from "../src/lib/gestor-risk-selection";
 import type { Operation } from "../src/lib/mock-data";
 
 const scope = { userId: "GST-PROGRESSIVE", clientIds: ["CL-01", "CL-02"] };
 const weights = { ml: 65, operationalRules: 35 };
-const services: OperationRiskExternalServices = {
-  geocode: async () => ({ latitude: -23.5, longitude: -47.5, source: "test" }),
-  historicalWeather: async () => ({ precipitationMm: 2, temperatureC: 24, windSpeedKmh: 8, source: "test" }),
-  elevation: async () => ({ elevationM: 600, source: "test" }),
-  water: async () => ({ nearWater: false, distanceMeters: 900, source: "test" }),
-};
-
 async function phaseAData() {
   const [clients, areas, machines, operations] = await Promise.all([
     mockRepository.listClients(),
@@ -54,7 +46,7 @@ describe("carregamento progressivo do Gestor", () => {
   test("batch limita a 12, aplica escopo e acumula cobertura parcial", async () => {
     const relational = await phaseAData();
     const ids = relational.operations.map((operation) => operation.id);
-    const first = await evaluateGestorRiskBatch(scope, ids, 1, services, mockRepository);
+    const first = await evaluateGestorRiskBatch(scope, ids, 1, mockRepository);
     expect(first.operationRows.length).toBeLessThanOrEqual(1);
     expect(first.operationRows.every((row) => scope.clientIds.includes(row.operation.clientId))).toBe(true);
     expect(first.riskCoverageComplete).toBe(false);
@@ -62,7 +54,6 @@ describe("carregamento progressivo do Gestor", () => {
       scope,
       relational.operations.slice(1, 2).map((operation) => operation.id),
       1,
-      services,
       mockRepository,
     );
     expect(second.operationRows.length).toBeGreaterThanOrEqual(first.operationRows.length);
@@ -78,8 +69,8 @@ describe("carregamento progressivo do Gestor", () => {
     expect(selectGestorPriorityOperationIds(operations, ["OP-1"], 2, false)).toEqual(["OP-1"]);
   });
 
-  test("fluxo legado mantém avaliação completa quando explicitamente solicitado", async () => {
-    const legacy = await loadGestorDashboardSnapshot(scope, mockRepository, mockRepository, services);
+  test("fluxo explícito mantém avaliação completa no repositório selecionado", async () => {
+    const legacy = await loadGestorDashboardSnapshot(scope, mockRepository, mockRepository);
     expect(legacy.machineRows.length).toBeGreaterThan(0);
     expect(legacy.riskCoverageComplete).toBe(true);
   });

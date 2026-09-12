@@ -15,7 +15,6 @@ import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/t
 import {
   buildFallbackOperationRiskContext,
   evaluateOperationRiskV2,
-  type OperationRiskExternalServices,
   type OperationRiskRelationalContext,
 } from "./risk-engine-v2/operation-input.server";
 import type { RiskResult } from "./risk-score";
@@ -320,7 +319,6 @@ async function buildSnapshot(
   degraded: boolean,
   engineWeights: RiskEngineV2Weights,
   operatorId: string,
-  externalServices?: OperationRiskExternalServices,
 ): Promise<OperadorDashboardSnapshot> {
   const phaseA = await buildOperadorDashboardPhaseA(
     relational, source, degraded, engineWeights, operatorId,
@@ -328,21 +326,18 @@ async function buildSnapshot(
   const { operation, machine, area, client } = phaseA;
   const context = relational.riskContexts?.find((item) => item.operation.id === operation.id)
     ?? buildFallbackOperationRiskContext(operation, machine, area, client);
-  return buildSnapshotFromPhaseA(phaseA, context, engineWeights, externalServices);
+  return buildSnapshotFromPhaseA(phaseA, context, engineWeights);
 }
 
 async function buildSnapshotFromPhaseA(
   phaseA: OperadorDashboardPhaseASnapshot,
   context: OperationRiskRelationalContext,
   engineWeights: RiskEngineV2Weights,
-  externalServices?: OperationRiskExternalServices,
 ): Promise<OperadorDashboardSnapshot> {
   const { operation } = phaseA;
   const evaluation = await evaluateOperationRiskV2(
     context,
     engineWeights,
-    externalServices,
-    { priority: "interactive" },
   );
   const result = evaluation.result;
   const risk = toPresentationRisk(result);
@@ -373,19 +368,18 @@ async function loadUncached(
   fallback: AgroRiskRepository,
   weights: RiskEngineV2Weights,
   operatorId: string,
-  externalServices?: OperationRiskExternalServices,
 ) {
   try {
     const relational = primary === postgresRepository
       ? await getOperatorRelationalScope(operatorId)
       : await readFallback(primary, operatorId);
-    return await buildSnapshot(relational, "postgres", false, weights, operatorId, externalServices);
+    return await buildSnapshot(relational, "postgres", false, weights, operatorId);
   } catch (error) {
     console.error("[operador-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
     const relational = await readFallback(fallback, operatorId);
-    return await buildSnapshot(relational, "mock", true, weights, operatorId, externalServices);
+    return await buildSnapshot(relational, "mock", true, weights, operatorId);
   }
 }
 
@@ -417,7 +411,6 @@ export async function evaluateOperadorDashboardRisk(
   operationId: string,
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
-  externalServices?: OperationRiskExternalServices,
 ): Promise<OperadorDashboardSnapshot> {
   const config = getRiskEngineV2Configuration();
   const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
@@ -445,7 +438,7 @@ export async function evaluateOperadorDashboardRisk(
       relational.areas[0]!,
       relational.clients[0]!,
     );
-  const evaluated = await buildSnapshotFromPhaseA(phaseA, context, weights, externalServices);
+  const evaluated = await buildSnapshotFromPhaseA(phaseA, context, weights);
   if (evaluated.operation.id !== operationId) {
     throw new Error("A operação avaliada não corresponde ao snapshot da Fase A.");
   }
@@ -456,12 +449,11 @@ export async function loadOperadorDashboardSnapshot(
   operatorId: string,
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
-  externalServices?: OperationRiskExternalServices,
 ): Promise<OperadorDashboardSnapshot> {
   const config = getRiskEngineV2Configuration();
   const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
-  if (primary !== postgresRepository || fallback !== mockRepository || externalServices) {
-    return loadUncached(primary, fallback, weights, operatorId, externalServices);
+  if (primary !== postgresRepository || fallback !== mockRepository) {
+    return loadUncached(primary, fallback, weights, operatorId);
   }
   const key = `operador-dashboard:v3:${operatorId}:${weights.ml}:${weights.operationalRules}`;
   const cached = cacheGet<OperadorDashboardSnapshot>(key);

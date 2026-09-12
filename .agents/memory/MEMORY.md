@@ -13,3 +13,4 @@
 - [Carregamento progressivo do Consultor](consultor-progressive-loading.md) — primeira tela traz relações do cliente inicial; V2 roda por cliente em lotes on-demand.
 - [Carregamento progressivo do Gestor](gestor-progressive-loading.md) — carteira relacional e alertas persistentes precedem V2; rankings avançam em lotes on-demand.
 - [Orquestração de carregamento](loading-orchestration.md) — somente IMMEDIATE, PRIORITY e ON_DEMAND; primeiro score unitário antes de qualquer demanda secundária.
+- [Inputs de risco preparados](prepared-risk-inputs.md) — providers rodam só na preparação; runtime recalcula o V2 com snapshots por operação, sem rede.

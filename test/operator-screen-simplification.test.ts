@@ -6,7 +6,6 @@ import {
 } from "../src/lib/data/postgres-repository.server";
 import { mockRepository } from "../src/lib/data/mock-repository.server";
 import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.server";
-import { testRiskExternalServices } from "./helpers/risk-external-services";
 
 afterAll(async () => {
   await closePostgresRepository();
@@ -15,7 +14,7 @@ afterAll(async () => {
 describe("Tela operacional simplificada", () => {
   test("mantém os mesmos dados centrais de Diego", async () => {
     const snapshot = await loadOperadorDashboardSnapshot(
-      "OPR-010", postgresRepository, mockRepository, testRiskExternalServices,
+      "OPR-010", postgresRepository, mockRepository,
     );
     expect(snapshot.operator).toMatchObject({ id: "OPR-010", name: "Diego Nunes" });
     expect(snapshot.operation).toMatchObject({

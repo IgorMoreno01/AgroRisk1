@@ -140,6 +140,22 @@ CREATE TABLE IF NOT EXISTS agrorisk.operations (
   UNIQUE (id, machine_id)
 );
 
+-- Inputs prepared outside the request path. No score, level, driver, or
+-- dominant component is stored here: those are always computed by the engine.
+CREATE TABLE IF NOT EXISTS agrorisk.operation_risk_input_snapshots (
+  operation_id text PRIMARY KEY
+    REFERENCES agrorisk.operations(id) ON DELETE CASCADE,
+  reference_date date NOT NULL,
+  ml_input jsonb NOT NULL,
+  operational_rules_input jsonb NOT NULL,
+  latitude double precision,
+  longitude double precision,
+  provenance jsonb NOT NULL DEFAULT '{}'::jsonb,
+  generated_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  version text NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS agrorisk.operation_risk_factors (
   operation_id text NOT NULL REFERENCES agrorisk.operations(id) ON DELETE CASCADE,
   risk_factor_id text NOT NULL REFERENCES agrorisk.risk_factors(id),
@@ -239,6 +255,10 @@ CREATE INDEX IF NOT EXISTS farms_client_idx ON agrorisk.farms(client_id);
 CREATE INDEX IF NOT EXISTS areas_client_farm_idx ON agrorisk.areas(client_id, farm_id);
 CREATE INDEX IF NOT EXISTS machines_client_area_idx ON agrorisk.machines(client_id, area_id);
 CREATE INDEX IF NOT EXISTS operations_client_area_machine_idx ON agrorisk.operations(client_id, area_id, machine_id);
+CREATE INDEX IF NOT EXISTS operation_risk_input_snapshots_reference_date_idx
+  ON agrorisk.operation_risk_input_snapshots(reference_date);
+CREATE INDEX IF NOT EXISTS operation_risk_input_snapshots_updated_at_idx
+  ON agrorisk.operation_risk_input_snapshots(updated_at DESC);
 CREATE INDEX IF NOT EXISTS alerts_operation_machine_idx ON agrorisk.alerts(operation_id, machine_id);
 CREATE INDEX IF NOT EXISTS history_operation_machine_idx ON agrorisk.operation_history(operation_id, machine_id);
 CREATE INDEX IF NOT EXISTS user_client_scopes_client_idx ON agrorisk.user_client_scopes(client_id);

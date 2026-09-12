@@ -9,7 +9,6 @@ import {
 import type { AgroRiskRepository } from "../src/lib/data/repository";
 import type { Alert, HistoryEntry } from "../src/lib/mock-data";
 import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.server";
-import { testRiskExternalServices } from "./helpers/risk-external-services";
 
 const failure = async () => {
   throw new Error("database unavailable");
@@ -40,7 +39,7 @@ const repositoryWithRecords = (
 describe("Migração do Operador para PostgreSQL", () => {
   test("carrega somente o contexto individual do operador determinístico", async () => {
     const snapshot = await loadOperadorDashboardSnapshot(
-      "OPR-001", postgresRepository, mockRepository, testRiskExternalServices,
+      "OPR-001", postgresRepository, mockRepository,
     );
     expect(snapshot.source).toBe("postgres");
     expect(snapshot.operator.id).toBe("OPR-001");
@@ -160,10 +159,8 @@ describe("Migração do Operador para PostgreSQL", () => {
 
   test("mantém igualdade com o Admin para a operação e máquina compartilhadas", async () => {
     const [operator, admin] = await Promise.all([
-      loadOperadorDashboardSnapshot(
-        "OPR-001", postgresRepository, mockRepository, testRiskExternalServices,
-      ),
-      loadAdminDashboardSnapshot(postgresRepository, mockRepository, testRiskExternalServices),
+      loadOperadorDashboardSnapshot("USR-OP-1", mockRepository, mockRepository),
+      loadAdminDashboardSnapshot(mockRepository, mockRepository),
     ]);
     const adminOperation = admin.operationRows.find((row) => row.operation.id === operator.operation.id);
     const adminMachine = admin.machineRows.find((row) => row.machine.id === operator.machine.id);

@@ -6,6 +6,7 @@ import type {
   Machine,
   Operation,
 } from "../mock-data";
+import type { PreparedOperationRiskInput } from "../risk-engine-v2/prepared-input";
 
 export interface AgroRiskRepository {
   listClients(): Promise<Client[]>;
@@ -18,6 +19,9 @@ export interface AgroRiskRepository {
   getArea(id: string): Promise<Area | undefined>;
   getMachine(id: string): Promise<Machine | undefined>;
   getOperation(id: string): Promise<Operation | undefined>;
+  /** Prepared inputs are optional for compatibility with scoped test stores. */
+  getOperationRiskInputSnapshot?(operationId: string): Promise<PreparedOperationRiskInput | undefined>;
+  upsertOperationRiskInputSnapshot?(snapshot: PreparedOperationRiskInput): Promise<void>;
 }
 
 export type AgroRiskDataSource = "mock" | "postgres";

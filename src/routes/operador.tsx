@@ -6,8 +6,6 @@ import { NextBestActionCard } from "@/components/next-best-action";
 import { CloudSun, Droplets, Mountain, Wind, type LucideIcon } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { ActionableAlertsList } from "@/components/actionable-alerts";
-import { getWeather } from "@/lib/api/weather.functions";
-import type { WeatherData } from "@/lib/external-data.types";
 import { getStoredSessionToken } from "@/lib/auth";
 import { evaluateOperadorRisk, getOperadorDashboard } from "@/lib/api/operador-dashboard.functions";
 import type {
@@ -34,11 +32,6 @@ function OperadorPage() {
   const [attempt, setAttempt] = useState(0);
   const [riskAttempt, setRiskAttempt] = useState(0);
   const riskRequestGeneration = useRef(0);
-
-  // O clima permanece disponível como resumo operacional; os demais dados
-  // externos continuam no backend, mas não são exibidos nesta persona.
-  const [weather, setWeather] = useState<WeatherData | null>(null);
-  const [loadingWeather, setLoadingWeather] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,15 +80,6 @@ function OperadorPage() {
       });
   }, [snapshot?.operation.id, riskAttempt]);
 
-  useEffect(() => {
-    if (!snapshot) return;
-    const coords = snapshot.geo;
-    getWeather({ data: { lat: coords.lat, lon: coords.lon } })
-      .then(setWeather)
-      .catch((e) => console.warn("[Operador] weather fetch failed:", e))
-      .finally(() => setLoadingWeather(false));
-  }, [snapshot?.geo.lat, snapshot?.geo.lon]);
-
   if (loadError) {
     return (
       <AppLayout title="Painel do Operador" subtitle="Contexto individual da operação">
@@ -125,16 +109,27 @@ function OperadorPage() {
   const score = scoreContext?.finalScore;
   const level = scoreContext?.level;
   const nextAction = riskSnapshot?.nextAction;
-  const climate = loadingWeather
-    ? { condition: "Carregando…", temperature: "—", precipitation: "—", wind: "—" }
-    : weather
-    ? {
-        condition: weather.current.conditionLabel,
-        temperature: `${Math.round(weather.current.temperature)}°C`,
-        precipitation: `${weather.current.precipitation.toFixed(1)} mm/h`,
-        wind: `${Math.round(weather.current.windSpeed)} km/h ${weather.current.windDirectionLabel}`,
-      }
-    : { condition: "Dados indisponíveis", temperature: "—", precipitation: "—", wind: "—" };
+  const preparedClimate = riskSnapshot?.evaluationContext.input.mlInput;
+  const hasPreparedClimate = preparedClimate && (
+    preparedClimate.TEMP_MEDIA_D1_C !== null ||
+    preparedClimate.PRECIPITACAO_D1_MM !== null ||
+    preparedClimate.VENTO_D1_MS !== null
+  );
+  const climate = {
+    condition: hasPreparedClimate ? "Dados históricos preparados" : "Dados indisponíveis",
+    temperature: preparedClimate?.TEMP_MEDIA_D1_C !== null &&
+      preparedClimate?.TEMP_MEDIA_D1_C !== undefined
+      ? `${Math.round(preparedClimate.TEMP_MEDIA_D1_C)}°C`
+      : "—",
+    precipitation: preparedClimate?.PRECIPITACAO_D1_MM !== null &&
+      preparedClimate?.PRECIPITACAO_D1_MM !== undefined
+      ? `${preparedClimate.PRECIPITACAO_D1_MM.toFixed(1)} mm`
+      : "—",
+    wind: preparedClimate?.VENTO_D1_MS !== null &&
+      preparedClimate?.VENTO_D1_MS !== undefined
+      ? `${preparedClimate.VENTO_D1_MS.toFixed(1)} m/s`
+      : "—",
+  };
 
   return (
     <AppLayout

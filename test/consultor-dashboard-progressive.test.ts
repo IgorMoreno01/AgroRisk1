@@ -6,7 +6,6 @@ import {
   loadConsultorDashboardSnapshot,
 } from "../src/lib/consultor-dashboard.server";
 import { mockRepository } from "../src/lib/data/mock-repository.server";
-import type { OperationRiskExternalServices } from "../src/lib/risk-engine-v2/operation-input.server";
 import { selectConsultorPriorityOperationIds } from "../src/lib/consultor-risk-selection";
 import type { Area, Machine, Operation } from "../src/lib/mock-data";
 
@@ -30,13 +29,6 @@ async function relationalFixture() {
     riskContexts: [],
   };
 }
-
-const deterministicServices: OperationRiskExternalServices = {
-  geocode: async () => ({ latitude: -23.5, longitude: -47.5, source: "test" }),
-  historicalWeather: async () => ({ precipitationMm: 2, temperatureC: 24, windSpeedKmh: 8, source: "test" }),
-  elevation: async () => ({ elevationM: 600, source: "test" }),
-  water: async () => ({ nearWater: false, distanceMeters: 900, source: "test" }),
-};
 
 describe("carregamento progressivo do Consultor", () => {
   test("Fase A entrega relações sem executar ou inventar scores", async () => {
@@ -69,7 +61,6 @@ describe("carregamento progressivo do Consultor", () => {
       client.id,
       operationIds,
       12,
-      deterministicServices,
       mockRepository,
     );
 
@@ -84,7 +75,6 @@ describe("carregamento progressivo do Consultor", () => {
       { userId: scope.userId, clientIds: [scope.clientIds[0]] },
       mockRepository,
       mockRepository,
-      deterministicServices,
     );
     const expected = full.clients[0].machines[0];
     const batch = await evaluateConsultorRiskBatch(
@@ -92,7 +82,6 @@ describe("carregamento progressivo do Consultor", () => {
       scope.clientIds[0],
       [expected.operation!.id],
       1,
-      deterministicServices,
       mockRepository,
     );
     const actual = batch.machines.find((row) => row.operation?.id === expected.operation?.id);

@@ -82,7 +82,6 @@ describe("orquestração controlada das personas", () => {
       operation.id,
       mockRepository,
       mockRepository,
-      { geocode: async () => null, historicalWeather: async () => null, elevation: async () => null, water: async () => null },
     );
     expect(snapshot.operation.id).toBe(operation.id);
     expect(snapshot.machine.id).toBe(operation.machineId);
@@ -100,12 +99,6 @@ describe("orquestração controlada das personas", () => {
       { userId: "GESTOR-ISOLAMENTO", clientIds: null },
       operations.slice(0, 2).map((operation) => operation.id),
       2,
-      {
-        geocode: async () => null,
-        historicalWeather: async () => null,
-        elevation: async () => null,
-        water: async () => null,
-      },
       repository,
     );
 

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   buildAdminDashboardSnapshot,
   buildAdminDashboardRelationalSnapshot,
-  memoizeAdminRiskServices,
   selectPrioritizedAdminOperations,
 } from "../src/lib/admin-dashboard.server";
 import { mergeAdminOperationRows } from "../src/lib/admin-dashboard-merge";
@@ -42,19 +43,12 @@ describe("Admin/Sompo fase A", () => {
       .toEqual([active.id]);
   });
 
-  test("deduplica Promises de contexto equivalente no batch", async () => {
-    let calls = 0;
-    const service = memoizeAdminRiskServices({
-      geocode: async () => { calls += 1; return { latitude: 1, longitude: 2, source: "geocoding" as const }; },
-      historicalWeather: async () => null,
-      elevation: async () => null,
-      water: async () => null,
-    });
-    await Promise.all([
-      service.geocode("Campinas", "SP"),
-      service.geocode("Campinas", "SP"),
-    ]);
-    expect(calls).toBe(1);
+  test("Phase A não importa adapters nem aceita serviços externos de risco", () => {
+    const source = readFileSync(resolve("src/lib/admin-dashboard.server.ts"), "utf8");
+    expect(source).not.toContain("/adapters/");
+    expect(source).not.toContain("OperationRiskExternalServices");
+    expect(source).not.toContain("externalServices");
+    expect(source).toContain("buildAdminDashboardRelationalSnapshot");
   });
 
   test("mantém agregados pendentes com cobertura parcial e recompõe o resultado completo sem alterar scores", async () => {
@@ -67,19 +61,11 @@ describe("Admin/Sompo fase A", () => {
     ]);
     const relational = { clients, areas, machines, operations, alerts };
     const weights = { ml: 70, operationalRules: 30 };
-    const services = {
-      geocode: async () => null,
-      historicalWeather: async () => null,
-      elevation: async () => null,
-      water: async () => null,
-    };
     const complete = await buildAdminDashboardSnapshot(
       relational,
       "mock",
       false,
       weights,
-      undefined,
-      services,
     );
     const relationalOnly = await buildAdminDashboardRelationalSnapshot(
       relational,

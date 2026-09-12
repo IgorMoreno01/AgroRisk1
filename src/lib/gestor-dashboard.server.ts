@@ -11,7 +11,6 @@ import {
 import {
   buildAdminDashboardRelationalSnapshot,
   buildAdminDashboardSnapshot,
-  memoizeAdminRiskServices,
 } from "./admin-dashboard.server";
 import { mergeAdminOperationRows } from "./admin-dashboard-merge";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
@@ -21,12 +20,7 @@ import type { GestorDashboardSnapshot } from "./gestor-dashboard-types";
 import {
   buildFallbackOperationRiskContext,
   evaluateOperationRiskV2,
-  type OperationRiskExternalServices,
 } from "./risk-engine-v2/operation-input.server";
-import { geocodeMunicipality } from "./adapters/location.server";
-import { getHistoricalClimate } from "./adapters/climate.server";
-import { getElevationForRisk } from "./adapters/terrain.server";
-import { getWaterGeo } from "./adapters/water-geo.server";
 import type { AdminOperationRow } from "./admin-dashboard-types";
 import type { Area, Client, Machine, Operation } from "./mock-data";
 import {
@@ -213,13 +207,12 @@ async function buildSnapshot(
   degraded: boolean,
   scope: GestorAccessScope,
   operationalOverview: GestorDashboardSnapshot["operationalOverview"],
-  externalServices?: OperationRiskExternalServices,
 ): Promise<GestorDashboardSnapshot> {
   const configuration = getRiskEngineV2Configuration();
   const base = await buildAdminDashboardSnapshot(relational, source, degraded, {
     ml: configuration.mlWeight,
     operationalRules: configuration.operationalRulesWeight,
-  }, undefined, externalServices);
+  });
   const scopedMachineIds = new Set(base.machines.map((machine) => machine.id));
   const scopedDemoAlerts = relational.alerts.filter((alert) => scopedMachineIds.has(alert.machineId));
   const machineRows = base.machineRows.map((row) => ({
@@ -272,10 +265,8 @@ async function loadUncached(
   primary: AgroRiskRepository,
   fallback: AgroRiskRepository,
   scope: GestorAccessScope,
-  externalServices?: OperationRiskExternalServices,
 ): Promise<GestorDashboardSnapshot> {
-  const progressive =
-    primary === postgresRepository && fallback === mockRepository && !externalServices;
+  const progressive = primary === postgresRepository && fallback === mockRepository;
   try {
     if (progressive) {
       const relational = await readGestorPhaseA(primary, scope);
@@ -286,12 +277,12 @@ async function loadUncached(
         readScoped(primary, scope),
         listGestorOperationalOverview(scope.clientIds),
       ]);
-      return await buildSnapshot(relational, "postgres", false, scope, operationalOverview, externalServices);
+      return await buildSnapshot(relational, "postgres", false, scope, operationalOverview);
     }
     return await buildSnapshot(await readScoped(primary, scope), "postgres", false, scope, {
       maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
       activity: [],
-    }, externalServices);
+      });
   } catch (error) {
     console.error("[gestor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
@@ -304,7 +295,7 @@ async function loadUncached(
     return await buildSnapshot(await readScoped(fallback, scope), "mock", true, scope, {
       maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
       activity: [],
-    }, externalServices);
+    });
   }
 }
 
@@ -312,10 +303,9 @@ export async function loadGestorDashboardSnapshot(
   scope: GestorAccessScope,
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
-  externalServices?: OperationRiskExternalServices,
 ): Promise<GestorDashboardSnapshot> {
-  if (primary !== postgresRepository || fallback !== mockRepository || externalServices) {
-    return loadUncached(primary, fallback, scope, externalServices);
+  if (primary !== postgresRepository || fallback !== mockRepository) {
+    return loadUncached(primary, fallback, scope);
   }
   const config = getRiskEngineV2Configuration();
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
@@ -339,13 +329,6 @@ const inFlight = new Map<string, Promise<GestorDashboardSnapshot>>();
 
 const gestorRiskBatchInFlight = new Map<string, Promise<GestorDashboardSnapshot>>();
 const gestorRowsByScope = new Map<string, { expiresAt: number; rows: AdminOperationRow[] }>();
-const gestorExternalServices: OperationRiskExternalServices = {
-  geocode: geocodeMunicipality,
-  historicalWeather: getHistoricalClimate,
-  elevation: getElevationForRisk,
-  water: getWaterGeo,
-};
-
 function snapshotWithRiskRows(
   base: GestorDashboardSnapshot,
   merged: Awaited<ReturnType<typeof buildAdminDashboardRelationalSnapshot>>,
@@ -377,7 +360,6 @@ export async function evaluateGestorRiskBatch(
   scope: GestorAccessScope,
   operationIds: readonly string[] = [],
   limit = GESTOR_RISK_BATCH_LIMIT,
-  externalServices?: OperationRiskExternalServices,
   repository: AgroRiskRepository = postgresRepository,
 ): Promise<GestorDashboardSnapshot> {
   const ids = [...new Set(operationIds)].slice(0, GESTOR_RISK_BATCH_LIMIT);
@@ -406,7 +388,6 @@ export async function evaluateGestorRiskBatch(
         : []
       ).map((context) => [context.operation.id, context]),
     );
-    const services = externalServices ?? gestorExternalServices;
     const settled = await Promise.allSettled(selected.map(async (operation) => {
       const context = contextByOperationId.get(operation.id) ?? buildFallbackOperationRiskContext(
         operation,
@@ -417,8 +398,6 @@ export async function evaluateGestorRiskBatch(
       const evaluation = await evaluateOperationRiskV2(
         context,
         weights,
-        services,
-        { priority: batchSize === 1 ? "interactive" : "background" },
       );
       return {
         operation,
@@ -450,7 +429,6 @@ export async function evaluateGestorRiskBatch(
       riskErrorsByOperationId,
     );
   };
-  if (externalServices) return run();
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
   const key = `${scope.userId}:${scopeKey}:${ids.slice().sort().join(",")}:${batchSize}:${weights.ml}:${weights.operationalRules}`;
   const pending = gestorRiskBatchInFlight.get(key);

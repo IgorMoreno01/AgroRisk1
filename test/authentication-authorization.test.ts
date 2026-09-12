@@ -7,9 +7,12 @@ import {
   getAccountClientScope,
 } from "../src/lib/auth-account.server";
 import { createSession, readSession } from "../src/lib/auth-session.server";
-import { loadAdminDashboardSnapshot } from "../src/lib/admin-dashboard.server";
-import { loadGestorDashboardSnapshot } from "../src/lib/gestor-dashboard.server";
-import { loadConsultorDashboardSnapshot } from "../src/lib/consultor-dashboard.server";
+import {
+  evaluateAdminDashboardRiskBatch,
+  loadAdminDashboardSnapshot,
+} from "../src/lib/admin-dashboard.server";
+import { evaluateGestorRiskBatch, loadGestorDashboardSnapshot } from "../src/lib/gestor-dashboard.server";
+import { evaluateConsultorRiskBatch, loadConsultorDashboardSnapshot } from "../src/lib/consultor-dashboard.server";
 import { loadOperadorDashboardSnapshot } from "../src/lib/operador-dashboard.server";
 import {
   closePostgresRepository,
@@ -17,7 +20,6 @@ import {
   postgresRepository,
 } from "../src/lib/data/postgres-repository.server";
 import { mockRepository } from "../src/lib/data/mock-repository.server";
-import { testRiskExternalServices } from "./helpers/risk-external-services";
 
 const seed = loadAccountsSeed();
 const account = (profile: "admin" | "gestor" | "consultor" | "operador", index = 0) =>
@@ -127,7 +129,6 @@ describe("Autenticação PostgreSQL e autorização por escopo", () => {
       { userId: candidate.id, clientIds },
       postgresRepository,
       mockRepository,
-      testRiskExternalServices,
     );
     const visible = new Set(snapshot.clients.map((client) => client.id));
     expect(visible).toEqual(new Set(clientIds));
@@ -144,7 +145,6 @@ describe("Autenticação PostgreSQL e autorização por escopo", () => {
       { userId: candidate.id, clientIds },
       postgresRepository,
       mockRepository,
-      testRiskExternalServices,
     );
     const visible = new Set(snapshot.clients.map((view) => view.client.id));
     expect(visible).toEqual(new Set(clientIds));
@@ -164,7 +164,6 @@ describe("Autenticação PostgreSQL e autorização por escopo", () => {
       authenticated.account.linkedOperatorId,
       postgresRepository,
       mockRepository,
-      testRiskExternalServices,
     );
     const other = await getOperatorRelationalScope("OPR-002");
     expect(snapshot.operator.id).toBe(candidate.id);
@@ -177,41 +176,43 @@ describe("Autenticação PostgreSQL e autorização por escopo", () => {
     const manager = account("gestor");
     const consultant = account("consultor");
     const operator = account("operador");
-    const [admin, gestor, consultor, operador] = await Promise.all([
-      loadAdminDashboardSnapshot(postgresRepository, mockRepository, testRiskExternalServices),
-      getAccountClientScope(manager.id).then((clientIds) =>
-        loadGestorDashboardSnapshot(
-          { userId: manager.id, clientIds },
-          postgresRepository,
-          mockRepository,
-          testRiskExternalServices,
-        )
+    const operador = await loadOperadorDashboardSnapshot(
+      operator.linked_operator_id!,
+      postgresRepository,
+      mockRepository,
+    );
+    const operationId = operador.operation.id;
+    const [managerClientIds, consultantClientIds] = await Promise.all([
+      getAccountClientScope(manager.id),
+      getAccountClientScope(consultant.id),
+    ]);
+    expect(managerClientIds).toContain(operador.operation.clientId);
+    expect(consultantClientIds).toContain(operador.operation.clientId);
+    const [adminRows, gestor, consultor] = await Promise.all([
+      evaluateAdminDashboardRiskBatch([operationId], 1),
+      evaluateGestorRiskBatch(
+        { userId: manager.id, clientIds: managerClientIds },
+        [operationId],
+        1,
       ),
-      getAccountClientScope(consultant.id).then((clientIds) =>
-        loadConsultorDashboardSnapshot(
-          { userId: consultant.id, clientIds },
-          postgresRepository,
-          mockRepository,
-          testRiskExternalServices,
-        )
-      ),
-      loadOperadorDashboardSnapshot(
-        operator.linked_operator_id!,
-        postgresRepository,
-        mockRepository,
-        testRiskExternalServices,
+      evaluateConsultorRiskBatch(
+        { userId: consultant.id, clientIds: consultantClientIds },
+        operador.operation.clientId,
+        [operationId],
+        1,
       ),
     ]);
-    for (const row of gestor.machineRows) {
-      expect(row.score).toBe(admin.machineRows.find((item) => item.machine.id === row.machine.id)?.score);
-    }
-    for (const view of consultor.clients) {
-      for (const row of view.machines) {
-        expect(row.score).toBe(admin.machineRows.find((item) => item.machine.id === row.machine.id)?.score);
-      }
-    }
-    expect(operador.risk.finalScore).toBe(
-      admin.operationRows.find((row) => row.operation.id === operador.operation.id)?.score,
-    );
+    const adminRow = adminRows.find((row) => row.operation.id === operationId);
+    const gestorRow = gestor.operationRows.find((row) => row.operation.id === operationId);
+    const consultorRow = consultor.machines.find((row) => row.operation?.id === operationId);
+    expect(adminRow).toBeDefined();
+    expect(gestorRow).toBeDefined();
+    expect(consultorRow).toBeDefined();
+    expect(adminRow!.score).toBe(operador.risk.finalScore);
+    expect(gestorRow!.score).toBe(adminRow!.score);
+    expect(consultorRow!.score).toBe(adminRow!.score);
+    expect(gestorRow!.evaluation.input).toEqual(adminRow!.evaluation.input);
+    expect(consultorRow!.evaluation.input).toEqual(adminRow!.evaluation.input);
+    expect(operador.evaluationContext.input).toEqual(adminRow!.evaluation.input);
   });
 });
