@@ -9,12 +9,13 @@ import {
   postgresRepository,
 } from "./data/postgres-repository.server";
 import {
+  assertOperationClientCoherence,
   buildAdminDashboardRelationalSnapshot,
   buildAdminDashboardSnapshot,
   selectPrioritizedAdminOperations,
 } from "./admin-dashboard.server";
 import { mergeAdminOperationRows } from "./admin-dashboard-merge";
-import { getRiskEngineV2Configuration } from "./risk-config.server";
+import { resolveRiskEngineV2Weights } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
 import {
@@ -177,13 +178,21 @@ async function buildSnapshot(
   degraded: boolean,
   weights: RiskEngineV2Weights,
   scope: ConsultorAccessScope,
+  repository: AgroRiskRepository,
   preventiveOverview: ConsultorPreventiveOverview = {
     maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
     attentionPoints: [],
   },
 ) {
+  const resolved = await Promise.all(
+    [...new Set(relational.operations.map((operation) => operation.clientId))]
+      .map(async (clientId) => [clientId, await resolveRiskEngineV2Weights(clientId, repository)] as const),
+  );
+  const effectiveWeightsByClientId = new Map(
+    resolved.map(([clientId, configuration]) => [clientId, configuration.weights]),
+  );
   const base = await buildAdminDashboardSnapshot(
-    relational, source, degraded, weights,
+    relational, source, degraded, weights, undefined, effectiveWeightsByClientId,
   );
   const resultByMachine = new Map<string, RiskEngineV2Result>();
   base.machineRows.forEach((row) => {
@@ -231,11 +240,12 @@ export async function buildConsultorRelationalSnapshot(
 async function loadUncached(
   primary: AgroRiskRepository,
   fallback: AgroRiskRepository,
-  weights: RiskEngineV2Weights,
   scope: ConsultorAccessScope,
 ): Promise<ConsultorDashboardSnapshot> {
   const progressive = primary === postgresRepository && fallback === mockRepository;
   try {
+    const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
+    const weights = globalConfiguration.weights;
     if (progressive) {
       const relational = await listConsultorRelationalPhaseA(scope.clientIds);
       return await buildConsultorRelationalSnapshot(
@@ -252,13 +262,16 @@ async function loadUncached(
           }),
     ]);
     return await buildSnapshot(
-      relational, "postgres", false, weights, scope, preventiveOverview,
+      relational, "postgres", false, weights, scope, primary, preventiveOverview,
     );
   } catch (error) {
+    if (error instanceof RangeError) throw error;
     console.error("[consultor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
     let relational = await readScope(fallback, scope);
+    const fallbackConfiguration = await resolveRiskEngineV2Weights(undefined, fallback);
+    const weights = fallbackConfiguration.weights;
     if (progressive) {
       relational = {
         ...relational,
@@ -267,7 +280,7 @@ async function loadUncached(
     }
     return progressive
       ? await buildConsultorRelationalSnapshot(relational, "mock", true, weights, scope)
-      : await buildSnapshot(relational, "mock", true, weights, scope);
+      : await buildSnapshot(relational, "mock", true, weights, scope, fallback);
   }
 }
 
@@ -276,16 +289,21 @@ export async function loadConsultorDashboardSnapshot(
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
 ): Promise<ConsultorDashboardSnapshot> {
-  const config = getRiskEngineV2Configuration();
-  const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
   if (primary !== postgresRepository || fallback !== mockRepository) {
-    return loadUncached(primary, fallback, weights, scope);
+    return loadUncached(primary, fallback, scope);
+  }
+  let globalConfiguration;
+  try {
+    globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
+  } catch (error) {
+    if (error instanceof RangeError) throw error;
+    return loadUncached(primary, fallback, scope);
   }
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
-  const key = `consultor-dashboard:v4:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
+  const key = `consultor-dashboard:v5:${scope.userId}:${scopeKey}:${globalConfiguration.cacheSignature}`;
   const pending = inFlight.get(key);
   if (pending) return pending;
-  const request = cacheOrFetch(key, 15, () => loadUncached(primary, fallback, weights, scope));
+  const request = cacheOrFetch(key, 15, () => loadUncached(primary, fallback, scope));
   inFlight.set(key, request);
   try { return await request; } finally { inFlight.delete(key); }
 }
@@ -311,12 +329,12 @@ export async function evaluateConsultorRiskBatch(
     throw new Error("Cliente fora do escopo autorizado.");
   }
   const ids = [...new Set(operationIds)].slice(0, 12);
-  const config = getRiskEngineV2Configuration();
-  const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
+  const relational = await readScope(repository, scope, false);
+  const client = relational.clients.find((item) => item.id === clientId);
+  if (!client) throw new Error("Cliente fora do escopo autorizado.");
+  const effectiveConfiguration = await resolveRiskEngineV2Weights(client.id, repository);
+  const weights = effectiveConfiguration.weights;
   const run = async () => {
-    const relational = await readScope(repository, scope, false);
-    const client = relational.clients.find((item) => item.id === clientId);
-    if (!client) throw new Error("Cliente fora do escopo autorizado.");
     const clientOperations = relational.operations.filter((operation) => operation.clientId === clientId);
     const selected = selectPrioritizedAdminOperations(
       clientOperations,
@@ -351,6 +369,7 @@ export async function evaluateConsultorRiskBatch(
         areaById.get(operation.areaId)!,
         clientById.get(operation.clientId)!,
       );
+      assertOperationClientCoherence(operation, context);
       const evaluation = await evaluateOperationRiskV2(
         context,
         weights,
@@ -369,7 +388,7 @@ export async function evaluateConsultorRiskBatch(
         ? [[selected[index].id, result.reason instanceof Error ? result.reason.message : "Não foi possível calcular o risco."]]
         : [],
     ));
-    const accumulatedKey = `${scope.userId}:${clientId}:${weights.ml}:${weights.operationalRules}`;
+    const accumulatedKey = `${scope.userId}:${effectiveConfiguration.cacheSignature}`;
     const previous = consultorRowsByClient.get(accumulatedKey);
     const accumulated = previous && previous.expiresAt > Date.now()
       ? [...new Map([...previous.rows, ...rows].map((row) => [row.operation.id, row])).values()]
@@ -380,7 +399,7 @@ export async function evaluateConsultorRiskBatch(
     merged.machineRows.forEach((row) => resultByMachine.set(row.machine.id, row.evaluation.result));
     return { ...buildClientView(client, merged, resultByMachine, relational.alerts), riskErrorsByOperationId };
   };
-  const key = `${scope.userId}:${clientId}:${ids.slice().sort().join(",")}:${Math.min(limit, 12)}:${weights.ml}:${weights.operationalRules}`;
+  const key = `${scope.userId}:${clientId}:${ids.slice().sort().join(",")}:${Math.min(limit, 12)}:${effectiveConfiguration.cacheSignature}`;
   const pending = consultorBatchInFlight.get(key);
   if (pending) return pending;
   const request = run();

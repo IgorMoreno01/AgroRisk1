@@ -8,7 +8,7 @@ import {
   postgresRepository,
 } from "./data/postgres-repository.server";
 import { cacheOrFetch } from "./cache.server";
-import { getRiskEngineV2Configuration } from "./risk-config.server";
+import { resolveRiskEngineV2Weights } from "./risk-config.server";
 import {
   buildFallbackOperationRiskContext,
   evaluateOperationRiskV2,
@@ -89,6 +89,33 @@ const adminRiskBatchInFlight = new Map<string, Promise<AdminRiskBatchEvaluation>
 const adminSnapshotInFlight = new Map<string, Promise<AdminDashboardSnapshot>>();
 export const ADMIN_RISK_BATCH_LIMIT = 20;
 
+export function assertOperationClientCoherence(
+  operation: Operation,
+  context: OperationRiskRelationalContext,
+): void {
+  const clientId = operation.clientId;
+  if (
+    context.operation.clientId !== clientId ||
+    context.machine.clientId !== clientId ||
+    context.area.clientId !== clientId ||
+    context.client.id !== clientId
+  ) {
+    throw new Error(`Contexto relacional incoerente para a operação ${operation.id}.`);
+  }
+}
+
+async function resolveWeightsByClientId(
+  clientIds: readonly string[],
+  repository: AgroRiskRepository,
+) {
+  return new Map(await Promise.all(
+    [...new Set(clientIds)].map(async (clientId) => [
+      clientId,
+      await resolveRiskEngineV2Weights(clientId, repository),
+    ] as const),
+  ));
+}
+
 export function selectPrioritizedAdminOperations(
   operations: readonly Operation[],
   operationIds: readonly string[] = [],
@@ -109,20 +136,31 @@ export function selectPrioritizedAdminOperations(
 export async function evaluateAdminDashboardRiskBatchDetails(
   operationIds: readonly string[] = [],
   limit = 12,
+  repository: AgroRiskRepository = postgresRepository,
 ): Promise<AdminRiskBatchEvaluation> {
   const ids = [...new Set(operationIds)].slice(0, ADMIN_RISK_BATCH_LIMIT);
   const batchSize = Math.max(1, Math.min(limit, ADMIN_RISK_BATCH_LIMIT));
-  const configuration = getRiskEngineV2Configuration();
-  const weights = { ml: configuration.mlWeight, operationalRules: configuration.operationalRulesWeight };
+  const relational = await readRepository(repository, false);
+  const selected = selectPrioritizedAdminOperations(relational.operations, ids, batchSize);
+  const effectiveByClientId = await resolveWeightsByClientId(
+    selected.map((operation) => operation.clientId),
+    repository,
+  );
+  const configurationSignature = [...effectiveByClientId.values()]
+    .map((resolved) => resolved.cacheSignature)
+    .sort()
+    .join("|");
   const run = async () => {
-    const relational = await readRepository(postgresRepository, false);
-    const selected = selectPrioritizedAdminOperations(relational.operations, ids, batchSize);
     const clientById = new Map(relational.clients.map((client) => [client.id, client]));
     const areaById = new Map(relational.areas.map((area) => [area.id, area]));
     const machineById = new Map(relational.machines.map((machine) => [machine.id, machine]));
-    const contextByOperationId = new Map((await listOperationRiskContexts({
-      operationIds: selected.map((operation) => operation.id),
-    })).map((context) => [context.operation.id, context]));
+    const contextByOperationId = new Map((
+      repository === postgresRepository
+        ? await listOperationRiskContexts({
+            operationIds: selected.map((operation) => operation.id),
+          })
+        : []
+    ).map((context) => [context.operation.id, context]));
     const settled = await Promise.allSettled(selected.map(async (operation) => {
       const context = contextByOperationId.get(operation.id) ??
         buildFallbackOperationRiskContext(
@@ -131,6 +169,9 @@ export async function evaluateAdminDashboardRiskBatchDetails(
           areaById.get(operation.areaId)!,
           clientById.get(operation.clientId)!,
         );
+      assertOperationClientCoherence(operation, context);
+      const weights = effectiveByClientId.get(operation.clientId)?.weights;
+      if (!weights) throw new Error(`Pesos não resolvidos para o cliente ${operation.clientId}.`);
       const evaluation = await evaluateOperationRiskV2(
         context,
         weights,
@@ -146,7 +187,7 @@ export async function evaluateAdminDashboardRiskBatchDetails(
       )),
     };
   };
-  const key = `${ids.slice().sort().join(",")}:${batchSize}:${weights.ml}:${weights.operationalRules}`;
+  const key = `${ids.slice().sort().join(",")}:${batchSize}:${configurationSignature}`;
   const existing = adminRiskBatchInFlight.get(key);
   if (existing) return existing;
   const promise = run();
@@ -162,8 +203,11 @@ export async function evaluateAdminDashboardRiskBatchDetails(
 export async function evaluateAdminDashboardRiskBatch(
   operationIds: readonly string[] = [],
   limit = 12,
+  repository: AgroRiskRepository = postgresRepository,
 ): Promise<AdminOperationRow[]> {
-  return (await evaluateAdminDashboardRiskBatchDetails(operationIds, limit)).operationRows;
+  return (
+    await evaluateAdminDashboardRiskBatchDetails(operationIds, limit, repository)
+  ).operationRows;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -192,7 +236,12 @@ export async function buildAdminDashboardSnapshot(
     maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
     activity: [],
   },
+  effectiveWeightsByClientId: ReadonlyMap<string, RiskEngineV2Weights> | unknown = new Map(),
 ): Promise<AdminDashboardSnapshot> {
+  const clientWeightMap =
+    effectiveWeightsByClientId instanceof Map
+      ? effectiveWeightsByClientId as ReadonlyMap<string, RiskEngineV2Weights>
+      : new Map<string, RiskEngineV2Weights>();
   const clientById = new Map(relational.clients.map((client) => [client.id, client]));
   const areaById = new Map(relational.areas.map((area) => [area.id, area]));
   const machineById = new Map(relational.machines.map((machine) => [machine.id, machine]));
@@ -223,7 +272,9 @@ export async function buildAdminDashboardSnapshot(
         areaById.get(operation.areaId)!,
         clientById.get(operation.clientId)!,
       );
-       const evaluation = await evaluateOperationRiskV2(context, weights);
+      assertOperationClientCoherence(operation, context);
+      const operationWeights = clientWeightMap.get(operation.clientId) ?? weights;
+      const evaluation = await evaluateOperationRiskV2(context, operationWeights);
       return { operation, evaluation, ...toEntityRisk(evaluation.result) };
     },
   );
@@ -385,14 +436,10 @@ export async function loadAdminDashboardSnapshot(
   primary: AgroRiskRepository = postgresRepository,
   fallback: AgroRiskRepository = mockRepository,
 ): Promise<AdminDashboardSnapshot> {
-  const configuration = getRiskEngineV2Configuration();
-  const weights = {
-    ml: configuration.mlWeight,
-    operationalRules: configuration.operationalRulesWeight,
-  };
-
   const load = async () => {
     try {
+      const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
+      const weights = globalConfiguration.weights;
       const useProgressiveAdminLoad =
         primary === postgresRepository && fallback === mockRepository;
       const [relational, operationalOverview] = await Promise.all([
@@ -404,30 +451,57 @@ export async function loadAdminDashboardSnapshot(
       // Explicit service injection is retained for integrations/tests that
       // need the complete legacy snapshot. Production Admin loads relational
       // data first and evaluates only through the authenticated batch API.
+      const effectiveByClientId = useProgressiveAdminLoad
+        ? new Map()
+        : new Map(
+            [...(await resolveWeightsByClientId(
+              relational.operations.map((operation) => operation.clientId),
+              primary,
+            )).entries()].map(([clientId, resolved]) => [clientId, resolved.weights]),
+          );
       return useProgressiveAdminLoad
         ? await buildAdminDashboardRelationalSnapshot(
             relational, "postgres", false, weights, operationalOverview,
           )
         : await buildAdminDashboardSnapshot(
-            relational, "postgres", false, weights, operationalOverview,
+            relational, "postgres", false, weights, operationalOverview, effectiveByClientId,
           );
     } catch (error) {
+      if (error instanceof RangeError) throw error;
       console.error("[admin-dashboard] PostgreSQL indisponível; usando fallback mock.", {
         error: error instanceof Error ? error.message : "Erro desconhecido",
       });
       // Custom repositories/services retain the legacy contract. Only the
       // production postgres+mock path uses the relational Phase A fallback.
       if (primary !== postgresRepository || fallback !== mockRepository) {
+        const relational = await readRepository(fallback);
+        const fallbackGlobal = await resolveRiskEngineV2Weights(undefined, fallback);
+        const effectiveByClientId = new Map(
+          [...(await resolveWeightsByClientId(
+            relational.operations.map((operation) => operation.clientId),
+            fallback,
+          )).entries()].map(([clientId, resolved]) => [clientId, resolved.weights]),
+        );
         return await buildAdminDashboardSnapshot(
-          await readRepository(fallback), "mock", true, weights,
+          relational, "mock", true, fallbackGlobal.weights, undefined, effectiveByClientId,
         );
       }
-      return await buildAdminDashboardRelationalSnapshot(await readRepository(fallback), "mock", true, weights);
+      const fallbackGlobal = await resolveRiskEngineV2Weights(undefined, fallback);
+      return await buildAdminDashboardRelationalSnapshot(
+        await readRepository(fallback), "mock", true, fallbackGlobal.weights,
+      );
     }
   };
   if (primary !== postgresRepository || fallback !== mockRepository) return load();
 
-  const cacheKey = `admin-dashboard:v2:${configuration.mlWeight}:${configuration.operationalRulesWeight}:postgres:relational`;
+  let globalConfiguration;
+  try {
+    globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
+  } catch (error) {
+    if (error instanceof RangeError) throw error;
+    return load();
+  }
+  const cacheKey = `admin-dashboard:v3:${globalConfiguration.cacheSignature}:postgres:relational`;
   const existing = adminSnapshotInFlight.get(cacheKey);
   if (existing) return existing;
   const promise = cacheOrFetch(cacheKey, 15, load);

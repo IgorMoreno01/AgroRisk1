@@ -4,7 +4,8 @@ import {
   type RiskWeights,
 } from "./risk-score";
 import { postgresRepository } from "./data/postgres-repository.server";
-import type { RiskWeightConfigurationRepository } from "./data/repository";
+import type { AgroRiskRepository, RiskWeightConfigurationRepository } from "./data/repository";
+import type { RiskEngineV2Weights } from "./risk-engine-v2/types";
 import {
   assertValidRiskWeightValues,
   type EffectiveRiskWeightConfiguration,
@@ -132,6 +133,48 @@ export async function resolveEffectiveRiskWeights(
   repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
 ): Promise<EffectiveRiskWeightConfiguration> {
   return repository.resolveEffectiveRiskWeights(clientId);
+}
+
+export interface ResolvedRiskEngineV2Weights {
+  weights: RiskEngineV2Weights;
+  source: EffectiveRiskWeightConfiguration["source"];
+  revision: number | null;
+  cacheSignature: string;
+}
+
+export async function resolveRiskEngineV2Weights(
+  clientId: string | undefined,
+  repository: AgroRiskRepository = postgresRepository,
+): Promise<ResolvedRiskEngineV2Weights> {
+  const effective = repository.resolveEffectiveRiskWeights
+    ? await repository.resolveEffectiveRiskWeights(clientId)
+    : {
+        weights: {
+          mlWeight: DEFAULT_RISK_ENGINE_V2_CONFIGURATION.mlWeight,
+          operationalRulesWeight:
+            DEFAULT_RISK_ENGINE_V2_CONFIGURATION.operationalRulesWeight,
+        },
+        source: "default" as const,
+        revision: null,
+        updatedAt: null,
+      };
+  assertValidRiskWeightValues(effective.weights);
+  const weights = {
+    ml: effective.weights.mlWeight,
+    operationalRules: effective.weights.operationalRulesWeight,
+  };
+  return {
+    weights,
+    source: effective.source,
+    revision: effective.revision,
+    cacheSignature: [
+      clientId ?? "global",
+      effective.source,
+      effective.revision ?? "default",
+      weights.ml,
+      weights.operationalRules,
+    ].join(":"),
+  };
 }
 
 export async function saveRiskEngineV2Configuration(

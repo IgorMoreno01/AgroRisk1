@@ -9,11 +9,12 @@ import {
   listOperationRiskContexts,
 } from "./data/postgres-repository.server";
 import {
+  assertOperationClientCoherence,
   buildAdminDashboardRelationalSnapshot,
   buildAdminDashboardSnapshot,
 } from "./admin-dashboard.server";
 import { mergeAdminOperationRows } from "./admin-dashboard-merge";
-import { getRiskEngineV2Configuration } from "./risk-config.server";
+import { resolveRiskEngineV2Weights } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
 import type { GeneratedRecommendation, RecCategory } from "./recommendations";
 import type { GestorDashboardSnapshot } from "./gestor-dashboard-types";
@@ -21,6 +22,7 @@ import {
   buildFallbackOperationRiskContext,
   evaluateOperationRiskV2,
 } from "./risk-engine-v2/operation-input.server";
+import type { RiskEngineV2Weights } from "./risk-engine-v2/types";
 import type { AdminOperationRow } from "./admin-dashboard-types";
 import type { Area, Client, Machine, Operation } from "./mock-data";
 import {
@@ -95,10 +97,7 @@ export async function buildGestorRelationalSnapshot(
   source: "postgres" | "mock",
   degraded: boolean,
   scope: GestorAccessScope,
-  weights = (() => {
-    const config = getRiskEngineV2Configuration();
-    return { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
-  })(),
+  weights: RiskEngineV2Weights = { ml: 70, operationalRules: 30 },
   operationalOverview: GestorDashboardSnapshot["operationalOverview"] = emptyOperationalOverview,
 ): Promise<GestorDashboardSnapshot> {
   const counts = alertCounts(relational.alerts);
@@ -207,12 +206,24 @@ async function buildSnapshot(
   degraded: boolean,
   scope: GestorAccessScope,
   operationalOverview: GestorDashboardSnapshot["operationalOverview"],
+  repository: AgroRiskRepository,
 ): Promise<GestorDashboardSnapshot> {
-  const configuration = getRiskEngineV2Configuration();
-  const base = await buildAdminDashboardSnapshot(relational, source, degraded, {
-    ml: configuration.mlWeight,
-    operationalRules: configuration.operationalRulesWeight,
-  });
+  const resolved = await Promise.all(
+    [...new Set(relational.operations.map((operation) => operation.clientId))]
+      .map(async (clientId) => [clientId, await resolveRiskEngineV2Weights(clientId, repository)] as const),
+  );
+  const effectiveWeightsByClientId = new Map(
+    resolved.map(([clientId, configuration]) => [clientId, configuration.weights]),
+  );
+  const globalConfiguration = await resolveRiskEngineV2Weights(undefined, repository);
+  const base = await buildAdminDashboardSnapshot(
+    relational,
+    source,
+    degraded,
+    globalConfiguration.weights,
+    undefined,
+    effectiveWeightsByClientId,
+  );
   const scopedMachineIds = new Set(base.machines.map((machine) => machine.id));
   const scopedDemoAlerts = relational.alerts.filter((alert) => scopedMachineIds.has(alert.machineId));
   const machineRows = base.machineRows.map((row) => ({
@@ -269,33 +280,42 @@ async function loadUncached(
   const progressive = primary === postgresRepository && fallback === mockRepository;
   try {
     if (progressive) {
+      const globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
       const relational = await readGestorPhaseA(primary, scope);
-      return await buildGestorRelationalSnapshot(relational, "postgres", false, scope);
+      return await buildGestorRelationalSnapshot(
+        relational, "postgres", false, scope, globalConfiguration.weights,
+      );
     }
     if (primary === postgresRepository) {
       const [relational, operationalOverview] = await Promise.all([
         readScoped(primary, scope),
         listGestorOperationalOverview(scope.clientIds),
       ]);
-      return await buildSnapshot(relational, "postgres", false, scope, operationalOverview);
+      return await buildSnapshot(relational, "postgres", false, scope, operationalOverview, primary);
     }
     return await buildSnapshot(await readScoped(primary, scope), "postgres", false, scope, {
       maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
       activity: [],
-      });
+      }, primary);
   } catch (error) {
+    if (error instanceof RangeError) throw error;
     console.error("[gestor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
     if (progressive) {
+      const fallbackConfiguration = await resolveRiskEngineV2Weights(undefined, fallback);
       return await buildGestorRelationalSnapshot(
-        await readGestorPhaseA(fallback, scope), "mock", true, scope,
+        await readGestorPhaseA(fallback, scope),
+        "mock",
+        true,
+        scope,
+        fallbackConfiguration.weights,
       );
     }
     return await buildSnapshot(await readScoped(fallback, scope), "mock", true, scope, {
       maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
       activity: [],
-    });
+    }, fallback);
   }
 }
 
@@ -307,9 +327,15 @@ export async function loadGestorDashboardSnapshot(
   if (primary !== postgresRepository || fallback !== mockRepository) {
     return loadUncached(primary, fallback, scope);
   }
-  const config = getRiskEngineV2Configuration();
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
-   const key = `gestor-dashboard:v5:phase-a:${scope.userId}:${scopeKey}:${config.mlWeight}:${config.operationalRulesWeight}`;
+  let globalConfiguration;
+  try {
+    globalConfiguration = await resolveRiskEngineV2Weights(undefined, primary);
+  } catch (error) {
+    if (error instanceof RangeError) throw error;
+    return loadUncached(primary, fallback, scope);
+  }
+  const key = `gestor-dashboard:v6:phase-a:${scope.userId}:${scopeKey}:${globalConfiguration.cacheSignature}`;
   const pending = inFlight.get(key);
   if (pending) return pending;
   const request = cacheOrFetch(
@@ -364,20 +390,28 @@ export async function evaluateGestorRiskBatch(
 ): Promise<GestorDashboardSnapshot> {
   const ids = [...new Set(operationIds)].slice(0, GESTOR_RISK_BATCH_LIMIT);
   const batchSize = Math.max(1, Math.min(limit, GESTOR_RISK_BATCH_LIMIT));
-  const configuration = getRiskEngineV2Configuration();
-  const weights = { ml: configuration.mlWeight, operationalRules: configuration.operationalRulesWeight };
   const source = repository === postgresRepository ? "postgres" : "mock";
+  const relational = await readGestorPhaseA(repository, scope);
+  const selectedIds = selectGestorPriorityOperationIds(
+    relational.operations, ids, batchSize, ids.length === 0,
+  );
+  const selected = relational.operations.filter((operation) => selectedIds.includes(operation.id));
+  const resolvedByClientId = new Map(await Promise.all(
+    [...new Set(relational.operations.map((operation) => operation.clientId))].map(
+      async (clientId) => [clientId, await resolveRiskEngineV2Weights(clientId, repository)] as const,
+    ),
+  ));
+  const configurationSignature = [...resolvedByClientId.values()]
+    .map((configuration) => configuration.cacheSignature)
+    .sort()
+    .join("|");
+  const globalConfiguration = await resolveRiskEngineV2Weights(undefined, repository);
   const run = async () => {
-    const relational = await readGestorPhaseA(repository, scope);
-    const selectedIds = selectGestorPriorityOperationIds(
-      relational.operations, ids, batchSize, ids.length === 0,
-    );
-    const selected = relational.operations.filter((operation) => selectedIds.includes(operation.id));
     const relationalSnapshot = await buildGestorRelationalSnapshot(
-      relational, source, false, scope, weights,
+      relational, source, false, scope, globalConfiguration.weights,
     );
     const adminBase = await buildAdminDashboardRelationalSnapshot(
-      relational, source, false, weights,
+      relational, source, false, globalConfiguration.weights,
     );
     const clients = new Map(relational.clients.map((client) => [client.id, client]));
     const areas = new Map(relational.areas.map((area) => [area.id, area]));
@@ -395,9 +429,11 @@ export async function evaluateGestorRiskBatch(
         areas.get(operation.areaId)!,
         clients.get(operation.clientId)!,
       );
+      assertOperationClientCoherence(operation, context);
       const evaluation = await evaluateOperationRiskV2(
         context,
-        weights,
+        resolvedByClientId.get(operation.clientId)?.weights
+          ?? (() => { throw new Error(`Pesos não resolvidos para ${operation.clientId}.`); })(),
       );
       return {
         operation,
@@ -414,7 +450,7 @@ export async function evaluateGestorRiskBatch(
         : [],
     ));
     const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
-    const accumulatedKey = `${scope.userId}:${scopeKey}:${weights.ml}:${weights.operationalRules}`;
+    const accumulatedKey = `${scope.userId}:${scopeKey}:${configurationSignature}`;
     const previous = gestorRowsByScope.get(accumulatedKey);
     const accumulated = previous && previous.expiresAt > Date.now()
       ? [...new Map([...previous.rows, ...rows].map((row) => [row.operation.id, row])).values()]
@@ -430,7 +466,7 @@ export async function evaluateGestorRiskBatch(
     );
   };
   const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
-  const key = `${scope.userId}:${scopeKey}:${ids.slice().sort().join(",")}:${batchSize}:${weights.ml}:${weights.operationalRules}`;
+  const key = `${scope.userId}:${scopeKey}:${ids.slice().sort().join(",")}:${batchSize}:${configurationSignature}`;
   const pending = gestorRiskBatchInFlight.get(key);
   if (pending) return pending;
   const request = run();
