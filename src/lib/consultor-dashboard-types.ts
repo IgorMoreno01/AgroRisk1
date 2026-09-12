@@ -1,4 +1,4 @@
-import type { Alert, Client } from "./mock-data";
+import type { Alert, Area, Client, Machine, Operation } from "./mock-data";
 import type { AdminAreaRow, AdminClientRow, AdminMachineRow } from "./admin-dashboard-types";
 import type { GeneratedRecommendation, NextBestAction } from "./recommendations";
 
@@ -12,14 +12,18 @@ export interface ConsultorComposition {
 
 export interface ConsultorClientView {
   client: Client;
-  summary: AdminClientRow;
+  machinesData: Machine[];
+  areasData: Area[];
+  operations: Operation[];
+  evaluatedOperationIds: string[];
+  summary?: AdminClientRow;
   machines: AdminMachineRow[];
   areas: AdminAreaRow[];
   recurringFactors: { factor: string; count: number }[];
-  composition: ConsultorComposition;
-  recommendation: GeneratedRecommendation;
-  nextAction: NextBestAction;
-  explanation: string;
+  composition?: ConsultorComposition;
+  recommendation?: GeneratedRecommendation;
+  nextAction?: NextBestAction;
+  explanation?: string;
   alerts: Alert[];
 }
 

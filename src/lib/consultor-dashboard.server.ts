@@ -3,20 +3,36 @@ import type { AgroRiskRepository } from "./data/repository";
 import { mockRepository } from "./data/mock-repository.server";
 import {
   listClientRelationalScope,
+  listConsultorRelationalPhaseA,
   listConsultorPreventiveOverview,
   postgresRepository,
 } from "./data/postgres-repository.server";
-import { buildAdminDashboardSnapshot } from "./admin-dashboard.server";
+import {
+  buildAdminDashboardRelationalSnapshot,
+  buildAdminDashboardSnapshot,
+  memoizeAdminRiskServices,
+  selectPrioritizedAdminOperations,
+} from "./admin-dashboard.server";
+import { mergeAdminOperationRows } from "./admin-dashboard-merge";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import { cacheOrFetch } from "./cache.server";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
-import type { OperationRiskExternalServices } from "./risk-engine-v2/operation-input.server";
+import {
+  buildFallbackOperationRiskContext,
+  evaluateOperationRiskV2,
+  type OperationRiskExternalServices,
+} from "./risk-engine-v2/operation-input.server";
+import { geocodeMunicipality } from "./adapters/location.server";
+import { getHistoricalClimate } from "./adapters/climate.server";
+import { getElevationForRisk } from "./adapters/terrain.server";
+import { getWaterGeo } from "./adapters/water-geo.server";
 import type { GeneratedRecommendation, NextBestAction, RecCategory } from "./recommendations";
 import type {
   ConsultorClientView,
   ConsultorDashboardSnapshot,
   ConsultorPreventiveOverview,
 } from "./consultor-dashboard-types";
+import type { AdminOperationRow } from "./admin-dashboard-types";
 
 export interface ConsultorAccessScope {
   userId: string;
@@ -57,7 +73,7 @@ function buildClientView(
   resultByMachine: Map<string, RiskEngineV2Result>,
   alerts: Alert[],
 ): ConsultorClientView {
-  const summary = base.clientRows.find((row) => row.client.id === client.id)!;
+  const summary = base.clientRows.find((row) => row.client.id === client.id);
   const machines = base.machineRows.filter((row) => row.machine.clientId === client.id);
   const areas = base.areaRows.filter((row) => row.area.clientId === client.id);
   const results = machines.map((row) => resultByMachine.get(row.machine.id)!).filter(Boolean);
@@ -72,32 +88,59 @@ function buildClientView(
     counts[row.mainFactor] = (counts[row.mainFactor] ?? 0) + 1;
     return counts;
   }, {})).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([factor, count]) => ({ factor, count }));
-  const recommendation = recommendationFor(client.id, summary.score, summary.mainFactor);
+  const recommendation = summary
+    ? recommendationFor(client.id, summary.score, summary.mainFactor)
+    : undefined;
   const componentLabel = dominantComponent === "climate" ? "componente climático" : dominantComponent === "operational" ? "componente operacional" : "componentes balanceados";
-  const nextAction: NextBestAction = {
+  const nextAction: NextBestAction | undefined = recommendation ? {
     title: recommendation.title,
     description: recommendation.description,
     factor: recommendation.factor,
     priority: recommendation.priority,
     category: recommendation.category,
-  };
+  } : undefined;
   return {
     client,
+    machinesData: base.machines.filter((machine) => machine.clientId === client.id),
+    areasData: base.areas.filter((area) => area.clientId === client.id),
+    operations: base.operations.filter((operation) => operation.clientId === client.id),
+    evaluatedOperationIds: base.operationRows.map((row) => row.operation.id),
     summary,
     machines,
     areas,
     recurringFactors,
-    composition: {
+    composition: summary ? {
       climateScore: Math.round(avg((result) => result.ml.mlRelativeScore)),
       operationalScore: Math.round(avg((result) => result.operationalRules.operationalRulesScore)),
       climateContribution,
       operationalContribution,
       dominantComponent,
-    },
+    } : undefined,
     recommendation,
     nextAction,
-    explanation: `O cliente apresenta score ${summary.score}/100, classificado como risco ${summary.level}. A origem predominante está em ${componentLabel}, com atenção principal em ${summary.mainFactor.toLowerCase()}. A recomendação é ${recommendation.title.toLowerCase()}.`,
+    explanation: summary && recommendation
+      ? `O cliente apresenta score ${summary.score}/100, classificado como risco ${summary.level}. A origem predominante está em ${componentLabel}, com atenção principal em ${summary.mainFactor.toLowerCase()}. A recomendação é ${recommendation.title.toLowerCase()}.`
+      : undefined,
     alerts: alerts.filter((alert) => machines.some((row) => row.machine.id === alert.machineId)),
+  };
+}
+
+function buildRelationalClientView(
+  client: Client,
+  relational: Awaited<ReturnType<typeof readScope>>,
+): ConsultorClientView {
+  const machinesData = relational.machines.filter((machine) => machine.clientId === client.id);
+  const machineIds = new Set(machinesData.map((machine) => machine.id));
+  return {
+    client,
+    machinesData,
+    areasData: relational.areas.filter((area) => area.clientId === client.id),
+    operations: relational.operations.filter((operation) => operation.clientId === client.id),
+    evaluatedOperationIds: [],
+    machines: [],
+    areas: [],
+    recurringFactors: [],
+    alerts: relational.alerts.filter((alert) => machineIds.has(alert.machineId)),
   };
 }
 
@@ -123,6 +166,7 @@ async function readScope(repository: AgroRiskRepository, scope: ConsultorAccessS
     machines,
     operations: allOperations.filter((operation) => ids.has(operation.clientId)),
     alerts: demoAlerts.filter((alert) => machineIds.has(alert.machineId)),
+    riskContexts: [],
   };
 }
 
@@ -159,6 +203,31 @@ async function buildSnapshot(
   };
 }
 
+export async function buildConsultorRelationalSnapshot(
+  relational: Awaited<ReturnType<typeof readScope>>,
+  source: "postgres" | "mock",
+  degraded: boolean,
+  weights: RiskEngineV2Weights,
+  scope: ConsultorAccessScope,
+  preventiveOverview: ConsultorPreventiveOverview = {
+    maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+    attentionPoints: [],
+  },
+): Promise<ConsultorDashboardSnapshot> {
+  return {
+    source,
+    degraded,
+    loadedAt: new Date().toISOString(),
+    scopeRule: scope.clientIds === null
+      ? "Escopo global autorizado pela conta Admin/Sompo"
+      : `Carteira autorizada para a conta ${scope.userId}`,
+    weights,
+    alertsSource: "demo",
+    clients: relational.clients.map((client) => buildRelationalClientView(client, relational)),
+    preventiveOverview,
+  };
+}
+
 async function loadUncached(
   primary: AgroRiskRepository,
   fallback: AgroRiskRepository,
@@ -166,7 +235,15 @@ async function loadUncached(
   scope: ConsultorAccessScope,
   externalServices?: OperationRiskExternalServices,
 ): Promise<ConsultorDashboardSnapshot> {
+  const progressive =
+    primary === postgresRepository && fallback === mockRepository && !externalServices;
   try {
+    if (progressive) {
+      const relational = await listConsultorRelationalPhaseA(scope.clientIds);
+      return await buildConsultorRelationalSnapshot(
+        relational, "postgres", false, weights, scope,
+      );
+    }
     const [relational, preventiveOverview] = await Promise.all([
       readScope(primary, scope),
       primary === postgresRepository
@@ -183,9 +260,20 @@ async function loadUncached(
     console.error("[consultor-dashboard] PostgreSQL indisponível; usando fallback mock.", {
       error: error instanceof Error ? error.message : "Erro desconhecido",
     });
-    return await buildSnapshot(
-      await readScope(fallback, scope), "mock", true, weights, scope, undefined, externalServices,
-    );
+    let relational = await readScope(fallback, scope);
+    if (progressive) {
+      const firstClientId = relational.clients[0]?.id;
+      relational = {
+        ...relational,
+        areas: relational.areas.filter((area) => area.clientId === firstClientId),
+        machines: relational.machines.filter((machine) => machine.clientId === firstClientId),
+        operations: relational.operations.filter((operation) => operation.clientId === firstClientId),
+        riskContexts: [],
+      };
+    }
+    return progressive
+      ? await buildConsultorRelationalSnapshot(relational, "mock", true, weights, scope)
+      : await buildSnapshot(relational, "mock", true, weights, scope, undefined, externalServices);
   }
 }
 
@@ -209,4 +297,118 @@ export async function loadConsultorDashboardSnapshot(
   try { return await request; } finally { inFlight.delete(key); }
 }
 
+export async function loadConsultorPreventiveData(
+  scope: ConsultorAccessScope,
+): Promise<ConsultorPreventiveOverview> {
+  return listConsultorPreventiveOverview(scope.clientIds);
+}
+
 const inFlight = new Map<string, Promise<ConsultorDashboardSnapshot>>();
+
+const consultorBatchInFlight = new Map<string, Promise<ConsultorClientView>>();
+const consultorRowsByClient = new Map<string, { expiresAt: number; rows: AdminOperationRow[] }>();
+const consultorExternalServices: OperationRiskExternalServices = {
+  geocode: geocodeMunicipality,
+  historicalWeather: getHistoricalClimate,
+  elevation: getElevationForRisk,
+  water: getWaterGeo,
+};
+
+export async function evaluateConsultorRiskBatch(
+  scope: ConsultorAccessScope,
+  clientId: string,
+  operationIds: readonly string[],
+  limit = 12,
+  externalServices?: OperationRiskExternalServices,
+  repository: AgroRiskRepository = postgresRepository,
+): Promise<ConsultorClientView> {
+  if (scope.clientIds !== null && !scope.clientIds.includes(clientId)) {
+    throw new Error("Cliente fora do escopo autorizado.");
+  }
+  const ids = [...new Set(operationIds)].slice(0, 12);
+  const config = getRiskEngineV2Configuration();
+  const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
+  const run = async () => {
+    const relational = await readScope(repository, scope);
+    const client = relational.clients.find((item) => item.id === clientId);
+    if (!client) throw new Error("Cliente fora do escopo autorizado.");
+    const clientOperations = relational.operations.filter((operation) => operation.clientId === clientId);
+    const selected = selectPrioritizedAdminOperations(
+      clientOperations,
+      ids.filter((id) => clientOperations.some((operation) => operation.id === id)),
+      Math.min(limit, 12),
+    );
+    const clientAreas = relational.areas.filter((area) => area.clientId === clientId);
+    const clientMachines = relational.machines.filter((machine) => machine.clientId === clientId);
+    const base = await buildAdminDashboardRelationalSnapshot(
+      {
+        ...relational,
+        clients: [client],
+        areas: clientAreas,
+        machines: clientMachines,
+        operations: clientOperations,
+      },
+      "postgres",
+      false,
+      weights,
+    );
+    const clientById = new Map(base.clients.map((item) => [item.id, item]));
+    const areaById = new Map(base.areas.map((area) => [area.id, area]));
+    const machineById = new Map(base.machines.map((machine) => [machine.id, machine]));
+    const contexts = new Map((relational.riskContexts ?? []).map((context) => [context.operation.id, context]));
+    const services = memoizeAdminRiskServices(externalServices ?? consultorExternalServices);
+    const rows = await mapWithConcurrency(selected, 6, async (operation) => {
+      const context = contexts.get(operation.id) ?? buildFallbackOperationRiskContext(
+        operation,
+        machineById.get(operation.machineId)!,
+        areaById.get(operation.areaId)!,
+        clientById.get(operation.clientId)!,
+      );
+      const evaluation = await evaluateOperationRiskV2(context, weights, services);
+      return {
+        operation,
+        evaluation,
+        score: evaluation.result.finalScore,
+        level: evaluation.result.level,
+        mainFactor: evaluation.result.drivers[0]?.label ?? "Sem fator dominante",
+      };
+    });
+    const accumulatedKey = `${scope.userId}:${clientId}:${weights.ml}:${weights.operationalRules}`;
+    const previous = consultorRowsByClient.get(accumulatedKey);
+    const accumulated = previous && previous.expiresAt > Date.now()
+      ? [...new Map([...previous.rows, ...rows].map((row) => [row.operation.id, row])).values()]
+      : rows;
+    consultorRowsByClient.set(accumulatedKey, { expiresAt: Date.now() + 15 * 60_000, rows: accumulated });
+    const merged = mergeAdminOperationRows(base, accumulated);
+    const resultByMachine = new Map<string, RiskEngineV2Result>();
+    merged.machineRows.forEach((row) => resultByMachine.set(row.machine.id, row.evaluation.result));
+    return buildClientView(client, merged, resultByMachine, relational.alerts);
+  };
+  if (externalServices) return run();
+  const key = `${scope.userId}:${clientId}:${ids.slice().sort().join(",")}:${Math.min(limit, 12)}:${weights.ml}:${weights.operationalRules}`;
+  const pending = consultorBatchInFlight.get(key);
+  if (pending) return pending;
+  const request = run();
+  consultorBatchInFlight.set(key, request);
+  try {
+    return await request;
+  } finally {
+    consultorBatchInFlight.delete(key);
+  }
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (cursor < values.length) {
+      const index = cursor++;
+      results[index] = await mapper(values[index]);
+    }
+  }));
+  return results;
+}

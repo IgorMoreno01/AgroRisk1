@@ -1,0 +1,207 @@
+Otimize SOMENTE a persona Consultor/Corretor.
+
+NÃO alterar:
+- Admin
+- Gestor
+- Operador
+- Risk Engine
+- modelo ML
+- fórmula
+- thresholds
+- pesos
+- banco/schema
+- Vite
+- V1
+
+NÃO executar Git mutável.
+
+PROBLEMA ATUAL:
+
+O Consultor espera carregar:
+- 25 clientes
+- 90 áreas
+- 120 máquinas
+- 500 operações
+- 500 avaliações V2
+- até 2.000 enriquecimentos externos
+
+antes de liberar a tela.
+
+Isso está deixando a UX lenta.
+
+OBJETIVO:
+
+A primeira tela do Consultor deve aparecer praticamente de imediato,
+idealmente < 1 segundo.
+
+==================================================
+1. FASE A RÁPIDA
+==================================================
+
+Carregar primeiro SOMENTE os dados relacionais necessários para:
+
+- lista de clientes autorizados
+- cliente inicialmente selecionado
+- fazendas/áreas desse cliente
+- máquinas desse cliente
+- operações básicas desse cliente
+- contagens e navegação
+
+Nenhuma API externa pode bloquear essa fase.
+
+Renderizar a tela assim que esses dados chegarem.
+
+Remover o comportamento de esperar 500 avaliações antes da renderização.
+
+==================================================
+2. SCORE PRIORITÁRIO
+==================================================
+
+Depois da primeira renderização:
+
+avaliar primeiro apenas os itens VISÍVEIS do cliente selecionado.
+
+Prioridade:
+
+1. operação principal/ativa
+2. máquinas visíveis
+3. áreas visíveis
+4. cards que aparecem na primeira tela
+
+Não calcular outros clientes antes do cliente selecionado.
+
+==================================================
+3. OUTROS CLIENTES
+==================================================
+
+Outros clientes devem ser ON_DEMAND.
+
+Quando o usuário selecionar outro cliente:
+carregar os scores daquele cliente naquele momento.
+
+Não pré-calcular os 25 clientes.
+
+==================================================
+4. BATCH
+==================================================
+
+Limitar avaliações V2 em pequenos lotes.
+
+Pode reutilizar padrão de até 12 operações por lote,
+se compatível com a arquitetura existente.
+
+Nunca disparar 500 automaticamente.
+
+==================================================
+5. BACKGROUND
+==================================================
+
+Dados secundários podem iniciar depois do primeiro paint,
+com pequeno escalonamento de aproximadamente 50–100 ms,
+SEM criar atraso artificial em dados já prontos.
+
+Exemplos:
+
+- rankings secundários
+- recomendações não visíveis
+- scores de páginas não abertas
+
+==================================================
+6. LOADING
+==================================================
+
+Eliminar o loading global longo:
+
+"Carregando carteira / Consultando clientes e riscos calculados..."
+
+Depois da Fase A, a tela deve ficar utilizável.
+
+Usar loading local:
+
+"Calculando..."
+
+somente onde o score ainda estiver pendente.
+
+Nunca inventar score provisório.
+
+==================================================
+7. CACHE / DEDUPLICAÇÃO
+==================================================
+
+Reutilizar os caches existentes.
+
+Requests equivalentes para:
+
+- geocodificação
+- clima
+- altitude
+- hidrografia
+
+devem ser deduplicados.
+
+==================================================
+8. CONSISTÊNCIA
+==================================================
+
+A mesma operação deve continuar produzindo exatamente:
+
+- mesmo Score ML
+- mesmo Score Operacional
+- mesmo Score Final
+- mesmo level
+
+Esta alteração é SOMENTE de carregamento.
+
+==================================================
+9. TESTES
+==================================================
+
+Cobrir:
+
+1. tela relacional aparece sem esperar V2;
+2. nenhum carregamento inicial avalia 500 operações;
+3. cliente selecionado recebe prioridade;
+4. outros clientes carregam sob demanda;
+5. APIs externas não bloqueiam a primeira tela;
+6. scores pendentes mostram "Calculando...";
+7. nenhuma fórmula foi alterada;
+8. outras personas não mudaram.
+
+Rodar:
+
+bun test
+bun run build
+
+==================================================
+RELATÓRIO FINAL
+==================================================
+
+A. arquivos alterados
+
+B. tempo primeira tela ANTES:
+~39 s
+
+C. tempo primeira tela DEPOIS:
+
+D. avaliações V2 antes da primeira tela:
+ANTES: 500
+DEPOIS:
+
+E. chamadas externas antes da primeira tela:
+
+F. primeiro score visível em:
+
+G. outros clientes são on-demand?
+SIM/NÃO
+
+H. outras personas foram alteradas?
+NÃO
+
+I. testes
+
+J. build
+
+K. Risk Engine/fórmula alterados?
+NÃO
+
+PARE AO FINAL.

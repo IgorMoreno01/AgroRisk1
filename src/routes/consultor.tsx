@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { RecommendationCard } from "@/components/recommendation-card";
@@ -8,9 +8,14 @@ import { AlertTriangle, Building2, Database, FileText } from "lucide-react";
 import { RequireProfile } from "@/components/require-profile";
 import { PersonaV2RiskPanel } from "@/components/persona-v2-risk-panel";
 import { getStoredSessionToken } from "@/lib/auth";
-import { getConsultorDashboard } from "@/lib/api/consultor-dashboard.functions";
+import {
+  evaluateConsultorRiskBatch,
+  getConsultorDashboard,
+  getConsultorPreventiveData,
+} from "@/lib/api/consultor-dashboard.functions";
 import type { ConsultorDashboardSnapshot } from "@/lib/consultor-dashboard-types";
 import { ConsultorPreventiveOverview } from "@/components/consultor-preventive-overview";
+import { selectConsultorPriorityOperationIds } from "@/lib/consultor-risk-selection";
 
 export const Route = createFileRoute("/consultor")({
   head: () => ({ meta: [{ title: "AgroRisk · Consultor" }] }),
@@ -26,6 +31,9 @@ function ConsultorPage() {
   const [clientId, setClientId] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [riskErrorByClient, setRiskErrorByClient] = useState<Record<string, string>>({});
+  const requestedClients = useRef(new Set<string>());
+  const requestedPreventiveData = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,6 +44,8 @@ function ConsultorPage() {
       .then((result) => {
         if (cancelled) return;
         if (!result.ok) return setLoadError(result.error);
+        requestedClients.current.clear();
+        requestedPreventiveData.current = false;
         setSnapshot(result.snapshot);
         setClientId((current) => current || result.snapshot.clients[0]?.client.id || "");
       })
@@ -51,8 +61,69 @@ function ConsultorPage() {
   const cs = selected?.summary;
   const clientMachines = selected?.machines ?? [];
   const clientAreas = selected?.areas ?? [];
-  const recommendations = selected ? [selected.recommendation] : [];
+  const recommendations = selected?.recommendation ? [selected.recommendation] : [];
   const topMachine = clientMachines[0];
+
+  useEffect(() => {
+    if (!snapshot || !selected || selected.summary || requestedClients.current.has(selected.client.id)) return;
+    const token = getStoredSessionToken();
+    if (!token) return;
+    const operationIds = selectConsultorPriorityOperationIds({
+      operations: selected.operations,
+      machines: selected.machinesData,
+      areas: selected.areasData,
+      evaluatedOperationIds: selected.evaluatedOperationIds,
+      limit: 12,
+    });
+    const timer = window.setTimeout(() => {
+      requestedClients.current.add(selected.client.id);
+      void evaluateConsultorRiskBatch({
+        data: { token, clientId: selected.client.id, operationIds, limit: 12 },
+      }).then((result) => {
+        if (!result.ok) throw new Error(result.error);
+        setSnapshot((current) => current ? {
+          ...current,
+          clients: current.clients.map((item) =>
+            item.client.id === result.client.client.id ? result.client : item),
+        } : current);
+        setRiskErrorByClient((current) => {
+          const next = { ...current };
+          delete next[selected.client.id];
+          return next;
+        });
+        const machinesWithOperations = new Set(
+          result.client.operations.map((operation) => operation.machineId),
+        ).size;
+        if (!result.client.summary &&
+            result.client.evaluatedOperationIds.length < machinesWithOperations) {
+          requestedClients.current.delete(selected.client.id);
+        }
+      }).catch(() => {
+        requestedClients.current.delete(selected.client.id);
+        setRiskErrorByClient((current) => ({
+          ...current,
+          [selected.client.id]: "Não foi possível calcular os scores deste cliente.",
+        }));
+      });
+    }, 75);
+    return () => window.clearTimeout(timer);
+  }, [snapshot, selected]);
+
+  useEffect(() => {
+    if (!snapshot || requestedPreventiveData.current) return;
+    const token = getStoredSessionToken();
+    if (!token) return;
+    const timer = window.setTimeout(() => {
+      requestedPreventiveData.current = true;
+      void getConsultorPreventiveData({ data: { token } }).then((result) => {
+        if (!result.ok) return;
+        setSnapshot((current) => current ? { ...current, preventiveOverview: result.overview } : current);
+      }).catch(() => {
+        requestedPreventiveData.current = false;
+      });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [snapshot]);
 
   if (loadError) {
     return (
@@ -74,7 +145,7 @@ function ConsultorPage() {
     return (
       <AppLayout title="Visão do Consultor" subtitle="Análise consolidada por cliente e recomendações preventivas">
         <Card>
-          <SectionTitle title="Carregando carteira" description="Consultando clientes e riscos calculados…" />
+          <SectionTitle title="Carregando carteira" description="Carregando dados relacionais…" />
           <div className="h-2 overflow-hidden rounded-full bg-muted">
             <div className="h-full w-1/2 animate-pulse rounded-full bg-primary" />
           </div>
@@ -83,7 +154,7 @@ function ConsultorPage() {
     );
   }
 
-  if (!selected || !client || !cs) {
+  if (!selected || !client) {
     return (
       <AppLayout title="Visão do Consultor" subtitle="Análise consolidada por cliente e recomendações preventivas">
         <Card>
@@ -137,10 +208,10 @@ function ConsultorPage() {
               <div className="text-lg font-semibold text-foreground">{client?.name ?? "Carregando…"}</div>
               <div className="text-sm text-muted-foreground">{client ? `${client.location} · ID ${client.id}` : "Aguarde um instante"}</div>
               <div className="mt-3 grid grid-cols-4 gap-4">
-                <Stat label="Máquinas" value={client ? String(client.machines) : "…"} />
-                <Stat label="Score médio" value={cs ? String(cs.score) : "…"} />
-                <Stat label="Máq. risco alto" value={cs ? String(cs.machinesHigh) : "…"} />
-                <Stat label="Área crítica" value={cs?.topAreaName ?? "…"} />
+                 <Stat label="Máquinas" value={String(selected.machinesData.length)} />
+                 <Stat label="Score médio" value={cs ? String(cs.score) : "Calculando..."} />
+                 <Stat label="Máq. risco alto" value={cs ? String(cs.machinesHigh) : "Calculando..."} />
+                 <Stat label="Área crítica" value={cs?.topAreaName ?? "Calculando..."} />
               </div>
             </div>
           </div>
@@ -149,10 +220,10 @@ function ConsultorPage() {
         <Card>
           <SectionTitle title="Status geral" />
           <div className="flex flex-col items-center gap-2 py-2">
-            <div className="text-5xl font-semibold tabular-nums text-foreground">{cs?.score ?? "…"}</div>
+             <div className="text-5xl font-semibold tabular-nums text-foreground">{cs?.score ?? "—"}</div>
             {cs && <RiskBadge score={cs.score} />}
             <p className="text-center text-xs text-muted-foreground">
-               Fator consolidado: <span className="font-medium text-foreground">{cs?.mainFactor ?? "…"}</span>
+               Fator consolidado: <span className="font-medium text-foreground">{cs?.mainFactor ?? "Calculando..."}</span>
             </p>
           </div>
         </Card>
@@ -166,6 +237,16 @@ function ConsultorPage() {
             description="Ordenado por score calculado"
           />
           <div className="space-y-2">
+            {clientMachines.length === 0 && selected.machinesData.slice(0, 3).map((machine, i) => (
+              <div key={machine.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-foreground">{machine.name}</div>
+                  <div className="text-xs text-muted-foreground">{machine.id} · {machine.area}</div>
+                </div>
+                <span className="text-sm text-muted-foreground">Calculando...</span>
+              </div>
+            ))}
             {clientMachines.slice(0, 3).map((row, i) => (
               <div key={row.machine.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
                 <span className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums ${
@@ -190,6 +271,16 @@ function ConsultorPage() {
             description="Score médio por área do cliente"
           />
           <ul className="space-y-2">
+            {clientAreas.length === 0 && selected.areasData.slice(0, 3).map((area, i) => (
+              <li key={area.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-foreground">{area.name}</div>
+                  <div className="text-xs text-muted-foreground">{area.condition}</div>
+                </div>
+                <span className="text-sm text-muted-foreground">Calculando...</span>
+              </li>
+            ))}
             {clientAreas.slice(0, 3).map((row, i) => (
               <li key={row.area.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
                 <span className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums ${
@@ -215,7 +306,7 @@ function ConsultorPage() {
             title="Composição do score do cliente"
              description="Fatores internos consolidados pelo Risk Engine"
           />
-           {selected ? (
+           {selected.composition ? (
              <div className="space-y-3">
                <CompositionRow label="Climático" score={selected.composition.climateScore} contribution={selected.composition.climateContribution} weight={snapshot!.weights.ml} />
                <CompositionRow label="Operacional" score={selected.composition.operationalScore} contribution={selected.composition.operationalContribution} weight={snapshot!.weights.operationalRules} />
@@ -236,8 +327,12 @@ function ConsultorPage() {
             title="Origem do risco"
             description="Explicação preventiva baseada no resultado central"
           />
-          {selected ? (
-            <ConsultorExplanation selected={selected} />
+           {selected.summary && selected.composition && selected.recommendation ? (
+             <ConsultorExplanation
+               summary={selected.summary}
+               composition={selected.composition}
+               recommendation={selected.recommendation}
+             />
           ) : (
             <p className="text-sm text-muted-foreground">Sem dados suficientes para explicar o risco.</p>
           )}
@@ -252,8 +347,8 @@ function ConsultorPage() {
             description="Geradas a partir do score, ranking e fatores do cliente"
           />
           <div className="space-y-3">
-            {recommendations.length === 0 && (
-              <p className="text-sm text-muted-foreground">Sem recomendações ativas no momento.</p>
+             {recommendations.length === 0 && (
+               <p className="text-sm text-muted-foreground">Calculando...</p>
             )}
             {recommendations.map((r) => (
               <RecommendationCard key={r.id} rec={r} />
@@ -273,7 +368,7 @@ function ConsultorPage() {
               </button>
             }
           />
-          {selected ? (
+          {selected.explanation ? (
             <p className="text-sm leading-relaxed text-foreground">{selected.explanation}</p>
           ) : (
             <p className="text-sm text-muted-foreground">Sem dados suficientes para explicar o risco.</p>
@@ -283,7 +378,10 @@ function ConsultorPage() {
               Destaque operacional: <strong>{topMachine.machine.name}</strong> (score {topMachine.score}).
             </p>
           )}
-          {selected && <div className="mt-4"><NextBestActionCard action={selected.nextAction} /></div>}
+          {selected.nextAction && <div className="mt-4"><NextBestActionCard action={selected.nextAction} /></div>}
+          {riskErrorByClient[selected.client.id] && (
+            <p className="mt-3 text-xs text-danger">{riskErrorByClient[selected.client.id]}</p>
+          )}
         </Card>
         </section>
       </div>
@@ -311,14 +409,22 @@ function CompositionRow({ label, score, contribution, weight }: { label: string;
   );
 }
 
-function ConsultorExplanation({ selected }: { selected: NonNullable<ConsultorDashboardSnapshot["clients"][number]> }) {
+function ConsultorExplanation({
+  summary,
+  composition,
+  recommendation,
+}: {
+  summary: NonNullable<ConsultorDashboardSnapshot["clients"][number]["summary"]>;
+  composition: NonNullable<ConsultorDashboardSnapshot["clients"][number]["composition"]>;
+  recommendation: NonNullable<ConsultorDashboardSnapshot["clients"][number]["recommendation"]>;
+}) {
   return (
     <div className="space-y-3 text-sm leading-relaxed">
-      <p>O score consolidado é <strong>{selected.summary.score}/100</strong>, classificado como <strong>risco {selected.summary.level}</strong>.</p>
+      <p>O score consolidado é <strong>{summary.score}/100</strong>, classificado como <strong>risco {summary.level}</strong>.</p>
       <p className="text-muted-foreground">
-        A principal origem é {componentLabel(selected.composition.dominantComponent).toLowerCase()}, com maior recorrência de {selected.summary.mainFactor.toLowerCase()}.
+        A principal origem é {componentLabel(composition.dominantComponent).toLowerCase()}, com maior recorrência de {summary.mainFactor.toLowerCase()}.
       </p>
-      <p>Orientação preventiva: <strong>{selected.recommendation.title.toLowerCase()}</strong>. {selected.recommendation.rationale}</p>
+      <p>Orientação preventiva: <strong>{recommendation.title.toLowerCase()}</strong>. {recommendation.rationale}</p>
     </div>
   );
 }

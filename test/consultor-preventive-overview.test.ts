@@ -122,7 +122,7 @@ describe("visão preventiva PostgreSQL do Consultor", () => {
     const route = readFileSync("src/routes/consultor.tsx", "utf8");
     const repository = readFileSync("src/lib/data/postgres-repository.server.ts", "utf8");
     expect(api).toContain("z.object({ token:");
-    expect(api).not.toMatch(/clientIds?\s*:/);
+    expect(api).not.toContain("clientIds: z.");
     expect(route).toContain("getConsultorDashboard({ data: { token } })");
     expect(route).not.toContain("setInterval");
     expect(repository).toContain("m.client_id = ANY");

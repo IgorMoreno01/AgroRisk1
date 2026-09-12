@@ -10,3 +10,4 @@
 - [Alertas acionáveis por destinatário](actionable-alerts.md) — cada usuário mantém estado próprio; toda leitura e transição revalida o escopo atual server-side.
 - [Watcher Vite e caches](vite-watcher-cache.md) — o watcher deve ignorar caches e saídas geradas; observar `.cache` esgota descritores e trava o Preview.
 - [Carregamento progressivo do Admin](admin-progressive-loading.md) — dados relacionais nunca aguardam avaliações V2 da carteira; scores entram em lotes lazy com cobertura explícita.
+- [Carregamento progressivo do Consultor](consultor-progressive-loading.md) — primeira tela traz relações do cliente inicial; V2 roda por cliente em lotes on-demand.
