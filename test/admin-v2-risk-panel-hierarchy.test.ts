@@ -22,7 +22,8 @@ describe("Admin · hierarquia executiva do Risk Engine V2", () => {
     expect(panelSource).toContain("result.operationalRules.factors.map");
     expect(panelSource).toContain("factor.points");
     expect(panelSource).toContain("factor.maxPoints");
-    expect(panelSource).toContain("Total bruto");
+    expect(panelSource).not.toContain("Total bruto");
+    expect(panelSource).toContain("Score Operacional");
   });
 
   test("preserva pesos, salvamento e recálculo do score", () => {

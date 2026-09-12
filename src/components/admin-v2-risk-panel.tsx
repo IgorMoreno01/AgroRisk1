@@ -170,14 +170,8 @@ function MlComponents({ result }: { result: RiskEngineV2Result }) {
 }
 
 function OperationalFactors({ result }: { result: RiskEngineV2Result }) {
-  const rawTotal = result.operationalRules.factors.reduce(
-    (total, factor) => total + factor.points,
-    0,
-  );
-  const maxTotal = result.operationalRules.factors.reduce(
-    (total, factor) => total + factor.maxPoints,
-    0,
-  );
+  const formatPoints = (value: number) =>
+    new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(value);
 
   return (
     <div className="space-y-3">
@@ -186,7 +180,7 @@ function OperationalFactors({ result }: { result: RiskEngineV2Result }) {
           <div className="flex items-center justify-between gap-3 text-sm">
             <span className="font-medium text-foreground">{factor.label}</span>
             <span className="shrink-0 font-semibold tabular-nums text-muted-foreground">
-              {factor.points} / {factor.maxPoints}
+              {formatPoints(factor.points)} / {formatPoints(factor.maxPoints)}
             </span>
           </div>
           <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
@@ -198,9 +192,9 @@ function OperationalFactors({ result }: { result: RiskEngineV2Result }) {
         </div>
       ))}
       <div className="flex items-center justify-between border-t border-border pt-3 text-sm">
-        <span className="font-medium text-muted-foreground">Total bruto</span>
+        <span className="font-medium text-muted-foreground">Score Operacional</span>
         <strong className="tabular-nums text-foreground">
-          {rawTotal} / {maxTotal}
+          {result.operationalRules.operationalRulesScore} / 100
         </strong>
       </div>
     </div>

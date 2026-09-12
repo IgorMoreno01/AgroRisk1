@@ -34,29 +34,29 @@ export interface OperationalRulesInput {
 }
 
 const RULES_VERSION = "1.0";
-const BASE_MAX_POINTS = 48;
+const OPERATIONAL_SCALE_FACTOR = 100 / 48;
 
 const WATER_POINTS: Record<OperationalWaterDistance, number> = {
   acima_150: 0,
-  "100_150": 6,
-  "50_100": 12,
-  abaixo_50: 18,
+  "100_150": 12.5,
+  "50_100": 25,
+  abaixo_50: 37.5,
 };
 
 const OPERATION_POINTS: Record<OperationalActivityType, number> = {
-  "Trabalho no campo": 6,
-  Transporte: 9,
-  "Pulverização": 8,
-  Colheita: 8,
-  "Deslocamento interno": 4,
-  "Operação próxima de água": 15,
+  "Trabalho no campo": 12.5,
+  Transporte: 18.75,
+  "Pulverização": 8 * OPERATIONAL_SCALE_FACTOR,
+  Colheita: 8 * OPERATIONAL_SCALE_FACTOR,
+  "Deslocamento interno": 4 * OPERATIONAL_SCALE_FACTOR,
+  "Operação próxima de água": 31.25,
 };
 
 const TERRAIN_POINTS: Record<OperationalTerrain, number> = {
   normal: 0,
-  umido: 7,
-  critico: 13,
-  baixa_aderencia: 15,
+  umido: 7 * OPERATIONAL_SCALE_FACTOR,
+  critico: 13 * OPERATIONAL_SCALE_FACTOR,
+  baixa_aderencia: 31.25,
 };
 
 const factor = (
@@ -99,34 +99,32 @@ export const evaluateOperationalRulesV2 = (
       "Proximidade de água",
       input.waterDistance,
       WATER_POINTS[input.waterDistance],
-      18,
+      37.5,
     ),
     factor(
       "operation_type",
       "Tipo de operação",
       input.operationType,
       OPERATION_POINTS[input.operationType],
-      15,
+      31.25,
     ),
     factor(
       "terrain",
       "Condição do terreno",
       input.terrain,
       TERRAIN_POINTS[input.terrain],
-      15,
+      31.25,
     ),
   ];
 
-  const rawPoints = factors.reduce(
+  const normalizedPoints = factors.reduce(
     (total, currentFactor) => total + currentFactor.points,
     0,
   );
 
   return {
     rulesVersion: RULES_VERSION,
-    operationalRulesScore: Math.round(
-      (rawPoints / BASE_MAX_POINTS) * 100,
-    ),
+    operationalRulesScore: Math.round(normalizedPoints),
     factors,
     dominantFactor: dominantFactor(factors),
   };
