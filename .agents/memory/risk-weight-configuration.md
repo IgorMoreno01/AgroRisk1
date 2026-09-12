@@ -25,6 +25,16 @@ uma alteração de revisão ou misturar overrides entre clientes.
 inválida deve interromper a avaliação explicitamente; falhas comuns de infraestrutura podem
 seguir o fallback relacional completo para mock.
 
+A interface Admin separa explicitamente Padrão Sompo, herança global e personalização por
+cliente. Selecionar cliente ou mover o draft nunca cria override; isso exige ação de
+personalizar seguida de save com revisão.
+
+**Why:** criar override implicitamente torna a origem efetiva ambígua e impede que mudanças
+globais alcancem clientes que deveriam continuar herdando o padrão.
+
+**How to apply:** descarte respostas tardias em toda troca de escopo, use operação do próprio
+cliente no preview e bloqueie novas mutações após conflito até recarregar a revisão atual.
+
 A inclinação é exclusivamente uma camada de segurança operacional: pode gerar classificação,
 alerta, orientação ao operador, acionamento de buzzer e registro, mas nunca pontos, contribuição
 operacional ou climática, score final ou fator dominante.

@@ -135,6 +135,33 @@ export async function resolveEffectiveRiskWeights(
   return repository.resolveEffectiveRiskWeights(clientId);
 }
 
+export interface RiskWeightConfigurationScope {
+  clientId: string | null;
+  mlWeight: number;
+  operationalRulesWeight: number;
+  source: EffectiveRiskWeightConfiguration["source"];
+  revision: number | null;
+  updatedAt: string | null;
+  hasOverride: boolean;
+}
+
+export async function getRiskWeightConfigurationScope(
+  clientId?: string,
+  repository: RiskWeightConfigurationRepository =
+    postgresRepository as RiskWeightConfigurationRepository,
+): Promise<RiskWeightConfigurationScope> {
+  const effective = await repository.resolveEffectiveRiskWeights(clientId);
+  assertValidRiskWeightValues(effective.weights);
+  return {
+    clientId: clientId ?? null,
+    ...effective.weights,
+    source: effective.source,
+    revision: effective.revision,
+    updatedAt: effective.updatedAt,
+    hasOverride: effective.source === "client",
+  };
+}
+
 export interface ResolvedRiskEngineV2Weights {
   weights: RiskEngineV2Weights;
   source: EffectiveRiskWeightConfiguration["source"];

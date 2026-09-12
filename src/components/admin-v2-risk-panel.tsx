@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowDownRight,
@@ -15,10 +15,15 @@ import type { GeneratedRecommendation } from "@/lib/recommendations";
 import { evaluateRiskEngineV2 } from "@/lib/risk-engine-v2/evaluate";
 import type { OperationRiskEvaluation } from "@/lib/risk-engine-v2/operation-input.server";
 import type { RiskEngineV2Result } from "@/lib/risk-engine-v2/types";
+import type { Client, Operation } from "@/lib/mock-data";
+import type { AdminOperationRow } from "@/lib/admin-dashboard-types";
 import { cn } from "@/lib/utils";
 import { getStoredSessionToken } from "@/lib/auth";
+import { evaluateAdminRiskBatch } from "@/lib/api/admin-dashboard.functions";
 import {
-  getRiskEngineV2Configuration,
+  deleteRiskEngineV2ClientOverride,
+  getRiskEngineV2WeightConfiguration,
+  saveRiskEngineV2ClientOverride,
   saveRiskEngineV2Configuration,
 } from "@/lib/api/risk-config.functions";
 
@@ -232,23 +237,71 @@ function ContributionTable({ result }: { result: RiskEngineV2Result }) {
   );
 }
 
-export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEvaluation }) {
-  const [mlWeight, setMlWeight] = useState(evaluation.input.weights.ml);
-  const [savedMlWeight, setSavedMlWeight] = useState(evaluation.input.weights.ml);
+type ConfigurationScope = {
+  clientId: string | null;
+  mlWeight: number;
+  operationalRulesWeight: number;
+  source: "client" | "global" | "default";
+  revision: number | null;
+  updatedAt: string | null;
+  hasOverride: boolean;
+};
+
+const GLOBAL_SCOPE = "__sompo_global__";
+
+export function selectAdminRiskPreviewOperation(
+  clientId: string,
+  operations: readonly Operation[],
+): Operation | undefined {
+  return operations.find((operation) => operation.clientId === clientId);
+}
+
+export function AdminV2RiskPanel({
+  evaluation: initialEvaluation,
+  clients,
+  operations,
+  operationRows,
+}: {
+  evaluation: OperationRiskEvaluation;
+  clients: Client[];
+  operations: Operation[];
+  operationRows: AdminOperationRow[];
+}) {
+  const [selectedScope, setSelectedScope] = useState(GLOBAL_SCOPE);
+  const [configuration, setConfiguration] = useState<ConfigurationScope | null>(null);
+  const [mlWeight, setMlWeight] = useState(initialEvaluation.input.weights.ml);
+  const [savedMlWeight, setSavedMlWeight] = useState(initialEvaluation.input.weights.ml);
+  const [editingOverride, setEditingOverride] = useState(false);
+  const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [previewEvaluation, setPreviewEvaluation] =
+    useState<OperationRiskEvaluation | null>(initialEvaluation);
+  const [previewStatus, setPreviewStatus] = useState<"ready" | "loading" | "error">("ready");
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [revisionConflict, setRevisionConflict] = useState(false);
+  const loadRequestVersion = useRef(0);
+  const previewRequestVersion = useRef(0);
+  const selectedClientId = selectedScope === GLOBAL_SCOPE ? null : selectedScope;
+  const selectedClient = clients.find((client) => client.id === selectedClientId);
+  const canEdit = selectedClientId === null || editingOverride || configuration?.hasOverride === true;
+  const activeEvaluation = previewEvaluation ?? initialEvaluation;
   const result = useMemo(
     () => evaluateRiskEngineV2({
-      ...evaluation.input,
+      ...activeEvaluation.input,
       weights: { ml: mlWeight, operationalRules: 100 - mlWeight },
     }),
-    [evaluation.input, mlWeight],
+    [activeEvaluation, mlWeight],
   );
   const operationalRulesWeight = 100 - mlWeight;
   const savedOperationalRulesWeight = 100 - savedMlWeight;
-  const hasUnsavedChanges = mlWeight !== savedMlWeight;
+  const isCreatingOverride =
+    Boolean(selectedClientId) && editingOverride && configuration?.hasOverride === false;
+  const hasUnsavedChanges = mlWeight !== savedMlWeight || isCreatingOverride;
   const isValidDraft =
     Number.isInteger(mlWeight) &&
     mlWeight >= 0 &&
@@ -256,28 +309,126 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
     operationalRulesWeight >= 0 &&
     operationalRulesWeight <= 100 &&
     mlWeight + operationalRulesWeight === 100;
-  const mlDriver = result.drivers.find((driver) => driver.source === "ml");
-  const operationalDriver = result.drivers.find((driver) => driver.source === "operational_rules");
-  const recommendation = recommendationForV2Result(result);
+  const mlDriver = result?.drivers.find((driver) => driver.source === "ml");
+  const operationalDriver = result?.drivers.find((driver) => driver.source === "operational_rules");
+  const recommendation = result ? recommendationForV2Result(result) : null;
 
   useEffect(() => {
+    const requestVersion = ++loadRequestVersion.current;
     const token = getStoredSessionToken();
-    if (!token) return;
-    void getRiskEngineV2Configuration({ data: { token } }).then((response) => {
-      if (!response.ok) return;
+    setLoadStatus("loading");
+    setLoadError(null);
+    setSaveStatus("idle");
+    setSaveError(null);
+    setRevisionConflict(false);
+    setEditingOverride(false);
+    if (!token) {
+      setLoadStatus("error");
+      setLoadError("Sessão não autorizada.");
+      return;
+    }
+    void getRiskEngineV2WeightConfiguration({
+      data: { token, clientId: selectedClientId ?? undefined },
+    }).then((response) => {
+      if (requestVersion !== loadRequestVersion.current) return;
+      if (!response.ok) {
+        setLoadStatus("error");
+        setLoadError(response.error);
+        return;
+      }
+      setConfiguration(response.configuration);
       setSavedMlWeight(response.configuration.mlWeight);
       setMlWeight(response.configuration.mlWeight);
+      setEditingOverride(response.configuration.hasOverride);
+      setLoadStatus("ready");
+    }).catch(() => {
+      if (requestVersion !== loadRequestVersion.current) return;
+      setLoadStatus("error");
+      setLoadError("Não foi possível carregar os pesos.");
     });
-  }, []);
+  }, [selectedClientId, reloadVersion]);
+
+  useEffect(() => {
+    const requestVersion = ++previewRequestVersion.current;
+    setPreviewError(null);
+    if (!selectedClientId) {
+      setPreviewEvaluation(initialEvaluation);
+      setPreviewStatus("ready");
+      return;
+    }
+    const operation = selectAdminRiskPreviewOperation(selectedClientId, operations);
+    if (!operation) {
+      setPreviewEvaluation(null);
+      setPreviewStatus("ready");
+      return;
+    }
+    const available = operationRows.find((row) => row.operation.id === operation.id)?.evaluation;
+    if (available) {
+      setPreviewEvaluation(available);
+      setPreviewStatus("ready");
+      return;
+    }
+    const token = getStoredSessionToken();
+    if (!token) {
+      setPreviewEvaluation(null);
+      setPreviewStatus("error");
+      setPreviewError("Sessão não autorizada.");
+      return;
+    }
+    setPreviewEvaluation(null);
+    setPreviewStatus("loading");
+    void evaluateAdminRiskBatch({
+      data: { token, operationIds: [operation.id], limit: 1 },
+    }).then((response) => {
+      if (requestVersion !== previewRequestVersion.current) return;
+      if (!response.ok || !response.operationRows[0]) {
+        setPreviewStatus("error");
+        setPreviewError(response.ok ? "Sem operação disponível para preview." : response.error);
+        return;
+      }
+      const evaluated = response.operationRows[0];
+      if (evaluated.operation.clientId !== selectedClientId) return;
+      setPreviewEvaluation(evaluated.evaluation);
+      setPreviewStatus("ready");
+    }).catch(() => {
+      if (requestVersion !== previewRequestVersion.current) return;
+      setPreviewStatus("error");
+      setPreviewError("Não foi possível carregar a operação para preview.");
+    });
+  }, [initialEvaluation, operationRows, operations, selectedClientId, reloadVersion]);
 
   const handleDraftChange = (value: number) => {
+    if (revisionConflict) return;
     setMlWeight(value);
     setSaveStatus("idle");
     setSaveError(null);
   };
 
+  const handleScopeChange = (value: string) => {
+    loadRequestVersion.current += 1;
+    previewRequestVersion.current += 1;
+    setSelectedScope(value);
+    setConfiguration(null);
+    setMlWeight(70);
+    setSavedMlWeight(70);
+    setPreviewEvaluation(null);
+    setPreviewStatus("loading");
+    setPreviewError(null);
+    setLoadStatus("loading");
+    setSaveStatus("idle");
+    setSaveError(null);
+    setRevisionConflict(false);
+    setEditingOverride(false);
+  };
+
   const handleSave = async () => {
-    if (!hasUnsavedChanges || !isValidDraft || saveStatus === "saving") return;
+    if (
+      revisionConflict ||
+      !canEdit ||
+      !hasUnsavedChanges ||
+      !isValidDraft ||
+      saveStatus === "saving"
+    ) return;
     const token = getStoredSessionToken();
     if (!token) {
       setSaveStatus("error");
@@ -287,25 +438,98 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
 
     setSaveStatus("saving");
     setSaveError(null);
+    const requestVersion = loadRequestVersion.current;
     try {
-      const response = await saveRiskEngineV2Configuration({
-        data: { token, mlWeight, operationalRulesWeight },
-      });
+      const response = selectedClientId
+        ? await saveRiskEngineV2ClientOverride({
+            data: {
+              token,
+              clientId: selectedClientId,
+              mlWeight,
+              operationalRulesWeight,
+              expectedRevision: configuration?.hasOverride
+                ? configuration.revision
+                : null,
+            },
+          })
+        : await saveRiskEngineV2Configuration({
+            data: {
+              token,
+              mlWeight,
+              operationalRulesWeight,
+              expectedRevision: configuration?.revision ?? null,
+            },
+          });
+      if (requestVersion !== loadRequestVersion.current) return;
       if (!response.ok) {
         setSaveStatus("error");
         setSaveError(response.error);
+        setRevisionConflict("code" in response && response.code === "REVISION_CONFLICT");
         return;
       }
-      setSavedMlWeight(response.configuration.mlWeight);
+      const saved: ConfigurationScope = selectedClientId
+        ? response.configuration as ConfigurationScope
+        : {
+            ...response.configuration,
+            clientId: null,
+            hasOverride: false,
+          } as ConfigurationScope;
+      setConfiguration(saved);
+      setSavedMlWeight(saved.mlWeight);
+      setEditingOverride(Boolean(selectedClientId));
       setSaveStatus("success");
     } catch {
+      if (requestVersion !== loadRequestVersion.current) return;
       setSaveStatus("error");
       setSaveError("Não foi possível salvar os pesos.");
     }
   };
 
+  const handleRemoveOverride = async () => {
+    if (
+      !selectedClientId ||
+      !configuration?.hasOverride ||
+      configuration.revision === null ||
+      revisionConflict ||
+      saveStatus === "saving"
+    ) return;
+    if (!window.confirm("Voltar ao Padrão Sompo para este cliente?")) return;
+    const token = getStoredSessionToken();
+    if (!token) return;
+    setSaveStatus("saving");
+    setSaveError(null);
+    setRevisionConflict(false);
+    const requestVersion = loadRequestVersion.current;
+    try {
+      const response = await deleteRiskEngineV2ClientOverride({
+        data: {
+          token,
+          clientId: selectedClientId,
+          expectedRevision: configuration.revision,
+        },
+      });
+      if (requestVersion !== loadRequestVersion.current) return;
+      if (!response.ok) {
+        setSaveStatus("error");
+        setSaveError(response.error);
+        setRevisionConflict("code" in response && response.code === "REVISION_CONFLICT");
+        return;
+      }
+      setConfiguration(response.configuration);
+      setSavedMlWeight(response.configuration.mlWeight);
+      setMlWeight(response.configuration.mlWeight);
+      setEditingOverride(false);
+      setSaveStatus("success");
+    } catch {
+      if (requestVersion !== loadRequestVersion.current) return;
+      setSaveStatus("error");
+      setSaveError("Não foi possível remover a personalização.");
+    }
+  };
+
   return (
     <div className="space-y-5">
+      {previewEvaluation ? (
       <Card className="border-primary/25 bg-primary/5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -313,14 +537,14 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
               <ShieldCheck className="h-4 w-4 text-primary" /> Risk Engine V2 · operação avaliada
             </div>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-              {evaluation.context.client.name} · {evaluation.context.farm.name} · Área{" "}
-              {evaluation.context.area.name} · {evaluation.context.machine.type}{" "}
-              {evaluation.context.machine.id} · Operação {evaluation.context.operation.id}
+               {activeEvaluation.context.client.name} · {activeEvaluation.context.farm.name} · Área{" "}
+               {activeEvaluation.context.area.name} · {activeEvaluation.context.machine.type}{" "}
+               {activeEvaluation.context.machine.id} · Operação {activeEvaluation.context.operation.id}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {evaluation.context.farm.municipality}/{evaluation.context.farm.state} ·{" "}
+               {activeEvaluation.context.farm.municipality}/{activeEvaluation.context.farm.state} ·{" "}
               {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(
-                new Date(evaluation.context.operation.scheduledAt),
+                 new Date(activeEvaluation.context.operation.scheduledAt),
               )}
             </p>
           </div>
@@ -329,8 +553,84 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
           </span>
         </div>
       </Card>
+      ) : (
+        <Card className="border-dashed">
+          <div className="text-sm font-semibold">Preview da operação</div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {previewStatus === "loading"
+              ? "Carregando operação do cliente selecionado…"
+              : previewError ?? "Sem operação disponível para preview."}
+          </p>
+          {previewStatus === "error" && (
+            <button
+              type="button"
+              onClick={() => setReloadVersion((value) => value + 1)}
+              className="mt-3 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              Tentar novamente
+            </button>
+          )}
+        </Card>
+      )}
 
       <Card className="border-primary/20">
+        <div className="mb-5 grid gap-3 border-b border-border pb-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Configuração
+            </span>
+            <select
+              value={selectedScope}
+              onChange={(event) => handleScopeChange(event.target.value)}
+              className="mt-2 h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
+            >
+              <option value={GLOBAL_SCOPE}>Padrão Sompo</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>{client.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className="md:text-right">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">
+              {selectedClientId === null
+                ? "PADRÃO SOMPO"
+                : configuration?.hasOverride
+                  ? "CONFIGURAÇÃO PERSONALIZADA"
+                  : "USANDO PADRÃO SOMPO"}
+            </div>
+            {selectedClient && (
+              <div className="mt-1 text-sm font-medium text-foreground">{selectedClient.name}</div>
+            )}
+            {configuration?.updatedAt && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                Atualizado em {new Intl.DateTimeFormat("pt-BR", {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                }).format(new Date(configuration.updatedAt))}
+              </div>
+            )}
+            {configuration && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                Origem: {configuration.source}
+              </div>
+            )}
+          </div>
+        </div>
+        {loadStatus === "error" && (
+          <div className="mb-5 rounded-lg border border-danger/30 bg-danger/5 p-3">
+            <p role="alert" className="text-sm text-danger">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => setReloadVersion((value) => value + 1)}
+              className="mt-2 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        )}
+        {loadStatus === "loading" && (
+          <p className="mb-5 text-sm text-muted-foreground">Carregando configuração…</p>
+        )}
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.75fr)]">
           <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
@@ -349,6 +649,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             step={1}
             value={[mlWeight]}
             onValueChange={([value]) => handleDraftChange(value)}
+             disabled={loadStatus !== "ready" || !canEdit || revisionConflict}
               aria-label="Peso do modelo ML no Risk Engine V2"
             className="mt-4"
           />
@@ -391,15 +692,37 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             <p className="text-xs font-medium text-foreground">
                 Configuração ativa: ML {savedMlWeight}% / Operacional {savedOperationalRulesWeight}%
             </p>
+             {selectedClientId && !configuration?.hasOverride && !editingOverride && (
+               <button
+                 type="button"
+                 onClick={() => {
+                   setEditingOverride(true);
+                   setSaveStatus("idle");
+                 }}
+                 className="mt-3 rounded-md border border-primary px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/5"
+               >
+                 Personalizar para este cliente
+               </button>
+             )}
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={!hasUnsavedChanges || !isValidDraft || saveStatus === "saving"}
+                 disabled={!hasUnsavedChanges || !canEdit || !isValidDraft || saveStatus === "saving" || loadStatus !== "ready" || revisionConflict}
                 className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saveStatus === "saving" ? "Salvando…" : "Salvar pesos"}
               </button>
+               {selectedClientId && configuration?.hasOverride && (
+                 <button
+                   type="button"
+                   onClick={handleRemoveOverride}
+                   disabled={saveStatus === "saving" || revisionConflict}
+                   className="inline-flex h-9 items-center justify-center rounded-md border border-border px-4 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+                 >
+                   Voltar ao Padrão Sompo
+                 </button>
+               )}
               {hasUnsavedChanges && (
                 <span className="text-xs font-medium text-warning-foreground">
                   Alterações não salvas
@@ -412,15 +735,26 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
               )}
             </div>
             {saveStatus === "error" && saveError && (
-              <p role="alert" className="mt-2 text-xs font-medium text-danger">
-                {saveError}
-              </p>
+               <div className="mt-2">
+                 <p role="alert" className="text-xs font-medium text-danger">{saveError}</p>
+                 {revisionConflict && (
+                   <button
+                     type="button"
+                     onClick={() => setReloadVersion((value) => value + 1)}
+                     className="mt-2 rounded-md border border-border px-3 py-1.5 text-xs font-semibold hover:bg-muted"
+                   >
+                     Recarregar valores
+                   </button>
+                 )}
+               </div>
             )}
           </div>
           </div>
         </div>
       </Card>
 
+      {previewEvaluation ? (
+      <>
       <div className="grid gap-4 xl:grid-cols-2">
         <Card className="border-info/30 bg-info/5">
           <div className="flex items-start justify-between gap-3">
@@ -565,9 +899,9 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             )?.label ?? "nenhum fator ativo"}
           </strong>
         </div>
-        <RecommendationCard rec={recommendation} />
+       <RecommendationCard rec={recommendation!} />
       </Card>
-      {evaluation.hasIncompleteInputs && (
+       {activeEvaluation.hasIncompleteInputs && (
         <details className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
           <summary className="cursor-pointer font-medium text-foreground">
             Detalhes da disponibilidade dos dados
@@ -577,6 +911,17 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             preparação do input V2. O resultado exibido é o retorno atual do motor.
           </p>
         </details>
+      )}
+      </>
+      ) : (
+        <Card>
+          <div className="text-sm font-semibold">Score Final simulado</div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {previewStatus === "loading"
+              ? "Carregando operação do cliente selecionado…"
+              : previewError ?? "Sem operação disponível para preview."}
+          </p>
+        </Card>
       )}
     </div>
   );

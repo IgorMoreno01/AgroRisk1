@@ -561,7 +561,14 @@ function RiskEngineConfigurationPanel() {
       </Card>
     );
   }
-  return <AdminV2RiskPanel evaluation={evaluation} />;
+  return (
+    <AdminV2RiskPanel
+      evaluation={evaluation}
+      clients={data.clients}
+      operations={data.operations}
+      operationRows={data.operationRows}
+    />
+  );
 }
 
 function OverviewPanel() {
