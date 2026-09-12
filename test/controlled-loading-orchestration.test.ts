@@ -121,7 +121,7 @@ describe("orquestração controlada das personas", () => {
     expect(operatorRoute).toContain("riskRequestGeneration");
     expect(sources[0]).toContain("!priorityPublished");
     expect(sources[1]).toContain("!priorityResolved.current");
-    expect(sources[2]).toContain("Carregar mais itens visíveis");
+    expect(sources[2]).toContain("Carregar mais equipamentos");
     expect(sources[2]).toContain("Carregar análise preventiva");
   });
 });

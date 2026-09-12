@@ -36,6 +36,8 @@ function ConsultorPage() {
   const [riskAttempt, setRiskAttempt] = useState(0);
   const [riskErrorByClient, setRiskErrorByClient] = useState<Record<string, string>>({});
   const [riskLoadingByClient, setRiskLoadingByClient] = useState<Record<string, boolean>>({});
+  const [equipmentLoadingByClient, setEquipmentLoadingByClient] = useState<Record<string, boolean>>({});
+  const [requestedEquipmentOperationIds, setRequestedEquipmentOperationIds] = useState<Record<string, string[]>>({});
   const [preventiveOverview, setPreventiveOverview] = useState<ConsultorDashboardSnapshot["preventiveOverview"] | null>(null);
   const [preventiveLoading, setPreventiveLoading] = useState(false);
   const [preventiveError, setPreventiveError] = useState<string | null>(null);
@@ -74,7 +76,11 @@ function ConsultorPage() {
   const selected = clients.find((item) => item.client.id === clientId) ?? clients[0];
   const client = selected?.client;
   const cs = selected?.summary;
-  const clientMachines = selected?.machines ?? [];
+  const visibleEquipmentOperationIds = requestedEquipmentOperationIds[selected?.client.id ?? ""] ?? [];
+  const visibleEquipmentOperationIdSet = new Set(visibleEquipmentOperationIds);
+  const clientMachines = (selected?.machines ?? []).filter(
+    (row) => row.operation && visibleEquipmentOperationIdSet.has(String(row.operation.id)),
+  );
   const clientAreas = selected?.areas ?? [];
   const recommendations = selected?.recommendation ? [selected.recommendation] : [];
   const topMachine = clientMachines.find(
@@ -90,6 +96,14 @@ function ConsultorPage() {
     (item) => item.component === "operational_rules",
   )?.weightedContribution ?? 0;
   const hasNoOperations = selected?.operations.length === 0;
+  const equipmentLoading = Boolean(equipmentLoadingByClient[selected?.client.id ?? ""]);
+  const hasMoreEligibleEquipment = Boolean(selected && selectConsultorPriorityOperationIds({
+    operations: selected.operations,
+    machines: selected.machinesData,
+    areas: selected.areasData,
+    evaluatedOperationIds: visibleEquipmentOperationIds,
+    limit: 1,
+  }).length);
   const noOperationsMessage = "Este cliente não possui operações monitoradas disponíveis.";
 
   const selectClient = (nextClientId: string) => {
@@ -106,6 +120,8 @@ function ConsultorPage() {
       return next;
     });
     setRiskLoadingByClient((current) => ({ ...current, [nextClientId]: false }));
+    setEquipmentLoadingByClient((current) => ({ ...current, [nextClientId]: false }));
+    setRequestedEquipmentOperationIds((current) => ({ ...current, [nextClientId]: [] }));
     setSnapshot((current) => current ? {
       ...current,
       clients: current.clients.map((item) => item.client.id === nextClientId ? {
@@ -132,12 +148,17 @@ function ConsultorPage() {
       operations: selected.operations,
       machines: selected.machinesData,
       areas: selected.areasData,
-      evaluatedOperationIds: selected.evaluatedOperationIds,
+      evaluatedOperationIds: visibleEquipmentOperationIds,
       limit: 3,
     });
-    if (!token || operationIds.length === 0) return;
+    if (!token || operationIds.length === 0 || equipmentLoading) return;
     if (!priorityPublished) return;
     const generation = ++secondaryGeneration.current;
+    setRequestedEquipmentOperationIds((current) => ({
+      ...current,
+      [selected.client.id]: [...new Set([...(current[selected.client.id] ?? []), ...operationIds.map(String)])],
+    }));
+    setEquipmentLoadingByClient((current) => ({ ...current, [selected.client.id]: true }));
     setRiskErrorByClient((current) => {
       const next = { ...current };
       delete next[selected.client.id];
@@ -165,6 +186,9 @@ function ConsultorPage() {
         ...current,
         [selected.client.id]: error instanceof Error ? error.message : "Não foi possível calcular os itens visíveis.",
       }));
+    }).finally(() => {
+      if (generation !== secondaryGeneration.current) return;
+      setEquipmentLoadingByClient((current) => ({ ...current, [selected.client.id]: false }));
     });
   };
 
@@ -189,6 +213,7 @@ function ConsultorPage() {
     secondaryGeneration.current += 1;
     requestedClients.current.delete(clientId);
     setRiskLoadingByClient((current) => ({ ...current, [clientId]: false }));
+    setEquipmentLoadingByClient((current) => ({ ...current, [clientId]: false }));
     setPriorityPublished(priorityPublishedClients.current.has(clientId));
   }, [clientId]);
 
@@ -204,6 +229,10 @@ function ConsultorPage() {
       limit: 1,
     });
     if (operationIds.length === 0) return;
+    setRequestedEquipmentOperationIds((current) => ({
+      ...current,
+      [selected.client.id]: [String(operationIds[0])],
+    }));
     priorityOperationByClient.current[selected.client.id] = operationIds[0]!;
     requestedClients.current.add(selected.client.id);
     setRiskLoadingByClient((current) => ({ ...current, [selected.client.id]: true }));
@@ -371,7 +400,7 @@ function ConsultorPage() {
           <div className="space-y-2">
             {priorityLoading && <p className="text-sm text-muted-foreground">Calculando...</p>}
             {!priorityLoading && !topMachine && <p className="text-sm text-muted-foreground">{riskErrorByClient[selected.client.id] ? "Não disponível" : hasNoOperations ? noOperationsMessage : "Análise ainda não solicitada."}</p>}
-            {clientMachines.slice(0, 1).map((row) => (
+            {clientMachines.map((row) => (
               <div key={row.machine.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-foreground">{row.machine.name}</div>
@@ -381,9 +410,9 @@ function ConsultorPage() {
                 <RiskBadge score={row.score} />
               </div>
             ))}
-            {selected.evaluatedOperationIds.length < selected.operations.length && (
-              <button type="button" onClick={loadMoreVisible} disabled={!priorityPublished} className="w-full rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-60">
-                {priorityPublished ? "Carregar mais itens visíveis" : "Calculando item prioritário..."}
+            {hasMoreEligibleEquipment && (
+              <button type="button" onClick={loadMoreVisible} disabled={!priorityPublished || equipmentLoading} className="w-full rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-60">
+                {equipmentLoading ? "Carregando equipamentos..." : priorityPublished ? "Carregar mais equipamentos" : "Calculando item prioritário..."}
               </button>
             )}
           </div>
