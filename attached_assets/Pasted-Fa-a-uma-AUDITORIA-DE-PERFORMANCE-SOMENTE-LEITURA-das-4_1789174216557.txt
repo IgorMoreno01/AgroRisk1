@@ -1,0 +1,192 @@
+Faça uma AUDITORIA DE PERFORMANCE SOMENTE LEITURA das 4 personas:
+
+- Admin/Sompo
+- Gestor
+- Operador
+- Consultor
+
+NÃO altere arquivos.
+NÃO altere banco.
+NÃO altere Risk Engine.
+NÃO altere Vite.
+NÃO execute Git mutável.
+
+CONTEXTO:
+
+Percepção atual de UX:
+
+Admin/Sompo: lento
+Gestor: um pouco lento
+Operador: rápido
+Consultor: lento
+
+O Vite já foi corrigido anteriormente e o watcher está estável.
+
+OBJETIVO:
+medir o carregamento real de cada persona e identificar por que
+Admin, Gestor e Consultor ainda demoram mais que Operador.
+
+==================================================
+1. MEDIR CADA PERSONA
+==================================================
+
+Para cada rota, medir cold load:
+
+/admin
+/gestor
+/operador
+/consultor
+
+Separar tempo em:
+
+A. PostgreSQL
+B. montagem do snapshot
+C. Risk Engine local
+D. geocodificação
+E. clima
+F. altitude
+G. hidrografia/Overpass
+H. serialização
+I. tempo até primeira renderização útil
+J. tempo até todos os scores ficarem prontos
+
+Formato:
+
+PERSONA | PRIMEIRA TELA | COMPLETO | PRINCIPAL GARGALO
+
+==================================================
+2. VOLUME PROCESSADO
+==================================================
+
+Para cada persona informe:
+
+- clientes carregados
+- fazendas/áreas
+- máquinas
+- operações
+- quantas avaliações V2 são executadas no load inicial
+
+==================================================
+3. CHAMADAS EXTERNAS
+==================================================
+
+Para cada persona:
+
+- quantidade lógica de chamadas
+- quantidade HTTP real após cache/deduplicação
+- quais provedores são usados
+- se alguma chamada é sequencial
+- se a UI espera terminar antes de renderizar
+
+==================================================
+4. LOADING DO FRONT
+==================================================
+
+Audite os estados React das 4 rotas.
+
+Informe:
+
+- qual condição mostra loading global;
+- quando esse loading é removido;
+- se Risk Engine/API externa bloqueia a primeira renderização;
+- se existe Promise.all desnecessário;
+- se existe carregamento progressivo/lazy.
+
+==================================================
+5. COMPARAR COM OPERADOR
+==================================================
+
+Explique exatamente por que Operador é rápido.
+
+Identifique quais características dele podem ser reaproveitadas
+em Gestor, Consultor e Admin sem alterar funcionalidade.
+
+==================================================
+6. ADMIN
+==================================================
+
+Confirmar se o carregamento progressivo implementado no Admin
+está realmente funcionando no navegador.
+
+Informar:
+
+- Fase A tempo real
+- lote inicial V2
+- se algum componente ainda espera cobertura completa
+- se algum tab dispara carga excessiva automaticamente
+
+==================================================
+7. CONSULTOR
+==================================================
+
+Investigar especialmente:
+
+"Carregando carteira / Consultando clientes e riscos calculados..."
+
+Identificar:
+
+- quantas operações são avaliadas antes de liberar a tela;
+- se há enriquecimento externo em massa;
+- se existe carregamento progressivo;
+- se o Consultor poderia renderizar carteira/cliente antes dos scores.
+
+==================================================
+8. GESTOR
+==================================================
+
+Identificar:
+
+- por que é mais lento que Operador;
+- quantas avaliações são feitas;
+- se score médio/ranking exige toda a carteira;
+- o que poderia ser lazy sem prejudicar UX.
+
+==================================================
+9. VITE
+==================================================
+
+Responder explicitamente:
+
+A alteração do watcher do Vite é responsável pela lentidão atual?
+SIM/NÃO
+
+Justificar tecnicamente em até 3 linhas.
+
+==================================================
+10. RESUMO FINAL
+==================================================
+
+Responder:
+
+A. Admin
+tempo primeira tela:
+tempo completo:
+gargalo:
+
+B. Gestor
+tempo primeira tela:
+tempo completo:
+gargalo:
+
+C. Operador
+tempo primeira tela:
+tempo completo:
+gargalo:
+
+D. Consultor
+tempo primeira tela:
+tempo completo:
+gargalo:
+
+E. Vite é causa?
+SIM/NÃO
+
+F. causa transversal principal:
+
+G. quais personas precisam de carregamento progressivo?
+
+H. correção recomendada em no máximo 5 pontos.
+
+NÃO implemente nada.
+
+PARE AO FINAL.
