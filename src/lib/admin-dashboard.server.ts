@@ -172,7 +172,7 @@ export async function evaluateAdminDashboardRiskBatch(
     const contextByOperationId = new Map(
       (relational.riskContexts ?? []).map((context) => [context.operation.id, context]),
     );
-    const memoizedServices = memoizeAdminRiskServices(externalServices ?? adminExternalServices);
+    const memoizedServices = externalServices ?? adminExternalServices;
     return mapWithConcurrency(selected, 6, async (operation) => {
       const context = contextByOperationId.get(operation.id) ??
         buildFallbackOperationRiskContext(
@@ -181,7 +181,12 @@ export async function evaluateAdminDashboardRiskBatch(
           areaById.get(operation.areaId)!,
           clientById.get(operation.clientId)!,
         );
-      const evaluation = await evaluateOperationRiskV2(context, weights, memoizedServices);
+      const evaluation = await evaluateOperationRiskV2(
+        context,
+        weights,
+        memoizedServices,
+        { priority: batchSize === 1 ? "interactive" : "background" },
+      );
       return { operation, evaluation, ...toEntityRisk(evaluation.result) };
     });
   };

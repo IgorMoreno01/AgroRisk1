@@ -1,0 +1,103 @@
+Otimize SOMENTE o pipeline de enriquecimento externo usado pelo Risk Engine V2.
+
+NÃO alterar:
+- fórmula
+- modelo ML
+- thresholds
+- pesos
+- UI
+- banco/schema
+- V1
+
+OBJETIVO:
+reduzir ao máximo a latência para transformar uma operação em um
+RiskEngineV2EvaluationInput completo.
+
+FOCO PRINCIPAL:
+geocodificação + clima + altitude + hidrografia.
+
+1. PERFILAR
+Meça para uma operação:
+- geocoding
+- weather
+- elevation
+- water
+- mapper
+- Risk Engine
+
+Identifique o maior gargalo.
+
+2. CACHE COMPARTILHADO
+Reutilizar resultados entre operações com mesmo:
+- município/UF
+- coordenada
+- data
+
+Não repetir chamada equivalente.
+
+3. IN-FLIGHT DEDUP
+Se duas operações pedirem o mesmo recurso simultaneamente:
+usar a mesma Promise.
+
+4. AGRUPAMENTO
+Quando um batch contiver operações da mesma fazenda/localização,
+resolver contexto externo uma única vez e distribuir para todas.
+
+5. PARALELISMO
+Após obter coordenada:
+executar em paralelo:
+- clima
+- altitude
+- água
+
+6. CACHE NEGATIVO
+Erros 401, 429, timeout ou indisponibilidade recente:
+usar cache negativo curto para evitar repetição imediata.
+
+7. PROVIDERS
+Não insistir repetidamente em provider sabidamente falhando.
+
+Preservar fallback seguro já existente.
+
+8. PRIORIDADE
+Operação visível/prioritária deve ser processada antes de background.
+
+Não permitir que batches secundários ocupem recursos antes dela.
+
+9. RETORNO PARCIAL
+Assim que uma operação prioritária terminar:
+retornar/atualizar imediatamente.
+
+Não esperar o batch inteiro.
+
+10. SEGURANÇA
+Não inventar inputs.
+
+Em falha:
+- missing_imputed para ML
+- synthetic_demo onde já previsto
+
+11. TESTES
+Cobrir:
+- deduplicação
+- agrupamento
+- cache positivo
+- cache negativo
+- paralelismo
+- prioridade
+- resultado matemático idêntico com mesmos inputs
+
+Rodar:
+bun test
+bun run build
+
+RELATÓRIO:
+A. tempo antes por operação
+B. tempo depois por operação
+C. maior gargalo antes
+D. chamadas eliminadas por cache/dedup
+E. agrupamento por localização implementado?
+F. primeiro score prioritário em quanto tempo?
+G. fórmula/modelo alterados? NÃO
+
+PARE AO FINAL.

@@ -20,7 +20,7 @@ const OVERPASS_SERVERS = [
 ] as const;
 
 // Códigos HTTP que justificam tentar o próximo servidor (não é erro permanente de query)
-const RETRYABLE_STATUS = new Set([406, 429, 500, 502, 503, 504]);
+const RETRYABLE_STATUS = new Set([401, 406, 408, 429, 500, 502, 503, 504]);
 
 // A query Overpass usa [timeout:20] internamente — o cliente precisa de pelo menos esse
 // valor mais margem de rede. 12s abortava antes do servidor terminar. 25s dá folga segura.
@@ -31,6 +31,18 @@ const FALLBACK_TIMEOUT_MS = 6_000;
 const CACHE_TTL_S = 30 * 60; // 30 minutos (dados geográficos mudam pouco)
 const DEFAULT_RADIUS_M = 5_000;
 const inFlight = new Map<string, Promise<WaterGeoData>>();
+const SERVER_BREAKER_COOLDOWN_MS = 30_000;
+const serverUnavailableUntil = new Map<string, number>();
+
+function isTransientProviderError(error: unknown): boolean {
+  const candidate = error as { name?: unknown; status?: unknown; message?: unknown };
+  const status = typeof candidate.status === "number" ? candidate.status : undefined;
+  if (status !== undefined && (status === 401 || status === 408 || status === 429 || status >= 500)) return true;
+  const message = typeof candidate.message === "string" ? candidate.message.toLowerCase() : "";
+  return candidate.name === "AbortError" ||
+    /(?:http\s*)?(?:401|408|429|5\d{2})\b/.test(message) ||
+    /\b(?:timeout|timed out|abort|aborted|network|fetch failed|unavailable|indisponível)\b/.test(message);
+}
 
 const WATER_TYPE_LABELS: Record<WaterFeatureType, string> = {
   river: "Rio",
@@ -300,6 +312,11 @@ out geom;
     const serverUrl = OVERPASS_SERVERS[i];
     const label = serverLabel(serverUrl);
     const isFallback = i > 0;
+    const unavailableUntil = serverUnavailableUntil.get(label) ?? 0;
+    if (unavailableUntil > Date.now()) {
+      errors.push(`${label}: circuit breaker ativo`);
+      continue;
+    }
 
     try {
       const result = await tryServer(serverUrl, query, lat, lon, radiusM, isFallback);
@@ -325,6 +342,12 @@ out geom;
         // Erro de query — não adianta tentar mais servidores
         console.error(`[WaterGeoAdapter] erro permanente em ${label}:`, msg);
         break;
+      }
+      // 401/429, timeout and network/provider-unavailable errors are
+      // short-lived provider failures. Skip this endpoint for a short period
+      // so concurrent batches immediately use the safe fallback path.
+      if (isTransientProviderError(err)) {
+        serverUnavailableUntil.set(label, Date.now() + SERVER_BREAKER_COOLDOWN_MS);
       }
 
       const isLast = i === OVERPASS_SERVERS.length - 1;

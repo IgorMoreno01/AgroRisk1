@@ -403,7 +403,7 @@ export async function evaluateGestorRiskBatch(
         : []
       ).map((context) => [context.operation.id, context]),
     );
-    const services = memoizeAdminRiskServices(externalServices ?? gestorExternalServices);
+    const services = externalServices ?? gestorExternalServices;
     const rows = await Promise.all(selected.map(async (operation) => {
       const context = contextByOperationId.get(operation.id) ?? buildFallbackOperationRiskContext(
         operation,
@@ -411,7 +411,12 @@ export async function evaluateGestorRiskBatch(
         areas.get(operation.areaId)!,
         clients.get(operation.clientId)!,
       );
-      const evaluation = await evaluateOperationRiskV2(context, weights, services);
+      const evaluation = await evaluateOperationRiskV2(
+        context,
+        weights,
+        services,
+        { priority: batchSize === 1 ? "interactive" : "background" },
+      );
       return {
         operation,
         evaluation,

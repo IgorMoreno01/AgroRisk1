@@ -356,7 +356,7 @@ export async function evaluateConsultorRiskBatch(
     const areaById = new Map(base.areas.map((area) => [area.id, area]));
     const machineById = new Map(base.machines.map((machine) => [machine.id, machine]));
     const contexts = new Map((relational.riskContexts ?? []).map((context) => [context.operation.id, context]));
-    const services = memoizeAdminRiskServices(externalServices ?? consultorExternalServices);
+    const services = externalServices ?? consultorExternalServices;
     const rows = await mapWithConcurrency(selected, 6, async (operation) => {
       const context = contexts.get(operation.id) ?? buildFallbackOperationRiskContext(
         operation,
@@ -364,7 +364,12 @@ export async function evaluateConsultorRiskBatch(
         areaById.get(operation.areaId)!,
         clientById.get(operation.clientId)!,
       );
-      const evaluation = await evaluateOperationRiskV2(context, weights, services);
+      const evaluation = await evaluateOperationRiskV2(
+        context,
+        weights,
+        services,
+        { priority: Math.min(limit, 12) === 1 ? "interactive" : "background" },
+      );
       return {
         operation,
         evaluation,

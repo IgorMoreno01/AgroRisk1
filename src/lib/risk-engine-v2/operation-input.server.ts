@@ -16,6 +16,10 @@ import type {
   OperationalWaterDistance,
 } from "./operational-rules";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./types";
+import {
+  createRiskExternalRuntime,
+  type RiskExternalPriority,
+} from "./external-runtime.server";
 
 export type RiskInputSource =
   | "postgres"
@@ -194,19 +198,21 @@ export async function buildOperationRiskV2EvaluationInput(
   context: OperationRiskRelationalContext,
   weights: RiskEngineV2Weights,
   services: OperationRiskExternalServices = defaultExternalServices,
+  options: { priority?: RiskExternalPriority } = {},
 ): Promise<Omit<OperationRiskEvaluation, "result">> {
   const entitySource: RiskInputSource =
     context.source === "postgres" ? "postgres" : "synthetic_demo";
   const mlInput = missingMlInput(context.operation, context.farm);
   const referenceDate = mlInput.DT_REFERENCIA;
+  const runtime = createRiskExternalRuntime(services, options.priority ?? "background");
   const location = context.source === "postgres"
-    ? await services.geocode(context.farm.municipality, context.farm.state)
+    ? await runtime.geocode(context.farm.municipality, context.farm.state)
     : null;
   const [weather, elevation, waterData] = location
     ? await Promise.all([
-        services.historicalWeather(location.latitude, location.longitude, referenceDate),
-        services.elevation(location.latitude, location.longitude),
-        services.water(location.latitude, location.longitude).catch(() => null),
+        runtime.historicalWeather(location.latitude, location.longitude, referenceDate),
+        runtime.elevation(location.latitude, location.longitude),
+        runtime.water(location.latitude, location.longitude),
       ])
     : [null, null, null];
   const realWaterDistanceM =
@@ -290,8 +296,9 @@ export async function evaluateOperationRiskV2(
   context: OperationRiskRelationalContext,
   weights: RiskEngineV2Weights,
   services: OperationRiskExternalServices = defaultExternalServices,
+  options: { priority?: RiskExternalPriority } = {},
 ): Promise<OperationRiskEvaluation> {
-  const evaluation = await buildOperationRiskV2EvaluationInput(context, weights, services);
+  const evaluation = await buildOperationRiskV2EvaluationInput(context, weights, services, options);
   const result = evaluateRiskEngineV2(evaluation.input);
   const { sampleProbabilityInternal: _internal, ...publicMl } = result.ml;
   return {

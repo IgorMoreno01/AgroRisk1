@@ -25,6 +25,12 @@ Nunca chamar APIs externas diretamente do frontend.
 ## Cache
 `src/lib/cache.server.ts` — TTL: clima 10min, água 30min, rota 15min, terreno 1h.
 
+O enriquecimento V2 usa também um runtime compartilhado com cache positivo/negativo, deduplicação in-flight e prioridade interativa. Chaves geográficas preservam 6 casas decimais; o cache é LRU e limitado.
+
+**Why:** arredondamento mais agressivo pode cruzar os thresholds hídricos de 50/100/150 m; cache sem limite cresce indefinidamente; filas sem fairness podem bloquear background ou a operação visível.
+
+**How to apply:** use funções de provider estáveis entre batches, converta em ausência apenas erros transitórios e mantenha promoção por chave com progresso obrigatório do background após burst limitado.
+
 ## Coordenadas aproximadas (mock GPS)
 `src/lib/area-coordinates.ts` — lookup por areaId/clientId. Sorriso/MT, Cascavel/PR, Rio Verde/GO.
 

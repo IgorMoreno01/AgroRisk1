@@ -273,7 +273,12 @@ async function buildSnapshot(
     : { ...area, condition: "Condição estável (demonstração)" };
   const context = relational.riskContexts?.find((item) => item.operation.id === operation.id)
     ?? buildFallbackOperationRiskContext(operation, machine, area, client);
-  const evaluation = await evaluateOperationRiskV2(context, engineWeights, externalServices);
+  const evaluation = await evaluateOperationRiskV2(
+    context,
+    engineWeights,
+    externalServices,
+    { priority: "interactive" },
+  );
   const result = evaluation.result;
   const risk = toPresentationRisk(result);
   const recommendation = centralRecommendation(operation, result);
