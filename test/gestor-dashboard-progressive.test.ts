@@ -79,7 +79,8 @@ describe("carregamento progressivo do Gestor", () => {
     const route = readFileSync("src/routes/gestor.tsx", "utf8");
     const api = readFileSync("src/lib/api/gestor-dashboard.functions.ts", "utf8");
     expect(route).toContain("evaluateGestorRiskBatch");
-    expect(route).toContain("}, 75)");
+    expect(route).not.toContain("}, 75)");
+    expect(route).toContain("requestBatch(visibleIds, true)");
     expect(route).toContain("Calculando...");
     expect(route).toContain("onValueChange={handleRankingTabChange}");
     expect(api).toContain(".max(12)");

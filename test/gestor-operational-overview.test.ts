@@ -108,7 +108,7 @@ describe("visão operacional PostgreSQL do Gestor", () => {
     const repository = readFileSync("src/lib/data/postgres-repository.server.ts", "utf8");
     expect(api).toContain("z.object({ token:");
     expect(api).not.toMatch(/clientIds?\s*:/);
-    expect(route).toContain("getGestorDashboard({ data: { token } })");
+    expect(route).toContain("getGestorDashboard({ data: { token }, signal })");
     expect(repository).toContain("m.client_id = ANY");
     expect(repository).toContain("o.client_id = ANY");
     expect(repository.match(/LIMIT 5/g)?.length).toBeGreaterThanOrEqual(2);
