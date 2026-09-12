@@ -34,7 +34,6 @@ export interface OperationalRulesInput {
 }
 
 const RULES_VERSION = "1.0";
-const OPERATIONAL_SCALE_FACTOR = 100 / 48;
 
 const WATER_POINTS: Record<OperationalWaterDistance, number> = {
   acima_150: 0,
@@ -46,16 +45,16 @@ const WATER_POINTS: Record<OperationalWaterDistance, number> = {
 const OPERATION_POINTS: Record<OperationalActivityType, number> = {
   "Trabalho no campo": 12.5,
   Transporte: 18.75,
-  "Pulverização": 8 * OPERATIONAL_SCALE_FACTOR,
-  Colheita: 8 * OPERATIONAL_SCALE_FACTOR,
-  "Deslocamento interno": 4 * OPERATIONAL_SCALE_FACTOR,
+  "Pulverização": 16.666666666666668,
+  Colheita: 16.666666666666668,
+  "Deslocamento interno": 8.333333333333334,
   "Operação próxima de água": 31.25,
 };
 
 const TERRAIN_POINTS: Record<OperationalTerrain, number> = {
   normal: 0,
-  umido: 7 * OPERATIONAL_SCALE_FACTOR,
-  critico: 13 * OPERATIONAL_SCALE_FACTOR,
+  umido: 14.583333333333334,
+  critico: 27.083333333333332,
   baixa_aderencia: 31.25,
 };
 

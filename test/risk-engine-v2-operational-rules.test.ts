@@ -22,7 +22,7 @@ describe("Risk Engine V2 · regras operacionais isoladas", () => {
     expect(result.dominantFactor).toBe("operation_type");
     expect(result.factors.map(({ points, active }) => ({ points, active }))).toEqual([
       { points: 0, active: false },
-      { points: 4 * (100 / 48), active: true },
+      { points: 8.333333333333334, active: true },
       { points: 0, active: false },
     ]);
   });
@@ -37,7 +37,7 @@ describe("Risk Engine V2 · regras operacionais isoladas", () => {
     expect(result.factors.map((factor) => factor.points)).toEqual([
       25,
       12.5,
-      7 * (100 / 48),
+      14.583333333333334,
     ]);
     expect(result.operationalRulesScore).toBe(52);
     expect(result.dominantFactor).toBe("water_proximity");
@@ -76,7 +76,7 @@ describe("Risk Engine V2 · regras operacionais isoladas", () => {
     });
     expect(factorById(result, "terrain")).toMatchObject({
       category: "terrain",
-      points: 13 * (100 / 48),
+      points: 27.083333333333332,
       maxPoints: 31.25,
       active: true,
     });
@@ -144,19 +144,35 @@ describe("Risk Engine V2 · regras operacionais isoladas", () => {
       baixa_aderencia: 15,
     } as const;
     let combinations = 0;
+    const level = (score: number) =>
+      score >= 71 ? "alto" : score >= 41 ? "medio" : "baixo";
 
     for (const [waterDistance, waterPoints] of Object.entries(water)) {
       for (const [operationType, operationPoints] of Object.entries(operation)) {
         for (const [terrainType, terrainPoints] of Object.entries(terrain)) {
-          const legacyScore = Math.round(
-            ((waterPoints + operationPoints + terrainPoints) / 48) * 100,
-          );
+          const legacyPoints = [
+            waterPoints * (100 / 48),
+            operationPoints * (100 / 48),
+            terrainPoints * (100 / 48),
+          ];
+          const legacyScore = Math.round(legacyPoints.reduce((total, points) => total + points, 0));
           const result = evaluateOperationalRulesV2({
             waterDistance: waterDistance as OperationalRulesInput["waterDistance"],
             operationType: operationType as OperationalRulesInput["operationType"],
             terrain: terrainType as OperationalRulesInput["terrain"],
           });
+          const currentPoints = result.factors.map((factor) => factor.points);
+          const legacyFinalScore = Math.round(50 * 0.7 + legacyScore * 0.3);
+          const currentFinalScore = Math.round(
+            50 * 0.7 + result.operationalRulesScore * 0.3,
+          );
+
+          currentPoints.forEach((points, index) => {
+            expect(points).toBeCloseTo(legacyPoints[index]!, 12);
+          });
           expect(result.operationalRulesScore).toBe(legacyScore);
+          expect(currentFinalScore).toBe(legacyFinalScore);
+          expect(level(currentFinalScore)).toBe(level(legacyFinalScore));
           combinations += 1;
         }
       }
