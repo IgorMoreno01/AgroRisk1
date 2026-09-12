@@ -10,6 +10,10 @@ import {
   type OperationRiskExternalServices,
   type OperationRiskRelationalContext,
 } from "./risk-engine-v2/operation-input.server";
+import { geocodeMunicipality } from "./adapters/location.server";
+import { getHistoricalClimate } from "./adapters/climate.server";
+import { getElevationForRisk } from "./adapters/terrain.server";
+import { getWaterGeo } from "./adapters/water-geo.server";
 import type { RiskEngineV2Result, RiskEngineV2Weights } from "./risk-engine-v2/types";
 import type {
   AdminAreaRow,
@@ -75,6 +79,125 @@ const newestOperation = (operations: readonly Operation[]): Operation | undefine
       left.id.localeCompare(right.id)
     );
   })[0];
+
+const adminRiskBatchInFlight = new Map<string, Promise<AdminOperationRow[]>>();
+const adminSnapshotInFlight = new Map<string, Promise<AdminDashboardSnapshot>>();
+export const ADMIN_RISK_BATCH_LIMIT = 20;
+const adminExternalServices: OperationRiskExternalServices = {
+  geocode: geocodeMunicipality,
+  historicalWeather: getHistoricalClimate,
+  elevation: getElevationForRisk,
+  water: getWaterGeo,
+};
+
+export function selectPrioritizedAdminOperations(
+  operations: readonly Operation[],
+  operationIds: readonly string[] = [],
+  limit = 12,
+): Operation[] {
+  const ids = new Set(operationIds);
+  return [...operations]
+    .filter((operation) => ids.size === 0 || ids.has(operation.id))
+    .sort((left, right) =>
+      (right.status === "Em andamento" ? 1 : 0) -
+        (left.status === "Em andamento" ? 1 : 0) ||
+      Date.parse(right.scheduledAt) - Date.parse(left.scheduledAt) ||
+      left.id.localeCompare(right.id),
+    )
+    .slice(0, Math.max(1, Math.min(limit, ADMIN_RISK_BATCH_LIMIT)));
+}
+
+export function memoizeAdminRiskServices(
+  services: OperationRiskExternalServices,
+): OperationRiskExternalServices {
+  const geocodes = new Map<string, ReturnType<OperationRiskExternalServices["geocode"]>>();
+  const weather = new Map<string, ReturnType<OperationRiskExternalServices["historicalWeather"]>>();
+  const elevations = new Map<string, ReturnType<OperationRiskExternalServices["elevation"]>>();
+  const waters = new Map<string, ReturnType<OperationRiskExternalServices["water"]>>();
+  return {
+    geocode: (municipality, state) => {
+      const key = `${municipality}|${state}`;
+      let promise = geocodes.get(key);
+      if (!promise) {
+        promise = services.geocode(municipality, state);
+        geocodes.set(key, promise);
+      }
+      return promise;
+    },
+    historicalWeather: (lat, lon, date) => {
+      const key = `${lat}|${lon}|${date}`;
+      let promise = weather.get(key);
+      if (!promise) {
+        promise = services.historicalWeather(lat, lon, date);
+        weather.set(key, promise);
+      }
+      return promise;
+    },
+    elevation: (lat, lon) => {
+      const key = `${lat}|${lon}`;
+      let promise = elevations.get(key);
+      if (!promise) {
+        promise = services.elevation(lat, lon);
+        elevations.set(key, promise);
+      }
+      return promise;
+    },
+    water: (lat, lon) => {
+      const key = `${lat}|${lon}`;
+      let promise = waters.get(key);
+      if (!promise) {
+        promise = services.water(lat, lon);
+        waters.set(key, promise);
+      }
+      return promise;
+    },
+  };
+}
+
+export async function evaluateAdminDashboardRiskBatch(
+  operationIds: readonly string[] = [],
+  limit = 12,
+  externalServices?: OperationRiskExternalServices,
+): Promise<AdminOperationRow[]> {
+  const ids = [...new Set(operationIds)].slice(0, ADMIN_RISK_BATCH_LIMIT);
+  const batchSize = Math.max(1, Math.min(limit, ADMIN_RISK_BATCH_LIMIT));
+  const configuration = getRiskEngineV2Configuration();
+  const weights = { ml: configuration.mlWeight, operationalRules: configuration.operationalRulesWeight };
+  const run = async () => {
+    const relational = await readRepository(postgresRepository);
+    const selected = selectPrioritizedAdminOperations(relational.operations, ids, batchSize);
+    const clientById = new Map(relational.clients.map((client) => [client.id, client]));
+    const areaById = new Map(relational.areas.map((area) => [area.id, area]));
+    const machineById = new Map(relational.machines.map((machine) => [machine.id, machine]));
+    const contextByOperationId = new Map(
+      (relational.riskContexts ?? []).map((context) => [context.operation.id, context]),
+    );
+    const memoizedServices = memoizeAdminRiskServices(externalServices ?? adminExternalServices);
+    return mapWithConcurrency(selected, 6, async (operation) => {
+      const context = contextByOperationId.get(operation.id) ??
+        buildFallbackOperationRiskContext(
+          operation,
+          machineById.get(operation.machineId)!,
+          areaById.get(operation.areaId)!,
+          clientById.get(operation.clientId)!,
+        );
+      const evaluation = await evaluateOperationRiskV2(context, weights, memoizedServices);
+      return { operation, evaluation, ...toEntityRisk(evaluation.result) };
+    });
+  };
+  if (externalServices) return run();
+
+  const key = `${ids.slice().sort().join(",")}:${batchSize}:${weights.ml}:${weights.operationalRules}`;
+  const existing = adminRiskBatchInFlight.get(key);
+  if (existing) return existing;
+  const promise = run();
+  adminRiskBatchInFlight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    adminRiskBatchInFlight.delete(key);
+  }
+}
 
 async function mapWithConcurrency<T, R>(
   values: readonly T[],
@@ -230,6 +353,47 @@ export async function buildAdminDashboardSnapshot(
   };
 }
 
+/**
+ * Phase A deliberately stops at the relational boundary.  Risk Engine V2 is
+ * requested by the Admin endpoint in small batches, so opening the dashboard
+ * never fans out to climate/geocoding providers for the whole portfolio.
+ */
+export async function buildAdminDashboardRelationalSnapshot(
+  relational: RelationalSnapshot,
+  source: "postgres" | "mock",
+  degraded: boolean,
+  weights: RiskEngineV2Weights,
+  operationalOverview: AdminOperationalOverview = {
+    maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] },
+    activity: [],
+  },
+): Promise<AdminDashboardSnapshot> {
+  const alertCountsByMachine = relational.alerts.reduce<Record<string, number>>((counts, alert) => {
+    counts[alert.machineId] = (counts[alert.machineId] ?? 0) + 1;
+    return counts;
+  }, {});
+  return {
+    source,
+    degraded,
+    loadedAt: new Date().toISOString(),
+    weights,
+    clients: relational.clients,
+    areas: relational.areas,
+    machines: relational.machines,
+    operations: relational.operations,
+    machineRows: [],
+    areaRows: [],
+    clientRows: [],
+    operationRows: [],
+    operationTypeRows: [],
+    machineDistribution: { alto: 0, medio: 0, baixo: 0, total: 0 },
+    areaDistribution: { alto: 0, medio: 0, baixo: 0, total: 0 },
+    operationalOverview,
+    alertCountsByMachine,
+    riskCoverageComplete: false,
+  };
+}
+
 const readRepository = async (repository: AgroRiskRepository): Promise<RelationalSnapshot> => {
   if (repository === postgresRepository) {
     const [relational, alerts] = await Promise.all([
@@ -267,22 +431,42 @@ export async function loadAdminDashboardSnapshot(
           ? listAdminOperationalOverview()
           : Promise.resolve({ maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] }, activity: [] }),
       ]);
-      return await buildAdminDashboardSnapshot(
-        relational, "postgres", false, weights, operationalOverview, externalServices,
-      );
+      // Explicit service injection is retained for integrations/tests that
+      // need the complete legacy snapshot. Production Admin loads relational
+      // data first and evaluates only through the authenticated batch API.
+      const useProgressiveAdminLoad =
+        primary === postgresRepository && fallback === mockRepository && !externalServices;
+      return useProgressiveAdminLoad
+        ? await buildAdminDashboardRelationalSnapshot(
+            relational, "postgres", false, weights, operationalOverview,
+          )
+        : await buildAdminDashboardSnapshot(
+            relational, "postgres", false, weights, operationalOverview, externalServices,
+          );
     } catch (error) {
       console.error("[admin-dashboard] PostgreSQL indisponível; usando fallback mock.", {
         error: error instanceof Error ? error.message : "Erro desconhecido",
       });
-      return await buildAdminDashboardSnapshot(
-        await readRepository(fallback), "mock", true, weights, undefined, externalServices,
-      );
+      // Custom repositories/services retain the legacy contract. Only the
+      // production postgres+mock path uses the relational Phase A fallback.
+      if (primary !== postgresRepository || fallback !== mockRepository || externalServices) {
+        return await buildAdminDashboardSnapshot(
+          await readRepository(fallback), "mock", true, weights, undefined, externalServices,
+        );
+      }
+      return await buildAdminDashboardRelationalSnapshot(await readRepository(fallback), "mock", true, weights);
     }
   };
   if (primary !== postgresRepository || fallback !== mockRepository || externalServices) return load();
-  return cacheOrFetch(
-    `admin-dashboard:v2:${configuration.mlWeight}:${configuration.operationalRulesWeight}`,
-    15,
-    load,
-  );
+
+  const cacheKey = `admin-dashboard:v2:${configuration.mlWeight}:${configuration.operationalRulesWeight}:postgres:relational`;
+  const existing = adminSnapshotInFlight.get(cacheKey);
+  if (existing) return existing;
+  const promise = cacheOrFetch(cacheKey, 15, load);
+  adminSnapshotInFlight.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    adminSnapshotInFlight.delete(cacheKey);
+  }
 }

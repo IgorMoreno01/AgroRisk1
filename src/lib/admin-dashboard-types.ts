@@ -98,4 +98,7 @@ export interface AdminDashboardSnapshot {
   machineDistribution: AdminRiskDistribution;
   areaDistribution: AdminRiskDistribution;
   operationalOverview: AdminOperationalOverview;
+  /** Counts come from the relational query and never imply a risk score. */
+  alertCountsByMachine?: Record<string, number>;
+  riskCoverageComplete?: boolean;
 }

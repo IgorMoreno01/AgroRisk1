@@ -4,8 +4,8 @@ import { AppLayout, Card } from "@/components/app-layout";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
 import { type MachineStatus } from "@/lib/mock-data";
 import {
-  allRecommendationsConsolidated, countByCategory, countByPriority,
-  type RecCategory, type RecPriority,
+  countByCategory, countByPriority,
+  type AdminRecRow, type RecCategory, type RecPriority,
 } from "@/lib/recommendations";
 import { Tractor, Building2, Map as MapIcon, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal } from "lucide-react";
 
@@ -13,10 +13,11 @@ import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
 import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { useRiskConfig } from "@/lib/risk-config";
-import { AdminV2RiskPanel } from "@/components/admin-v2-risk-panel";
+import { AdminV2RiskPanel, recommendationForV2Result } from "@/components/admin-v2-risk-panel";
 import { getStoredSessionToken } from "@/lib/auth";
-import { getAdminDashboard } from "@/lib/api/admin-dashboard.functions";
+import { evaluateAdminRiskBatch, getAdminDashboard } from "@/lib/api/admin-dashboard.functions";
 import type { AdminDashboardSnapshot } from "@/lib/admin-dashboard-types";
+import { mergeAdminOperationRows } from "@/lib/admin-dashboard-merge";
 import { AdminOperationalOverview } from "@/components/admin-operational-overview";
 import { useActionableAlerts } from "@/lib/actionable-alerts";
 
@@ -54,12 +55,15 @@ const createTabs = (snapshot: AdminDashboardSnapshot, actionableAlertCount: numb
   { id: "motor-risco" as const, label: "Configuração do motor de risco", icon: SlidersHorizontal, count: null as number | null },
 ];
 
-const AdminDashboardContext = createContext<AdminDashboardSnapshot | null>(null);
+const AdminDashboardContext = createContext<{
+  snapshot: AdminDashboardSnapshot;
+  setSnapshot: React.Dispatch<React.SetStateAction<AdminDashboardSnapshot | null>>;
+} | null>(null);
 
 function useAdminDashboardData() {
-  const snapshot = useContext(AdminDashboardContext);
-  if (!snapshot) throw new Error("AdminDashboardContext não foi inicializado.");
-  return snapshot;
+  const state = useContext(AdminDashboardContext);
+  if (!state) throw new Error("AdminDashboardContext não foi inicializado.");
+  return state.snapshot;
 }
 
 function useAdminDashboardLoader() {
@@ -110,17 +114,95 @@ function useAdminDashboardLoader() {
 }
 
 function AdminPage() {
-  const { weights } = useRiskConfig();
   const { snapshot, error } = useAdminDashboardLoader();
+  const [riskSnapshot, setRiskSnapshot] = useState<AdminDashboardSnapshot | null>(null);
+  const requestedRiskIds = useRef(new Set<string>());
+  const requestedRiskTabs = useRef(new Set<TabId>());
   const [tab, setTab] = useState<TabId>("visao-geral");
   const { snapshot: actionableAlerts } = useActionableAlerts();
   const tabs = useMemo(
-    () => (snapshot ? createTabs(snapshot, actionableAlerts.alerts.length) : []),
-    [snapshot, actionableAlerts.alerts.length],
+    () => (riskSnapshot ? createTabs(riskSnapshot, actionableAlerts.alerts.length) : []),
+    [riskSnapshot, actionableAlerts.alerts.length],
   );
 
   useEffect(() => {
     if (!snapshot) return;
+    requestedRiskIds.current.clear();
+    requestedRiskTabs.current.clear();
+    setRiskSnapshot(snapshot);
+    const token = getStoredSessionToken();
+    if (!token || snapshot.operations.length === 0) return;
+    const ids = [...snapshot.operations]
+      .sort((left, right) =>
+        (right.status === "Em andamento" ? 1 : 0) -
+          (left.status === "Em andamento" ? 1 : 0) ||
+        Date.parse(right.scheduledAt) - Date.parse(left.scheduledAt),
+      )
+      .slice(0, 12)
+      .map((operation) => operation.id);
+    ids.forEach((id) => requestedRiskIds.current.add(id));
+    void evaluateAdminRiskBatch({ data: { token, operationIds: ids, limit: 12 } })
+      .then((result) => {
+        if (result.ok) setRiskSnapshot((current) => current
+          ? mergeAdminOperationRows(current, result.operationRows)
+          : current);
+      })
+      .catch(() => {
+        // The relational dashboard remains usable; each score keeps its
+        // granular "Calculando..." state instead of inventing a value.
+      });
+  }, [snapshot]);
+
+  // Each section requests only the operation IDs needed for its first visible
+  // page. In particular, opening Operations never evaluates the remaining
+  // portfolio eagerly.
+  useEffect(() => {
+    if (!riskSnapshot || tab === "visao-geral" || tab === "alerts" || tab === "motor-risco") return;
+    if (requestedRiskTabs.current.has(tab)) return;
+    const token = getStoredSessionToken();
+    if (!token) return;
+    requestedRiskTabs.current.add(tab);
+    const visibleMachines = tab === "areas"
+      ? riskSnapshot.machines.filter((machine) =>
+          riskSnapshot.areas.slice(0, 4).some((area) => area.id === machine.areaId))
+      : tab === "clients"
+        ? riskSnapshot.machines.filter((machine) =>
+            riskSnapshot.clients.slice(0, 2).some((client) => client.id === machine.clientId))
+        : riskSnapshot.machines.slice(0, 12);
+    const needsCurrentMachineRisk =
+      tab === "machines" || tab === "rankings" || tab === "scores" ||
+      tab === "areas" || tab === "clients" || tab === "recs";
+    const operations = needsCurrentMachineRisk
+      ? visibleMachines.flatMap((machine) =>
+          riskSnapshot.operations
+            .filter((operation) => operation.machineId === machine.id)
+            .sort((left, right) =>
+              (right.status === "Em andamento" ? 1 : 0) -
+                (left.status === "Em andamento" ? 1 : 0) ||
+              Date.parse(right.scheduledAt) - Date.parse(left.scheduledAt) ||
+              left.id.localeCompare(right.id),
+            )
+            .slice(0, 1),
+        )
+      : riskSnapshot.operations;
+    const ids = operations
+      .map((operation) => operation.id)
+      .filter((id) => !requestedRiskIds.current.has(id))
+      .slice(0, 12);
+    if (ids.length === 0) return;
+    ids.forEach((id) => requestedRiskIds.current.add(id));
+    void evaluateAdminRiskBatch({ data: { token, operationIds: ids, limit: ids.length } })
+      .then((result) => {
+        if (!result.ok) return;
+        setRiskSnapshot((current) => current
+          ? mergeAdminOperationRows(current, result.operationRows)
+          : current);
+      })
+      .catch(() => undefined);
+  }, [tab, riskSnapshot]);
+
+  useEffect(() => {
+    if (!riskSnapshot) return;
     const applyHash = () => {
       const h = window.location.hash.replace(/^#/, "");
       if (!h || h === "topo") { setTab("visao-geral"); return; }
@@ -131,9 +213,9 @@ function AdminPage() {
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, [snapshot, tabs]);
+  }, [riskSnapshot, tabs]);
 
-  if (!snapshot) {
+   if (!riskSnapshot) {
     return (
       <AppLayout
         title="Dashboard da Sompo"
@@ -148,14 +230,12 @@ function AdminPage() {
     );
   }
 
-  const current = tabs.find((t) => t.id === tab)!;
-  const currentCount = tab === "recs"
-    ? allRecommendationsConsolidated(weights).length
-    : current.count;
+   const current = tabs.find((t) => t.id === tab)!;
+  const currentCount = tab === "recs" ? riskSnapshot.operationRows.length : current.count;
   const Icon = current.icon;
 
   return (
-    <AdminDashboardContext.Provider value={snapshot}>
+       <AdminDashboardContext.Provider value={{ snapshot: riskSnapshot, setSnapshot: setRiskSnapshot }}>
       <AppLayout
       title="Dashboard da Sompo"
       subtitle="Visão consolidada dos clientes, frota, áreas, riscos e recomendações do MVP"
@@ -165,14 +245,14 @@ function AdminPage() {
       <div
         className={cn(
           "mb-4 rounded-lg border px-3 py-2 text-xs",
-          snapshot.degraded
+           riskSnapshot.degraded
             ? "border-warning/40 bg-warning/10 text-warning-foreground"
             : "border-success/30 bg-success/5 text-success",
         )}
       >
-        {snapshot.degraded
+         {riskSnapshot.degraded
           ? "PostgreSQL indisponível para clientes, máquinas, áreas e operações — exibindo fallback seguro com dados demonstrativos."
-          : `Clientes, máquinas, áreas e operações: PostgreSQL · scores calculados pelo Risk Engine V2 com pesos Climático ${snapshot.weights.ml}% / Operacional ${snapshot.weights.operationalRules}%; sinais ainda não persistidos usam os vetores de referência homologados.`}
+           : `Clientes, máquinas, áreas e operações: PostgreSQL · scores calculados pelo Risk Engine V2 com pesos Climático ${riskSnapshot.weights.ml}% / Operacional ${riskSnapshot.weights.operationalRules}%; sinais ainda não persistidos usam os vetores de referência homologados.`}
       </div>
 
       <div className="mb-5 flex items-center gap-3 border-b border-border pb-3">
@@ -219,19 +299,12 @@ function RiskEngineConfigurationPanel() {
 }
 
 function OverviewPanel() {
-  const { weights } = useRiskConfig();
   const data = useAdminDashboardData();
   const mDist = data.machineDistribution;
   const aDist = data.areaDistribution;
-  const avgScore = data.machineRows.length
-    ? Math.round(
-        data.machineRows.reduce((total, row) => total + row.score, 0) / data.machineRows.length,
-      )
-    : 0;
   const { snapshot: actionableAlerts } = useActionableAlerts();
   const criticalAlerts = actionableAlerts.alerts.filter((alert) => alert.severity === "critical").length;
-  const opsAtRisk = data.operationRows.filter((row) => row.level === "alto").length;
-  const topRecs = allRecommendationsConsolidated(weights)
+  const topRecs = adminV2RecommendationRows(data)
     .filter((r) => r.rec.priority === "alta")
     .slice(0, 4);
 
@@ -239,8 +312,8 @@ function OverviewPanel() {
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Máquinas monitoradas" value={String(data.machines.length)} tone="info" />
-        <SummaryCard label="Operações em risco" value={String(opsAtRisk)} tone="warning" />
-        <SummaryCard label="Score médio da frota" value={String(avgScore)} tone={avgScore >= 71 ? "danger" : avgScore >= 41 ? "warning" : "success"} />
+         <SummaryCard label="Operações em risco" value="Calculando..." tone="warning" />
+         <SummaryCard label="Score médio da frota" value="Calculando..." tone="info" />
         <SummaryCard label="Alertas críticos" value={String(criticalAlerts)} tone="danger" />
       </div>
 
@@ -250,9 +323,9 @@ function OverviewPanel() {
         <Card>
           <div className="mb-3 text-sm font-semibold text-foreground">Distribuição da frota por risco</div>
           <div className="space-y-2 text-sm">
-            <DistRow label="Risco alto"  mq={mDist.alto}  ar={aDist.alto}  tone="danger" />
-            <DistRow label="Risco médio" mq={mDist.medio} ar={aDist.medio} tone="warning" />
-            <DistRow label="Risco baixo" mq={mDist.baixo} ar={aDist.baixo} tone="success" />
+             <DistRow label="Risco alto"  mq={mDist.total ? mDist.alto : "Calculando..."}  ar={aDist.total ? aDist.alto : "Calculando..."} tone="danger" />
+             <DistRow label="Risco médio" mq={mDist.total ? mDist.medio : "Calculando..."} ar={aDist.total ? aDist.medio : "Calculando..."} tone="warning" />
+             <DistRow label="Risco baixo" mq={mDist.total ? mDist.baixo : "Calculando..."} ar={aDist.total ? aDist.baixo : "Calculando..."} tone="success" />
           </div>
         </Card>
 
@@ -279,7 +352,7 @@ function OverviewPanel() {
   );
 }
 
-function DistRow({ label, mq, ar, tone }: { label: string; mq: number; ar: number; tone: "danger" | "warning" | "success" }) {
+function DistRow({ label, mq, ar, tone }: { label: string; mq: number | string; ar: number | string; tone: "danger" | "warning" | "success" }) {
   const dot = { danger: "bg-danger", warning: "bg-warning", success: "bg-success" }[tone];
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2">
@@ -396,8 +469,8 @@ const priorityTone: Record<RecPriority, string> = {
 };
 
 function RecsPanel() {
-  const { weights } = useRiskConfig();
-  const rows = allRecommendationsConsolidated(weights);
+  const data = useAdminDashboardData();
+  const rows = adminV2RecommendationRows(data);
   const byCat = countByCategory(rows);
   const byPrio = countByPriority(rows);
 
@@ -455,6 +528,24 @@ function RecsPanel() {
       </Card>
     </div>
   );
+}
+
+function adminV2RecommendationRows(data: AdminDashboardSnapshot): AdminRecRow[] {
+  const priorityOrder: Record<RecPriority, number> = { alta: 0, "média": 1, baixa: 2 };
+  return data.operationRows
+    .map((row): AdminRecRow => ({
+      clientName: row.evaluation.context.client.name,
+      target: row.evaluation.context.machine.code,
+      targetType: "equipamento",
+      score: row.score,
+      level: row.level,
+      rec: recommendationForV2Result(row.evaluation.result),
+    }))
+    .sort((left, right) =>
+      priorityOrder[left.rec.priority] - priorityOrder[right.rec.priority] ||
+      right.score - left.score ||
+      left.target.localeCompare(right.target),
+    );
 }
 
 function SummaryCard({
@@ -597,7 +688,7 @@ function MachinesTable() {
   return (
     <TableShell headers={["ID", "Equipamento", "Tipo", "Cliente", "Área", "Operador", "Status", "Score", "Risco"]}>
       {data.machines.map((m) => {
-        const risk = riskByMachine.get(m.id)!;
+        const risk = riskByMachine.get(m.id);
         return (
           <tr key={m.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{m.id}</TD>
@@ -607,8 +698,8 @@ function MachinesTable() {
             <TD>{m.area}</TD>
             <TD>{m.operator}</TD>
             <TD><StatusPill label={m.status} tone={machineStatusTone[m.status]} /></TD>
-            <TD><ScoreBar score={risk.score} /></TD>
-            <TD><RiskBadge score={risk.score} /></TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : "Calculando..."}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : "Calculando..."}</TD>
           </tr>
         );
       })}
@@ -622,7 +713,7 @@ function ClientsTable() {
   return (
     <TableShell headers={["ID", "Cliente", "Localização", "Operação", "Máquinas", "Score médio", "Risco"]}>
       {data.clients.map((c) => {
-        const risk = riskByClient.get(c.id)!;
+        const risk = riskByClient.get(c.id);
         return (
           <tr key={c.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{c.id}</TD>
@@ -630,8 +721,8 @@ function ClientsTable() {
             <TD>{c.location}</TD>
             <TD>{c.mainOperation}</TD>
             <TD className="tabular-nums">{c.machineCount}</TD>
-            <TD><ScoreBar score={risk.score} /></TD>
-            <TD><RiskBadge score={risk.score} /></TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : "Calculando..."}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : "Calculando..."}</TD>
           </tr>
         );
       })}
@@ -645,7 +736,7 @@ function AreasTable() {
   return (
     <TableShell headers={["ID", "Área", "Cliente", "Tipo", "Condição", "Água", "Score", "Risco"]}>
       {data.areas.map((a) => {
-        const risk = riskByArea.get(a.id)!;
+        const risk = riskByArea.get(a.id);
         return (
           <tr key={a.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
@@ -654,8 +745,8 @@ function AreasTable() {
             <TD>{a.type}</TD>
             <TD>{a.condition || "Não informada"}</TD>
             <TD className="capitalize">{a.nearWater}</TD>
-            <TD><ScoreBar score={risk.score} /></TD>
-            <TD><RiskBadge score={risk.score} /></TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : "Calculando..."}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : "Calculando..."}</TD>
           </tr>
         );
       })}
@@ -665,11 +756,16 @@ function AreasTable() {
 
 function OperationsTable() {
   const data = useAdminDashboardData();
+  const dashboardState = useContext(AdminDashboardContext);
+  const [page, setPage] = useState(0);
   const riskByOperation = new Map(data.operationRows.map((row) => [row.operation.id, row]));
+  const pageSize = 12;
+  const visibleOperations = data.operations.slice(page * pageSize, (page + 1) * pageSize);
   return (
-    <TableShell headers={["ID", "Máquina", "Tipo", "Área", "Início", "Duração", "Status", "Score", "Risco"]}>
-      {data.operations.map((o) => {
-        const risk = riskByOperation.get(o.id)!;
+    <div className="space-y-3">
+      <TableShell headers={["ID", "Máquina", "Tipo", "Área", "Início", "Duração", "Status", "Score", "Risco"]}>
+      {visibleOperations.map((o) => {
+        const risk = riskByOperation.get(o.id);
         return (
           <tr key={o.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{o.id}</TD>
@@ -684,11 +780,33 @@ function OperationsTable() {
                 tone={o.status === "Em andamento" ? "green" : o.status === "Concluída" ? "blue" : o.status === "Agendada" ? "yellow" : "red"}
               />
             </TD>
-            <TD><ScoreBar score={risk.score} /></TD>
-            <TD><RiskBadge score={risk.score} /></TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : "Calculando..."}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : "Calculando..."}</TD>
           </tr>
         );
       })}
-    </TableShell>
+      </TableShell>
+      <div className="flex items-center justify-between px-4 pb-4 text-sm text-muted-foreground">
+        <span>Página {page + 1}</span>
+        {page < Math.ceil(data.operations.length / pageSize) - 1 && (
+          <button
+            type="button"
+            className="rounded-md border border-border px-3 py-1.5 text-foreground hover:bg-muted"
+            onClick={() => {
+              const next = page + 1;
+              setPage(next);
+              const token = getStoredSessionToken();
+              const ids = data.operations.slice(next * pageSize, (next + 1) * pageSize).map((operation) => operation.id);
+              if (!token || !dashboardState) return;
+              void evaluateAdminRiskBatch({ data: { token, operationIds: ids, limit: ids.length } }).then((result) => {
+                if (result.ok) dashboardState.setSnapshot((current) => current
+                  ? mergeAdminOperationRows(current, result.operationRows)
+                  : current);
+              });
+            }}
+          >Próxima página</button>
+        )}
+      </div>
+    </div>
   );
 }
