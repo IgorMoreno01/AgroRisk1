@@ -147,12 +147,14 @@ describe("visão operacional global do Admin/Sompo", () => {
   test("API aceita somente sessão e a rota não faz polling", () => {
     const api = readFileSync("src/lib/api/admin-dashboard.functions.ts", "utf8");
     const route = readFileSync("src/routes/admin.tsx", "utf8");
+    const loader = readFileSync("src/lib/admin-dashboard-loader.ts", "utf8");
     const repository = readFileSync("src/lib/data/postgres-repository.server.ts", "utf8");
     expect(api).toContain("z.object({");
     expect(api).toContain("token:");
     expect(api).not.toMatch(/clientIds?|globalScope\s*:/);
     expect(api).toContain("session.globalScope");
-    expect(route).toContain("getAdminDashboard({ data: { token } })");
+    expect(route).toContain("useAdminDashboardLoader");
+    expect(loader).toContain("getAdminDashboard({ data: { token }, signal })");
     expect(route).not.toContain("setInterval");
     expect(repository.match(/LIMIT 5/g)?.length).toBeGreaterThanOrEqual(4);
   });

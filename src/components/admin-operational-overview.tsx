@@ -30,8 +30,8 @@ export function AdminOperationalOverview({ overview }: { overview: AdminOperatio
   };
 
   return (
-    <div id="admin-operational-overview" className="grid scroll-mt-20 gap-4 xl:grid-cols-3">
-      <Card className="h-full">
+    <div id="admin-operational-overview" className="grid scroll-mt-20 items-start gap-4 xl:grid-cols-3">
+      <Card>
         <SectionTitle title="Alertas acionáveis" description="Visão global por prioridade e recência" />
         <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
           <span>Críticos <b className="text-foreground">{counts.critical}</b></span>
@@ -40,7 +40,7 @@ export function AdminOperationalOverview({ overview }: { overview: AdminOperatio
           <span>Novos <b className="text-foreground">{counts.new}</b></span>
           <span>Reconhecidos <b className="text-foreground">{counts.acknowledged}</b></span>
         </div>
-        <div className="space-y-2">
+        <div className="max-h-60 space-y-2 overflow-y-auto">
           {topAlerts.length === 0
             ? <p className="text-sm text-muted-foreground">Nenhum alerta acionável.</p>
             : topAlerts.map((alert) => (
@@ -59,7 +59,7 @@ export function AdminOperationalOverview({ overview }: { overview: AdminOperatio
           <span>Atrasadas <b className="text-danger">{overview.maintenance.overdueCount}</b></span>
           <span>Próximas <b className="text-warning-foreground">{overview.maintenance.dueSoonCount}</b></span>
         </div>
-        <div className="space-y-2 text-xs">
+        <div className="max-h-60 space-y-2 overflow-y-auto text-xs">
           {overview.maintenance.top.length === 0 && (
             <p className="text-muted-foreground">Nenhuma manutenção pendente.</p>
           )}
@@ -81,7 +81,7 @@ export function AdminOperationalOverview({ overview }: { overview: AdminOperatio
 
       <Card>
         <SectionTitle title="Atividade operacional recente" description="Últimos registros globais" />
-        <div className="space-y-2 text-xs">
+        <div className="max-h-60 space-y-2 overflow-y-auto text-xs">
           {overview.activity.length === 0 && (
             <p className="text-muted-foreground">Nenhuma atividade registrada.</p>
           )}

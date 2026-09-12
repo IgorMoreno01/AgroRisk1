@@ -1,27 +1,39 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
-const presentationFiles = [
+const adminPresentationSource = [
   "../src/components/admin-v2-risk-panel.tsx",
+  "../src/routes/admin.tsx",
+]
+  .map((file) => readFileSync(new URL(file, import.meta.url), "utf8"))
+  .join("\n");
+const otherPersonaPresentationSource = [
   "../src/components/persona-v2-risk-panel.tsx",
   "../src/components/machine-detail-dialog.tsx",
   "../src/components/area-detail-dialog.tsx",
-  "../src/routes/admin.tsx",
   "../src/routes/consultor.tsx",
-];
-
-const presentationSource = presentationFiles
+]
   .map((file) => readFileSync(new URL(file, import.meta.url), "utf8"))
   .join("\n");
+const presentationSource = `${adminPresentationSource}\n${otherPersonaPresentationSource}`;
 
 describe("nomenclatura dos macrocomponentes de risco", () => {
-  test("apresenta Climático e Operacional sem aliases antigos", () => {
-    expect(presentationSource).toContain("Score climático");
-    expect(presentationSource).toContain("Score operacional");
-    expect(presentationSource).toContain("Peso climático");
-    expect(presentationSource).toContain("Peso operacional");
-    expect(presentationSource).toContain("Climático");
-    expect(presentationSource).toContain("Operacional");
+  test("Admin apresenta SCORE ML, operacional e final sem aliases climáticos", () => {
+    expect(adminPresentationSource).toContain("SCORE ML");
+    expect(adminPresentationSource).toContain("SCORE OPERACIONAL");
+    expect(adminPresentationSource).toContain("SCORE FINAL");
+    expect(adminPresentationSource).toContain("Peso do modelo ML");
+    expect(adminPresentationSource).toContain("Peso operacional");
+    expect(adminPresentationSource).not.toContain("Score climático");
+    expect(adminPresentationSource).not.toContain("Peso climático");
+    expect(adminPresentationSource).not.toContain("Climático");
+  });
+
+  test("outras personas preservam Climático e Operacional sem aliases antigos", () => {
+    expect(otherPersonaPresentationSource).toContain("Score climático");
+    expect(otherPersonaPresentationSource).toContain("Score operacional");
+    expect(otherPersonaPresentationSource).toContain("Climático");
+    expect(otherPersonaPresentationSource).toContain("Operacional");
 
     for (const obsoleteLabel of [
       "Modelo ML",
@@ -31,7 +43,7 @@ describe("nomenclatura dos macrocomponentes de risco", () => {
       "Configuração ativa: ML",
       "Pesos Sompo: ML",
     ]) {
-      expect(presentationSource).not.toContain(obsoleteLabel);
+      expect(otherPersonaPresentationSource).not.toContain(obsoleteLabel);
     }
   });
 

@@ -10,10 +10,10 @@ const panelSource = readFileSync(
 );
 
 describe("Admin · hierarquia executiva do Risk Engine V2", () => {
-  test("exibe scores climático, operacional e final em escala de 100", () => {
-    expect(panelSource).toContain("Score climático");
-    expect(panelSource).toContain("Score operacional");
-    expect(panelSource).toContain("Score final de risco");
+  test("exibe scores ML, operacional e final em escala de 100", () => {
+    expect(panelSource).toContain("SCORE ML");
+    expect(panelSource).toContain("SCORE OPERACIONAL");
+    expect(panelSource).toContain("SCORE FINAL");
     expect(panelSource.match(/\/ 100/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -62,10 +62,11 @@ describe("Admin · hierarquia executiva do Risk Engine V2", () => {
   });
 
   test("identifica inputs incompletos e mantém semântica sem probabilidade real", () => {
-    expect(panelSource).toContain("clima {quality.weather");
-    expect(panelSource).toContain("altitude {quality.altitude");
-    expect(panelSource).toContain('Água {quality.water === "hydrography_api" ? "real" : "sintética"}');
-    expect(panelSource).toContain('quality.terrain === "synthetic_demo" ? "sintético" : "validado"');
+    expect(panelSource).toContain("evaluation.hasIncompleteInputs");
+    expect(panelSource).toContain("Detalhes da disponibilidade dos dados");
+    expect(panelSource).toContain("Parte dos sinais necessários para a avaliação");
+    expect(panelSource).not.toContain("quality.weather");
+    expect(panelSource).not.toContain("quality.altitude");
     expect(panelSource).not.toContain("sampleProbabilityInternal");
     expect(panelSource.toLowerCase()).not.toContain("probabilidade real");
     expect(panelSource.toLowerCase()).not.toContain("chance de sinistro");

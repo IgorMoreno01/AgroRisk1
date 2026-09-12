@@ -3,7 +3,7 @@
 - [Configuração de pesos de risco](risk-weight-configuration.md) — pesos Sompo são server-side; inclinação é segurança operacional e nunca participa do score.
 - [Risco explicável](recommendation-origin.md) — recomendações e explicações compartilham score, componente e fator; inclinação permanece em telemetria separada.
 - [Fundação de dados](data-foundation.md) — PostgreSQL gerenciado fica atrás de repositórios compatíveis; mocks seguem como origem até uma migração explícita.
-- [Macrocomponentes de risco](risk-component-naming.md) — Sompo pondera Climático e Operacional; ML não é macrocomponente e será apenas fonte futura de probabilidades.
+- [Nomenclatura de risco](risk-component-naming.md) — Admin usa Score ML/Operacional/Final por instrução explícita; outras personas mantêm Climático/Operacional.
 - [Registro de execução do Operador](operator-execution-logs.md) — execução persiste separada de operações planejadas e não altera o cálculo de risco.
 - [Foco visual do Operador](operator-ui-focus.md) — a tela do Operador prioriza decisão e execução; detalhes técnicos permanecem fora da interface.
 - [Manutenção preventiva](preventive-maintenance.md) — manutenção segue a máquina autorizada da operação e permanece fora do cálculo de risco.

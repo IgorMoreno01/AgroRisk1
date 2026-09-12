@@ -3,10 +3,10 @@ name: Macrocomponentes de risco
 description: Nomenclatura conceitual dos componentes ponderados pela Sompo e papel futuro do ML.
 ---
 
-Os dois macrocomponentes ponderados pela Sompo são **Climático** e **Operacional**. Use score, peso e contribuição climáticos; e score, peso e contribuição operacionais. Não apresente “ML” ou “regras operacionais” como nomes desses macrocomponentes.
+Nas personas fora do Admin, os macrocomponentes continuam apresentados como **Climático** e **Operacional**. No Admin/Sompo, a instrução explícita de 2026-09-12 substitui essa nomenclatura visual: apresentar **Score ML**, **Score Operacional** e **Score Final**, usando os valores reais do V2. Não chamar todo o ML de Climático.
 
-O ML será integrado posteriormente apenas como fonte de probabilidades. Identificadores internos legados do motor podem continuar usando nomes como `ml` e `operational_rules` enquanto forem contratos técnicos, mas nunca devem definir a nomenclatura exibida.
+Identificadores internos como `ml` e `operational_rules` não autorizam apresentar o score relativo como probabilidade calibrada.
 
-**Why:** Chamar os componentes de “ML” e “regras operacionais” descreve uma arquitetura que não corresponde ao modelo conceitual definido pela Sompo.
+**Why:** A referência visual aprovada para recuperar o Admin exige distinguir o score relativo ML de seus sinais Clima/Estrutura/Histórico, sem alterar o modelo ou propagar essa mudança às outras personas.
 
-**How to apply:** Em qualquer interface, explicação, relatório ou DTO de apresentação, traduza os componentes internos para Climático e Operacional sem alterar matemática, pesos ou contratos internos do Risk Engine.
+**How to apply:** No Admin, exiba somente saídas existentes do V2, sem inventar outro modelo ou probabilidade. Fora do Admin, mantenha a nomenclatura Climático/Operacional. Não altere matemática, pesos ou contratos internos por causa dos rótulos.

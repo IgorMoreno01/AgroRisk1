@@ -15,11 +15,19 @@ import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { useRiskConfig } from "@/lib/risk-config";
 import { AdminV2RiskPanel, recommendationForV2Result } from "@/components/admin-v2-risk-panel";
 import { getStoredSessionToken } from "@/lib/auth";
-import { evaluateAdminRiskBatch, getAdminDashboard } from "@/lib/api/admin-dashboard.functions";
+import { evaluateAdminRiskBatch } from "@/lib/api/admin-dashboard.functions";
 import type { AdminDashboardSnapshot } from "@/lib/admin-dashboard-types";
 import { mergeAdminOperationRows } from "@/lib/admin-dashboard-merge";
 import { AdminOperationalOverview } from "@/components/admin-operational-overview";
 import { useActionableAlerts } from "@/lib/actionable-alerts";
+import {
+  ADMIN_PRIORITY_TIMEOUT_MESSAGE,
+  ADMIN_RISK_REQUEST_TIMEOUT_MS,
+  ADMIN_SECONDARY_TIMEOUT_MESSAGE,
+  createSingleFlightRequestController,
+  preserveAdminRiskSnapshot,
+  useAdminDashboardLoader,
+} from "@/lib/admin-dashboard-loader";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "AgroRisk · Admin / Sompo" }] }),
@@ -60,6 +68,8 @@ const AdminDashboardContext = createContext<{
   setSnapshot: React.Dispatch<React.SetStateAction<AdminDashboardSnapshot | null>>;
   requestMoreRisk: (operationIds: string[]) => void;
   riskErrorsByOperationId: Record<string, string>;
+  priorityPending: boolean;
+  priorityOperationId: string | null;
 } | null>(null);
 
 function useAdminDashboardData() {
@@ -68,83 +78,156 @@ function useAdminDashboardData() {
   return state.snapshot;
 }
 
-function useAdminDashboardLoader() {
-  const [snapshot, setSnapshot] = useState<AdminDashboardSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const inFlight = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (document.visibilityState !== "visible" || inFlight.current) return;
-      const token = getStoredSessionToken();
-      if (!token) {
-        if (!cancelled) setError("Sessão Admin/Sompo não encontrada.");
-        return;
-      }
-      inFlight.current = true;
-      try {
-        const result = await getAdminDashboard({ data: { token } });
-        if (cancelled) return;
-        if (!result.ok) {
-          setError(result.error);
-          return;
-        }
-        setSnapshot(result.snapshot);
-        setError(null);
-      } catch {
-        if (!cancelled) setError("Não foi possível carregar os dados do Admin/Sompo.");
-      } finally {
-        inFlight.current = false;
-      }
-    };
-
-    void load();
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void load();
-    };
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, []);
-
-  return { snapshot, error };
-}
-
 function AdminPage() {
-  const { snapshot, error } = useAdminDashboardLoader();
-  const [riskSnapshot, setRiskSnapshot] = useState<AdminDashboardSnapshot | null>(null);
+  const { snapshot, error, retry: retryDashboard } = useAdminDashboardLoader();
+  const [localRiskSnapshot, setRiskSnapshot] = useState<AdminDashboardSnapshot | null>(null);
+  // Phase A can render in the same pass as the loader; risk rows remain local
+  // and are overlaid once the priority/secondary evaluations resolve.
+  const riskSnapshot = localRiskSnapshot ?? snapshot;
   const [priorityRiskError, setPriorityRiskError] = useState<string | null>(null);
   const [priorityPublished, setPriorityPublished] = useState(false);
   const [riskErrorsByOperationId, setRiskErrorsByOperationId] = useState<Record<string, string>>({});
   const [priorityOperationId, setPriorityOperationId] = useState<string | null>(null);
   const requestedRiskIds = useRef(new Set<string>());
   const requestedRiskTabs = useRef(new Set<TabId>());
+  const riskSnapshotRef = useRef<AdminDashboardSnapshot | null>(null);
   const priorityGeneration = useRef(0);
+  const priorityOperationIdRef = useRef<string | null>(null);
   const secondaryGeneration = useRef(0);
+  const riskRequest = useRef(
+    createSingleFlightRequestController<Awaited<ReturnType<typeof evaluateAdminRiskBatch>>>(),
+  ).current;
+  const [riskRequestRevision, setRiskRequestRevision] = useState(0);
   const [tab, setTab] = useState<TabId>("visao-geral");
   const { snapshot: actionableAlerts } = useActionableAlerts();
   const tabs = useMemo(
     () => (riskSnapshot ? createTabs(riskSnapshot, actionableAlerts.alerts.length) : []),
     [riskSnapshot, actionableAlerts.alerts.length],
   );
+  const priorityPending = Boolean(priorityOperationId) &&
+    !priorityPublished &&
+    priorityRiskError === null;
+
+  const mergeRiskRows = (rows: Parameters<typeof mergeAdminOperationRows>[1]) => {
+    setRiskSnapshot((current) => {
+      const next = current ? mergeAdminOperationRows(current, rows) : current;
+      riskSnapshotRef.current = next;
+      return next;
+    });
+  };
+
+  const requestPriorityRisk = (id: string) => {
+    const token = getStoredSessionToken();
+    if (!token) {
+      requestedRiskIds.current.delete(id);
+      setPriorityRiskError("Sessão Admin/Sompo não encontrada.");
+      setPriorityPublished(true);
+      return;
+    }
+    // Timeout aborts the transport before releasing this single-flight slot;
+    // retries therefore never overlap an older evaluation request.
+    if (riskRequest.inFlight) return;
+    requestedRiskIds.current.add(id);
+    const generation = ++priorityGeneration.current;
+    const isCurrentPriority = () =>
+      generation === priorityGeneration.current &&
+      priorityOperationIdRef.current === id &&
+      !!riskSnapshotRef.current?.operations.some((operation) => operation.id === id);
+    const request = riskRequest.start(
+      (signal) => evaluateAdminRiskBatch({
+        data: { token, operationIds: [id], limit: 1 },
+        signal,
+      }),
+      {
+        timeoutMs: ADMIN_RISK_REQUEST_TIMEOUT_MS,
+        onTimeout: () => {
+          requestedRiskIds.current.delete(id);
+          if (!isCurrentPriority()) {
+            setRiskRequestRevision((revision) => revision + 1);
+            return;
+          }
+          setPriorityRiskError(ADMIN_PRIORITY_TIMEOUT_MESSAGE);
+          // A failed priority item must not block all secondary tabs forever.
+          setPriorityPublished(true);
+          setRiskRequestRevision((revision) => revision + 1);
+        },
+      },
+    );
+    if (!request.started) return;
+    void request.promise.then(
+      (result) => {
+        if (!request.isCurrent() || !isCurrentPriority()) {
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        if (!result.ok) {
+          requestedRiskIds.current.delete(id);
+          setPriorityRiskError(result.error);
+          setPriorityPublished(true);
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        if (!result.operationRows.some((row) => row.operation.id === id)) {
+          requestedRiskIds.current.delete(id);
+          setPriorityRiskError(
+            result.riskErrorsByOperationId?.[id] ??
+              "Não foi possível calcular o risco da operação prioritária.",
+          );
+          setPriorityPublished(true);
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        requestedRiskIds.current.add(id);
+        mergeRiskRows(result.operationRows);
+        setPriorityRiskError(null);
+        setPriorityPublished(true);
+        setRiskRequestRevision((revision) => revision + 1);
+      },
+      (requestError) => {
+        if (!request.isCurrent() || !isCurrentPriority()) {
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        requestedRiskIds.current.delete(id);
+        setPriorityRiskError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Não foi possível calcular o risco da operação prioritária.",
+        );
+        setPriorityPublished(true);
+        setRiskRequestRevision((revision) => revision + 1);
+      },
+    );
+  };
 
   useEffect(() => {
     if (!snapshot) return;
-    requestedRiskIds.current.clear();
-    requestedRiskTabs.current.clear();
-    priorityGeneration.current += 1;
-    secondaryGeneration.current += 1;
-    setRiskSnapshot(snapshot);
-    setPriorityRiskError(null);
-    setPriorityPublished(false);
-    setRiskErrorsByOperationId({});
-    const token = getStoredSessionToken();
-    if (!token || snapshot.operations.length === 0) return;
+    const previousSnapshot = riskSnapshotRef.current;
+    const nextSnapshot = preserveAdminRiskSnapshot(snapshot, previousSnapshot);
+    riskSnapshotRef.current = nextSnapshot;
+    setRiskSnapshot(nextSnapshot);
+    const operationIds = new Set(snapshot.operations.map((operation) => operation.id));
+    requestedRiskIds.current.forEach((id) => {
+      if (!operationIds.has(id)) requestedRiskIds.current.delete(id);
+    });
+
+    if (!previousSnapshot) {
+      requestedRiskIds.current.clear();
+      requestedRiskTabs.current.clear();
+      setPriorityRiskError(null);
+      setPriorityPublished(false);
+      setRiskErrorsByOperationId({});
+    }
+
+    if (snapshot.operations.length === 0) {
+      priorityGeneration.current += 1;
+      priorityOperationIdRef.current = null;
+      setPriorityOperationId(null);
+      setPriorityRiskError(null);
+      // Empty relational data is a resolved state, not an endless spinner.
+      setPriorityPublished(true);
+      return;
+    }
     const id = [...snapshot.operations]
       .sort((left, right) =>
         (right.status === "Em andamento" ? 1 : 0) -
@@ -153,65 +236,25 @@ function AdminPage() {
       )
       .map((operation) => operation.id)[0];
     if (!id) return;
+    const isSamePriority = previousSnapshot !== null && priorityOperationId === id;
+    if (!isSamePriority) priorityGeneration.current += 1;
+    priorityOperationIdRef.current = id;
     setPriorityOperationId(id);
-    requestedRiskIds.current.add(id);
-    const generation = ++priorityGeneration.current;
-    void evaluateAdminRiskBatch({ data: { token, operationIds: [id], limit: 1 } })
-      .then((result) => {
-        if (generation !== priorityGeneration.current) {
-          requestedRiskIds.current.delete(id);
-          return;
-        }
-        if (!result.ok) {
-          requestedRiskIds.current.delete(id);
-          setPriorityRiskError(result.error);
-          return;
-        }
-        if (!result.operationRows.some((row) => row.operation.id === id)) {
-          requestedRiskIds.current.delete(id);
-          setPriorityRiskError(result.riskErrorsByOperationId?.[id] ?? "Não foi possível calcular o risco da operação prioritária.");
-          return;
-        }
-        setRiskSnapshot((current) => current ? mergeAdminOperationRows(current, result.operationRows) : current);
-        setPriorityRiskError(null);
-        setPriorityPublished(true);
-      })
-      .catch(() => {
-        if (generation !== priorityGeneration.current) return;
-        requestedRiskIds.current.delete(id);
-        setPriorityRiskError("Não foi possível calcular o risco da operação prioritária.");
-      });
-  }, [snapshot]);
+    // A refresh with the same priority keeps both its score and its failure
+    // state.  Only the first load or a newly selected operation starts work.
+    if (isSamePriority && priorityPublished) return;
+    if (isSamePriority && riskRequest.inFlight) return;
+    setPriorityRiskError(null);
+    setPriorityPublished(false);
+    requestPriorityRisk(id);
+  }, [snapshot, riskRequestRevision]);
 
   const retryPriorityRisk = () => {
-    if (!riskSnapshot || !priorityOperationId) return;
+    if (!riskSnapshot || !priorityOperationId || riskRequest.inFlight) return;
     requestedRiskIds.current.delete(priorityOperationId);
-    const token = getStoredSessionToken();
-    if (!token) return;
-    const generation = ++priorityGeneration.current;
-    requestedRiskIds.current.add(priorityOperationId);
-    void evaluateAdminRiskBatch({ data: { token, operationIds: [priorityOperationId], limit: 1 } })
-      .then((result) => {
-        if (generation !== priorityGeneration.current) {
-          requestedRiskIds.current.delete(priorityOperationId);
-          return;
-        }
-        if (!result.ok || !result.operationRows.some((row) => row.operation.id === priorityOperationId)) {
-          requestedRiskIds.current.delete(priorityOperationId);
-          setPriorityRiskError(result.ok
-            ? result.riskErrorsByOperationId?.[priorityOperationId] ?? "Não foi possível calcular o risco da operação prioritária."
-            : result.error);
-          return;
-        }
-        setRiskSnapshot((current) => current ? mergeAdminOperationRows(current, result.operationRows) : current);
-        setPriorityRiskError(null);
-        setPriorityPublished(true);
-      })
-      .catch(() => {
-        if (generation !== priorityGeneration.current) return;
-        requestedRiskIds.current.delete(priorityOperationId);
-        setPriorityRiskError("Não foi possível calcular o risco da operação prioritária.");
-      });
+    setPriorityRiskError(null);
+    setPriorityPublished(false);
+    requestPriorityRisk(priorityOperationId);
   };
 
   const requestMoreRisk = (operationIds: string[]) => {
@@ -219,7 +262,15 @@ function AdminPage() {
     const ids = operationIds
       .filter((id) => !requestedRiskIds.current.has(id))
       .slice(0, 12);
-    if (!token || ids.length === 0) return;
+    if (ids.length === 0) return false;
+    if (!token) {
+      setRiskErrorsByOperationId((current) => ({
+        ...current,
+        ...Object.fromEntries(ids.map((id) => [id, "Sessão Admin/Sompo não encontrada."])),
+      }));
+      return false;
+    }
+    if (riskRequest.inFlight) return false;
     ids.forEach((id) => requestedRiskIds.current.add(id));
     setRiskErrorsByOperationId((current) => {
       const next = { ...current };
@@ -227,44 +278,93 @@ function AdminPage() {
       return next;
     });
     const generation = ++secondaryGeneration.current;
-    void evaluateAdminRiskBatch({ data: { token, operationIds: ids, limit: ids.length } })
-      .then((result) => {
-        if (generation !== secondaryGeneration.current) {
+    const isCurrentSecondary = () =>
+      generation === secondaryGeneration.current &&
+      ids.every((id) => riskSnapshotRef.current?.operations.some((operation) => operation.id === id));
+    const request = riskRequest.start(
+      (signal) => evaluateAdminRiskBatch({
+        data: { token, operationIds: ids, limit: ids.length },
+        signal,
+      }),
+      {
+        timeoutMs: ADMIN_RISK_REQUEST_TIMEOUT_MS,
+        onTimeout: () => {
           ids.forEach((id) => requestedRiskIds.current.delete(id));
+          if (!isCurrentSecondary()) {
+            setRiskRequestRevision((revision) => revision + 1);
+            return;
+          }
+          setRiskErrorsByOperationId((current) => ({
+            ...current,
+            ...Object.fromEntries(ids.map((id) => [id, ADMIN_SECONDARY_TIMEOUT_MESSAGE])),
+          }));
+          setRiskRequestRevision((revision) => revision + 1);
+        },
+      },
+    );
+    if (!request.started) {
+      ids.forEach((id) => requestedRiskIds.current.delete(id));
+      return false;
+    }
+    void request.promise.then(
+      (result) => {
+        if (!request.isCurrent() || !isCurrentSecondary()) {
+          if (generation === secondaryGeneration.current) {
+            ids.forEach((id) => requestedRiskIds.current.delete(id));
+          }
+          setRiskRequestRevision((revision) => revision + 1);
           return;
         }
         if (!result.ok) {
           ids.forEach((id) => requestedRiskIds.current.delete(id));
-          setRiskErrorsByOperationId((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, result.error])) }));
+          setRiskErrorsByOperationId((current) => ({
+            ...current,
+            ...Object.fromEntries(ids.map((id) => [id, result.error])),
+          }));
+          setRiskRequestRevision((revision) => revision + 1);
           return;
         }
         const completed = new Set(result.operationRows.map((row) => row.operation.id));
         const failed = result.failedOperationIds ?? ids.filter((id) => !completed.has(id));
         failed.forEach((id) => requestedRiskIds.current.delete(id));
+        setRiskErrorsByOperationId((current) => {
+          const next = { ...current };
+          completed.forEach((id) => delete next[id]);
+          failed.forEach((id) => {
+            next[id] = result.riskErrorsByOperationId?.[id] ??
+              "Não foi possível calcular o risco desta operação.";
+          });
+          return next;
+        });
+        mergeRiskRows(result.operationRows);
+        setRiskRequestRevision((revision) => revision + 1);
+      },
+      (requestError) => {
+        if (!request.isCurrent() || !isCurrentSecondary()) {
+          if (generation === secondaryGeneration.current) {
+            ids.forEach((id) => requestedRiskIds.current.delete(id));
+          }
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        ids.forEach((id) => requestedRiskIds.current.delete(id));
+        const message = requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível calcular o risco desta operação.";
         setRiskErrorsByOperationId((current) => ({
           ...current,
-          ...Object.fromEntries(failed.map((id) => [
-            id,
-            result.riskErrorsByOperationId?.[id] ?? "Não foi possível calcular o risco desta operação.",
-          ])),
+          ...Object.fromEntries(ids.map((id) => [id, message])),
         }));
-        setRiskSnapshot((current) => current ? mergeAdminOperationRows(current, result.operationRows) : current);
-      })
-      .catch((error) => {
-        if (generation !== secondaryGeneration.current) return;
-        ids.forEach((id) => requestedRiskIds.current.delete(id));
-        const message = error instanceof Error ? error.message : "Não foi possível calcular o risco desta operação.";
-        setRiskErrorsByOperationId((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, message])) }));
-      });
+        setRiskRequestRevision((revision) => revision + 1);
+      },
+    );
+    return true;
   };
 
   // Secondary batches are gated until the priority result has been published.
   useEffect(() => {
     if (!riskSnapshot || !priorityPublished || tab === "visao-geral" || tab === "alerts" || tab === "motor-risco") return;
     if (requestedRiskTabs.current.has(tab)) return;
-    const token = getStoredSessionToken();
-    if (!token) return;
-    requestedRiskTabs.current.add(tab);
     const visibleMachines = tab === "areas"
       ? riskSnapshot.machines.filter((machine) =>
           riskSnapshot.areas.slice(0, 4).some((area) => area.id === machine.areaId))
@@ -293,8 +393,8 @@ function AdminPage() {
       .filter((id) => !requestedRiskIds.current.has(id))
       .slice(0, 12);
     if (ids.length === 0) return;
-    requestMoreRisk(ids);
-  }, [tab, riskSnapshot, priorityPublished]);
+    if (requestMoreRisk(ids)) requestedRiskTabs.current.add(tab);
+  }, [tab, riskSnapshot, priorityPublished, riskRequestRevision]);
 
   useEffect(() => {
     if (!riskSnapshot) return;
@@ -317,8 +417,17 @@ function AdminPage() {
         subtitle="Visão consolidada dos clientes, frota, áreas, riscos e recomendações do MVP"
       >
         <Card>
-          <div className="text-sm font-medium text-foreground">
-            {error ?? "Carregando dados relacionais do Admin/Sompo..."}
+          <div className="flex items-center justify-between gap-3 text-sm font-medium text-foreground">
+            <span>{error ?? "Carregando dados relacionais do Admin/Sompo..."}</span>
+            {error && (
+              <button
+                type="button"
+                onClick={retryDashboard}
+                className="rounded-md border border-border px-3 py-1 text-xs font-medium"
+              >
+                Tentar novamente
+              </button>
+            )}
           </div>
         </Card>
       </AppLayout>
@@ -334,11 +443,32 @@ function AdminPage() {
      .slice(0, 12);
 
    return (
-       <AdminDashboardContext.Provider value={{ snapshot: riskSnapshot, setSnapshot: setRiskSnapshot, requestMoreRisk, riskErrorsByOperationId }}>
+        <AdminDashboardContext.Provider
+          value={{
+            snapshot: riskSnapshot,
+            setSnapshot: setRiskSnapshot,
+            requestMoreRisk,
+            riskErrorsByOperationId,
+            priorityPending,
+            priorityOperationId,
+          }}
+        >
       <AppLayout
       title="Dashboard da Sompo"
       subtitle="Visão consolidada dos clientes, frota, áreas, riscos e recomendações do MVP"
     >
+      {error && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+          <span>Atualização relacional não concluída: {error} Os dados exibidos permanecem disponíveis.</span>
+          <button
+            type="button"
+            onClick={retryDashboard}
+            className="shrink-0 rounded-md border border-warning/40 px-3 py-1 font-medium"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      )}
       <div id="topo" className="scroll-mt-20" />
 
       <div
@@ -350,8 +480,8 @@ function AdminPage() {
         )}
       >
          {riskSnapshot.degraded
-          ? "PostgreSQL indisponível para clientes, máquinas, áreas e operações — exibindo fallback seguro com dados demonstrativos."
-           : `Clientes, máquinas, áreas e operações: PostgreSQL · scores calculados pelo Risk Engine V2 com pesos Climático ${riskSnapshot.weights.ml}% / Operacional ${riskSnapshot.weights.operationalRules}%; sinais ainda não persistidos usam os vetores de referência homologados.`}
+          ? "Dados relacionais indisponíveis no momento — a visualização pode estar parcial."
+           : `Dados atualizados · Risk Engine V2 ativo · Pesos Sompo: ML ${riskSnapshot.weights.ml}% / Operacional ${riskSnapshot.weights.operationalRules}%.`}
       </div>
 
       <div className="mb-5 flex items-center gap-3 border-b border-border pb-3">
@@ -415,25 +545,61 @@ function AdminPage() {
 
 function RiskEngineConfigurationPanel() {
   const data = useAdminDashboardData();
-  const evaluation = data.operationRows[0]?.evaluation;
-  if (!evaluation) return <Card>Nenhuma operação disponível para avaliação.</Card>;
+  const dashboardContext = useContext(AdminDashboardContext);
+  const evaluation = data.operationRows.find(
+    (row) => row.operation.id === dashboardContext?.priorityOperationId,
+  )?.evaluation;
+  if (!evaluation) {
+    return (
+      <Card>
+        <div className="text-sm font-semibold text-foreground">Configuração do motor de risco</div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {dashboardContext?.priorityPending
+            ? "Calculando temporário para a operação prioritária."
+            : "Não disponível: a operação prioritária não possui avaliação V2."}
+        </p>
+      </Card>
+    );
+  }
   return <AdminV2RiskPanel evaluation={evaluation} />;
 }
 
 function OverviewPanel() {
   const data = useAdminDashboardData();
+  const dashboardContext = useContext(AdminDashboardContext);
   const mDist = data.machineDistribution;
   const aDist = data.areaDistribution;
-  const priorityRisk = data.operationRows[0];
-  const coverageState = data.riskCoverageComplete
-    ? "Completo"
-    : data.operationRows.length > 0 ? "Parcial" : "Calculando...";
-  const completeAverage = data.machineRows.length
+  const priorityRisk = data.operationRows.find(
+    (row) => row.operation.id === dashboardContext?.priorityOperationId,
+  );
+  const hasRiskRows = data.operationRows.length > 0;
+  const partialSuffix = data.riskCoverageComplete ? "" : " · Parcial";
+  const averageScore = data.riskCoverageComplete && data.machineRows.length
     ? Math.round(data.machineRows.reduce((sum, row) => sum + row.score, 0) / data.machineRows.length)
-    : 0;
-  const completeAtRisk = data.operationRows.filter((row) => row.score >= 71).length;
+    : data.operationRows.length
+      ? Math.round(data.operationRows.reduce((sum, row) => sum + row.score, 0) / data.operationRows.length)
+    : null;
+  const operationsAtRisk = data.operationRows.filter((row) => row.score >= 71).length;
+  const evaluatedDistribution = {
+    alto: data.operationRows.filter((row) => row.score >= 71).length,
+    medio: data.operationRows.filter((row) => row.score >= 41 && row.score < 71).length,
+    baixo: data.operationRows.filter((row) => row.score < 41).length,
+  };
   const { snapshot: actionableAlerts } = useActionableAlerts();
   const criticalAlerts = actionableAlerts.alerts.filter((alert) => alert.severity === "critical").length;
+  const priorityResult = priorityRisk?.evaluation.result;
+  const dominantDriver = priorityResult
+    ? priorityResult.drivers.find(
+      (driver) =>
+        priorityResult.dominantComponent === "balanced" ||
+        driver.source === priorityResult.dominantComponent,
+    )
+    : undefined;
+  const recommendation = priorityResult
+    ? recommendationForV2Result(
+      priorityResult as Parameters<typeof recommendationForV2Result>[0],
+    )
+    : null;
   const topRecs = adminV2RecommendationRows(data)
     .filter((r) => r.rec.priority === "alta")
     .slice(0, 4);
@@ -441,22 +607,103 @@ function OverviewPanel() {
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard label="Clientes monitorados" value={String(data.clients.length)} tone="info" />
         <SummaryCard label="Máquinas monitoradas" value={String(data.machines.length)} tone="info" />
-          <SummaryCard label="Operações em risco" value={data.riskCoverageComplete ? String(completeAtRisk) : coverageState} tone="warning" />
-          <SummaryCard label="Score médio da frota" value={data.riskCoverageComplete ? String(completeAverage) : coverageState} tone="info" />
-        <SummaryCard label="Score prioritário" value={priorityRisk ? String(priorityRisk.score) : "Calculando..."} tone="success" />
+        <SummaryCard label="Operações monitoradas" value={String(data.operations.length)} tone="info" />
+        <SummaryCard
+          label="Operações em risco"
+          value={hasRiskRows ? `${operationsAtRisk}${partialSuffix}` : dashboardContext?.priorityPending ? "Calculando temporário" : "Não disponível"}
+          tone="warning"
+        />
+        <SummaryCard
+          label={data.riskCoverageComplete ? "Score médio da frota" : "Média das operações avaliadas"}
+          value={averageScore === null ? "Não disponível" : `${averageScore}${partialSuffix}`}
+          tone="info"
+        />
+        <SummaryCard label="Score prioritário" value={priorityRisk ? String(priorityRisk.score) : dashboardContext?.priorityPending ? "Calculando temporário" : "Não disponível"} tone="success" />
         <SummaryCard label="Alertas críticos" value={String(criticalAlerts)} tone="danger" />
       </div>
 
       <AdminOperationalOverview overview={data.operationalOverview} />
 
+      {priorityRisk && priorityResult && recommendation ? (
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <Card className="border-primary/30 bg-primary/5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary">
+                  Resumo de risco prioritário
+                </div>
+                <div className="mt-2 text-5xl font-semibold tabular-nums text-foreground">
+                  {priorityRisk.score}<span className="ml-1 text-lg font-medium text-muted-foreground">/100</span>
+                </div>
+                <p className="mt-2 text-sm font-medium text-foreground">
+                  {priorityRisk.operation.id} · {priorityRisk.operation.type}
+                </p>
+              </div>
+              <RiskBadge score={priorityRisk.score} />
+            </div>
+            <div className="mt-4 grid gap-2 border-t border-primary/15 pt-3 sm:grid-cols-2">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Componente dominante</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">
+                  {priorityResult.dominantComponent === "ml" ? "Modelo ML" : priorityResult.dominantComponent === "operational_rules" ? "Operacional" : "Equilibrado"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Principal driver</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">
+                  {dominantDriver?.label ?? "Não disponível"}
+                </div>
+              </div>
+            </div>
+          </Card>
+          <Card className="border-warning/30 bg-warning/5">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-warning-foreground">
+              Recomendação prioritária
+            </div>
+            <div className="mt-2 text-base font-semibold text-foreground">{recommendation.title}</div>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{recommendation.description}</p>
+            <div className="mt-3 border-t border-warning/20 pt-3 text-xs text-muted-foreground">
+              Fator: <span className="font-medium text-foreground">{recommendation.factor}</span>
+            </div>
+          </Card>
+        </div>
+      ) : (
+        <Card className="border-border bg-muted/20">
+          <div className="text-sm font-semibold text-foreground">Resumo de risco prioritário</div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {dashboardContext?.priorityPending
+              ? "Calculando temporário para a operação prioritária."
+              : "Não disponível: a operação prioritária não possui avaliação V2."}
+          </p>
+        </Card>
+      )}
+
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
-          <div className="mb-3 text-sm font-semibold text-foreground">Distribuição da frota por risco</div>
+          <div className="mb-1 text-sm font-semibold text-foreground">
+            {data.riskCoverageComplete ? "Distribuição da frota por risco" : "Distribuição das operações avaliadas"}
+          </div>
+          {!data.riskCoverageComplete && (
+            <div className="mb-3 text-xs text-muted-foreground">
+              {data.operationRows.length} de {data.operations.length} operações avaliadas
+            </div>
+          )}
           <div className="space-y-2 text-sm">
-             <DistRow label="Risco alto"  mq={mDist.total ? mDist.alto : coverageState}  ar={aDist.total ? aDist.alto : coverageState} tone="danger" />
-             <DistRow label="Risco médio" mq={mDist.total ? mDist.medio : coverageState} ar={aDist.total ? aDist.medio : coverageState} tone="warning" />
-             <DistRow label="Risco baixo" mq={mDist.total ? mDist.baixo : coverageState} ar={aDist.total ? aDist.baixo : coverageState} tone="success" />
+             {data.riskCoverageComplete ? (
+               <>
+                 <DistRow label="Risco alto" mq={mDist.total ? mDist.alto : "Não disponível"} ar={aDist.total ? aDist.alto : "Não disponível"} tone="danger" />
+                 <DistRow label="Risco médio" mq={mDist.total ? mDist.medio : "Não disponível"} ar={aDist.total ? aDist.medio : "Não disponível"} tone="warning" />
+                 <DistRow label="Risco baixo" mq={mDist.total ? mDist.baixo : "Não disponível"} ar={aDist.total ? aDist.baixo : "Não disponível"} tone="success" />
+               </>
+             ) : (
+               <>
+                 <DistRow label="Risco alto" mq={evaluatedDistribution.alto} ar="—" tone="danger" primaryLabel="operações" secondaryLabel="" />
+                 <DistRow label="Risco médio" mq={evaluatedDistribution.medio} ar="—" tone="warning" primaryLabel="operações" secondaryLabel="" />
+                 <DistRow label="Risco baixo" mq={evaluatedDistribution.baixo} ar="—" tone="success" primaryLabel="operações" secondaryLabel="" />
+               </>
+             )}
           </div>
         </Card>
 
@@ -475,7 +722,7 @@ function OverviewPanel() {
             ))}
             {topRecs.length === 0 && (
               <div className="text-sm text-muted-foreground">
-                {data.riskCoverageComplete ? "Sem recomendações de prioridade alta no momento." : "Recomendações parciais — calculando os demais itens."}
+                {data.riskCoverageComplete ? "Sem recomendações de prioridade alta no momento." : "Recomendações parciais."}
               </div>
             )}
           </div>
@@ -485,7 +732,7 @@ function OverviewPanel() {
   );
 }
 
-function DistRow({ label, mq, ar, tone }: { label: string; mq: number | string; ar: number | string; tone: "danger" | "warning" | "success" }) {
+function DistRow({ label, mq, ar, tone, primaryLabel = "máq.", secondaryLabel = "áreas" }: { label: string; mq: number | string; ar: number | string; tone: "danger" | "warning" | "success"; primaryLabel?: string; secondaryLabel?: string }) {
   const dot = { danger: "bg-danger", warning: "bg-warning", success: "bg-success" }[tone];
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2">
@@ -494,8 +741,8 @@ function DistRow({ label, mq, ar, tone }: { label: string; mq: number | string; 
         <span className="text-foreground">{label}</span>
       </div>
       <div className="flex items-center gap-4 text-xs text-muted-foreground tabular-nums">
-        <span><b className="text-foreground">{mq}</b> máq.</span>
-        <span><b className="text-foreground">{ar}</b> áreas</span>
+        <span><b className="text-foreground">{mq}</b> {primaryLabel}</span>
+        {secondaryLabel && <span><b className="text-foreground">{ar}</b> {secondaryLabel}</span>}
       </div>
     </div>
   );
@@ -518,7 +765,7 @@ function RankingsPanel() {
         </div>
       ) : (
         <Card><div className="text-sm text-muted-foreground">
-          {data.operationRows.length ? "Distribuição parcial — aguardando os demais itens visíveis." : "Calculando distribuição de risco..."}
+          {data.operationRows.length ? "Distribuição parcial — aguardando os demais itens visíveis." : "Distribuição não disponível."}
         </div></Card>
       )}
 
@@ -619,10 +866,10 @@ function RecsPanel() {
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-4">
-        <SummaryCard label="Recomendações geradas" value={partial ? "Parcial" : String(rows.length)} tone="info" />
-        <SummaryCard label="Prioridade alta"  value={partial ? "Parcial" : String(byPrio.alta)}    tone="danger" />
-        <SummaryCard label="Prioridade média" value={partial ? "Parcial" : String(byPrio["média"])} tone="warning" />
-        <SummaryCard label="Prioridade baixa" value={partial ? "Parcial" : String(byPrio.baixa)}   tone="success" />
+        <SummaryCard label="Recomendações geradas" value={`${rows.length}${partial ? " · Parcial" : ""}`} tone="info" />
+        <SummaryCard label="Prioridade alta"  value={`${byPrio.alta}${partial ? " · Parcial" : ""}`} tone="danger" />
+        <SummaryCard label="Prioridade média" value={`${byPrio["média"]}${partial ? " · Parcial" : ""}`} tone="warning" />
+        <SummaryCard label="Prioridade baixa" value={`${byPrio.baixa}${partial ? " · Parcial" : ""}`} tone="success" />
       </div>
 
       <Card>
@@ -824,11 +1071,13 @@ function ScoresPanel() {
 
 function MachinesTable() {
   const data = useAdminDashboardData();
+  const dashboardState = useContext(AdminDashboardContext);
   const riskByMachine = new Map(data.machineRows.map((row) => [row.machine.id, row]));
   return (
     <TableShell headers={["ID", "Equipamento", "Tipo", "Cliente", "Área", "Operador", "Status", "Score", "Risco"]}>
       {data.machines.map((m) => {
         const risk = riskByMachine.get(m.id);
+        const operationId = data.operations.find((operation) => operation.machineId === m.id)?.id;
         return (
           <tr key={m.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{m.id}</TD>
@@ -838,8 +1087,8 @@ function MachinesTable() {
             <TD>{m.area}</TD>
             <TD>{m.operator}</TD>
             <TD><StatusPill label={m.status} tone={machineStatusTone[m.status]} /></TD>
-            <TD>{risk ? <ScoreBar score={risk.score} /> : "Calculando..."}</TD>
-            <TD>{risk ? <RiskBadge score={risk.score} /> : "Calculando..."}</TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : operationId ? <button type="button" onClick={() => dashboardState?.requestMoreRisk([operationId])} className="text-xs font-medium text-primary underline">Solicitar avaliação</button> : "Não disponível"}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : operationId ? "Pendente" : "Não disponível"}</TD>
           </tr>
         );
       })}
@@ -849,11 +1098,13 @@ function MachinesTable() {
 
 function ClientsTable() {
   const data = useAdminDashboardData();
+  const dashboardState = useContext(AdminDashboardContext);
   const riskByClient = new Map(data.clientRows.map((row) => [row.client.id, row]));
   return (
     <TableShell headers={["ID", "Cliente", "Localização", "Operação", "Máquinas", "Score médio", "Risco"]}>
       {data.clients.map((c) => {
         const risk = riskByClient.get(c.id);
+        const operationId = data.operations.find((operation) => operation.clientId === c.id)?.id;
         return (
           <tr key={c.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{c.id}</TD>
@@ -861,8 +1112,8 @@ function ClientsTable() {
             <TD>{c.location}</TD>
             <TD>{c.mainOperation}</TD>
             <TD className="tabular-nums">{c.machineCount}</TD>
-            <TD>{risk ? <ScoreBar score={risk.score} /> : "Calculando..."}</TD>
-            <TD>{risk ? <RiskBadge score={risk.score} /> : "Calculando..."}</TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : operationId ? <button type="button" onClick={() => dashboardState?.requestMoreRisk([operationId])} className="text-xs font-medium text-primary underline">Solicitar avaliação</button> : "Não disponível"}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : operationId ? "Pendente" : "Não disponível"}</TD>
           </tr>
         );
       })}
@@ -872,11 +1123,13 @@ function ClientsTable() {
 
 function AreasTable() {
   const data = useAdminDashboardData();
+  const dashboardState = useContext(AdminDashboardContext);
   const riskByArea = new Map(data.areaRows.map((row) => [row.area.id, row]));
   return (
     <TableShell headers={["ID", "Área", "Cliente", "Tipo", "Condição", "Água", "Score", "Risco"]}>
       {data.areas.map((a) => {
         const risk = riskByArea.get(a.id);
+        const operationId = data.operations.find((operation) => operation.areaId === a.id)?.id;
         return (
           <tr key={a.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
@@ -885,8 +1138,8 @@ function AreasTable() {
             <TD>{a.type}</TD>
             <TD>{a.condition || "Não informada"}</TD>
             <TD className="capitalize">{a.nearWater}</TD>
-            <TD>{risk ? <ScoreBar score={risk.score} /> : "Calculando..."}</TD>
-            <TD>{risk ? <RiskBadge score={risk.score} /> : "Calculando..."}</TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : operationId ? <button type="button" onClick={() => dashboardState?.requestMoreRisk([operationId])} className="text-xs font-medium text-primary underline">Solicitar avaliação</button> : "Não disponível"}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : operationId ? "Pendente" : "Não disponível"}</TD>
           </tr>
         );
       })}
@@ -923,8 +1176,8 @@ function OperationsTable() {
             </TD>
             <TD>{risk ? <ScoreBar score={risk.score} /> : riskError ? (
               <button type="button" onClick={() => dashboardState?.requestMoreRisk([o.id])} className="text-xs text-danger underline">Tentar novamente</button>
-            ) : "Calculando..."}</TD>
-            <TD>{risk ? <RiskBadge score={risk.score} /> : riskError ?? "Calculando..."}</TD>
+            ) : "Não disponível"}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : riskError ?? "Não disponível"}</TD>
           </tr>
         );
       })}

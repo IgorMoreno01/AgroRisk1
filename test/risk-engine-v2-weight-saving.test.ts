@@ -70,7 +70,7 @@ describe("Risk Engine V2 · salvamento temporário de pesos", () => {
     expect(panelSource).toContain("disabled={!hasUnsavedChanges");
     expect(panelSource).toContain("setSavedMlWeight(response.configuration.mlWeight)");
     expect(panelSource).toContain("Pesos salvos com sucesso");
-    expect(panelSource).toContain("Configuração ativa: Climático");
+    expect(panelSource).toContain("Configuração ativa: ML");
     expect(panelSource).toContain('setSaveStatus("success")');
     expect(panelSource).toContain("Prévia com pesos não salvos");
     expect(panelSource).toContain("hasUnsavedChanges &&");

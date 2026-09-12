@@ -33,7 +33,7 @@ const directionLabels = {
   neutral: "efeito neutro",
 } as const;
 const dominantLabels = {
-  ml: "Climático",
+  ml: "Modelo ML",
   operational_rules: "Operacional",
   balanced: "Equilibrado",
 } as const;
@@ -57,12 +57,12 @@ export const recommendationForV2Result = (
     : "as condições operacionais";
   const dominant =
     result.dominantComponent === "ml"
-      ? "o score climático tem a maior contribuição ponderada"
+      ? "o score ML tem a maior contribuição ponderada"
       : result.dominantComponent === "operational_rules"
         ? "o score operacional tem a maior contribuição ponderada"
-        : "os componentes climático e operacional têm contribuições ponderadas equivalentes";
+        : "os componentes ML e operacional têm contribuições ponderadas equivalentes";
   const mlContext = mlDriver
-    ? ` O principal sinal explicativo climático é ${mlDriver.label.toLowerCase()}, sem indicar causalidade.`
+    ? ` O principal sinal explicativo do modelo é ${mlDriver.label.toLowerCase()}, sem indicar causalidade.`
     : "";
 
   if (result.level === "alto") {
@@ -162,7 +162,7 @@ function MlComponents({ result }: { result: RiskEngineV2Result }) {
         );
       })}
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        Barras mostram apenas magnitude relativa entre componentes; não são percentuais e não
+        Barras mostram apenas magnitude relativa entre os sinais do modelo; não são percentuais e não
         precisam somar 100.
       </p>
     </div>
@@ -222,7 +222,7 @@ function ContributionTable({ result }: { result: RiskEngineV2Result }) {
           {result.contributions.map((item) => (
             <tr key={item.component}>
               <td className="py-2 pr-3 font-medium">
-                 {item.component === "ml" ? "Climático" : "Operacional"}
+                 {item.component === "ml" ? "ML" : "Operacional"}
               </td>
               <td className="py-2 pr-3 tabular-nums text-muted-foreground">
                 {fmt(item.sourceScore)} × {item.weight}%
@@ -241,7 +241,6 @@ function ContributionTable({ result }: { result: RiskEngineV2Result }) {
 export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEvaluation }) {
   const [mlWeight, setMlWeight] = useState(evaluation.input.weights.ml);
   const [savedMlWeight, setSavedMlWeight] = useState(evaluation.input.weights.ml);
-  const quality = evaluation.provenance.external;
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
   );
@@ -320,21 +319,16 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
               <ShieldCheck className="h-4 w-4 text-primary" /> Risk Engine V2 · operação avaliada
             </div>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-              {evaluation.context.client.name} · {evaluation.context.farm.name} ·{" "}
-              {evaluation.context.machine.type} {evaluation.context.machine.id} · operação{" "}
-              {evaluation.context.operation.id} · {evaluation.context.farm.municipality}/
-              {evaluation.context.farm.state}
+              {evaluation.context.client.name} · {evaluation.context.farm.name} · Área{" "}
+              {evaluation.context.area.name} · {evaluation.context.machine.type}{" "}
+              {evaluation.context.machine.id} · Operação {evaluation.context.operation.id}
             </p>
-            {evaluation.hasIncompleteInputs && (
-              <p className="mt-1 max-w-3xl text-xs text-warning-foreground">
-                Localização {quality.location === "geocoded" ? "geocodificada" : "indisponível"};
-                clima {quality.weather === "historical_api" ? "histórico real" : "imputado"};
-                altitude {quality.altitude === "elevation_api" ? "real" : "imputada"}.
-                Água {quality.water === "hydrography_api" ? "real" : "sintética"};
-                terreno {quality.terrain === "synthetic_demo" ? "sintético" : "validado"}.
-                COD_MOD e histórico de itens seguem imputados.
-              </p>
-            )}
+            <p className="mt-1 text-xs text-muted-foreground">
+              {evaluation.context.farm.municipality}/{evaluation.context.farm.state} ·{" "}
+              {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(
+                new Date(evaluation.context.operation.scheduledAt),
+              )}
+            </p>
           </div>
           <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
             Engine {result.engineVersion}
@@ -350,8 +344,8 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
           </div>
           <div className="mt-5 flex items-end justify-between">
             <div>
-               <div className="text-sm font-medium">Peso climático</div>
-               <div className="text-xs text-muted-foreground">Peso do score climático</div>
+                <div className="text-sm font-medium">Peso do modelo ML</div>
+                <div className="text-xs text-muted-foreground">Participação do score ML no resultado</div>
             </div>
             <div className="text-3xl font-semibold tabular-nums text-primary">{mlWeight}%</div>
           </div>
@@ -361,12 +355,12 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             step={1}
             value={[mlWeight]}
             onValueChange={([value]) => handleDraftChange(value)}
-             aria-label="Peso climático no Risk Engine V2"
+              aria-label="Peso do modelo ML no Risk Engine V2"
             className="mt-4"
           />
           <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-             <span>0% Climático</span>
-             <span>100% Climático</span>
+              <span>0% ML</span>
+              <span>100% ML</span>
           </div>
           <div className="mt-5 rounded-lg border border-border bg-muted/30 p-3">
             <div className="flex items-center justify-between">
@@ -380,8 +374,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             </p>
           </div>
           <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-            Os pesos definem quanto cada componente participa do Score Final. Eles não alteram o
-             treinamento das fontes futuras de probabilidade.
+             Os pesos Sompo definem quanto cada score participa do Score Final.
           </p>
           </div>
           <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -390,7 +383,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3">
               <div>
-                 <div className="text-xs text-muted-foreground">Climático</div>
+                 <div className="text-xs text-muted-foreground">ML</div>
                 <div className="text-3xl font-semibold tabular-nums text-info">{mlWeight}%</div>
               </div>
               <div>
@@ -402,7 +395,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             </div>
           <div className="mt-4 border-t border-border pt-4">
             <p className="text-xs font-medium text-foreground">
-               Configuração ativa: Climático {savedMlWeight}% / Operacional {savedOperationalRulesWeight}%
+                Configuração ativa: ML {savedMlWeight}% / Operacional {savedOperationalRulesWeight}%
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button
@@ -439,7 +432,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.15em] text-info">
-                 Score climático
+                 SCORE ML
               </div>
               <div className="mt-2 text-5xl font-semibold tabular-nums text-foreground">
                 {fmt(result.ml.mlRelativeScore)}
@@ -451,13 +444,13 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
             </span>
           </div>
           <p className="mt-3 text-sm font-medium text-foreground">
-             Score climático
+              Score ML
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Baseado em clima, histórico e estrutura do risco.
+             Sinais disponíveis: Clima, Estrutura do risco e Histórico.
           </p>
           <div className="mt-5 border-t border-info/20 pt-4">
-             <h3 className="mb-4 text-sm font-semibold text-foreground">Componentes climáticos</h3>
+              <h3 className="mb-4 text-sm font-semibold text-foreground">Sinais do modelo</h3>
             <MlComponents result={result} />
           </div>
         </Card>
@@ -466,7 +459,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.15em] text-warning-foreground">
-                Score operacional
+                 SCORE OPERACIONAL
               </div>
               <div className="mt-2 text-5xl font-semibold tabular-nums text-foreground">
                 {result.operationalRules.operationalRulesScore}
@@ -481,7 +474,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
              Score operacional
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Baseado nas condições atuais da operação demonstrativa.
+             Água, tipo da operação e terreno da operação avaliada.
           </p>
           <div className="mt-5 border-t border-warning/20 pt-4">
             <h3 className="mb-4 text-sm font-semibold text-foreground">
@@ -501,15 +494,12 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
         <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-primary">
-              <Activity className="h-4 w-4" /> Score final de risco
+               <Activity className="h-4 w-4" /> SCORE FINAL
             </div>
             <div className="mt-3 text-6xl font-semibold tabular-nums text-foreground">
               {result.finalScore}
               <span className="ml-2 text-2xl font-medium text-muted-foreground">/ 100</span>
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Operação PostgreSQL com inputs ausentes imputados pelo modelo
-            </p>
           </div>
           <div className="min-w-0 rounded-xl border border-border bg-background/80 p-4 md:min-w-64">
             <LevelBadge level={result.level} />
@@ -544,7 +534,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
           {mlDriver && (
             <div className="rounded-lg border border-border bg-muted/20 p-3">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                 Primeiro driver climático
+                  Primeiro driver do modelo
               </div>
               <div className="mt-1 text-sm font-medium">
                 {mlDriver.label} ·{" "}
@@ -571,8 +561,7 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
       <Card>
         <h2 className="text-sm font-semibold">Recomendação administrativa</h2>
         <p className="mt-1 mb-3 text-xs text-muted-foreground">
-          Orientação demonstrativa baseada no nível, componente dominante e principais drivers do
-          cenário V2 atual.
+           Orientação baseada no nível, componente dominante e drivers da operação avaliada.
         </p>
         <div className="mb-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-sm">
           Fator operacional dominante:{" "}
@@ -584,6 +573,17 @@ export function AdminV2RiskPanel({ evaluation }: { evaluation: OperationRiskEval
         </div>
         <RecommendationCard rec={recommendation} />
       </Card>
+      {evaluation.hasIncompleteInputs && (
+        <details className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer font-medium text-foreground">
+            Detalhes da disponibilidade dos dados
+          </summary>
+          <p className="mt-2 leading-relaxed">
+            Parte dos sinais necessários para a avaliação está indisponível ou foi completada na
+            preparação do input V2. O resultado exibido é o retorno atual do motor.
+          </p>
+        </details>
+      )}
     </div>
   );
 }

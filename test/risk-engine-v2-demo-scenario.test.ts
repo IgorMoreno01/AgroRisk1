@@ -33,16 +33,17 @@ describe("Risk Engine V2 · cenário demonstrativo do Admin", () => {
       "utf8",
     );
 
-    expect(panelSource).toContain("Score climático");
-    expect(panelSource).toContain("Score operacional");
-    expect(panelSource).toContain("Score final de risco");
+    expect(panelSource).toContain("SCORE ML");
+    expect(panelSource).toContain("SCORE OPERACIONAL");
+    expect(panelSource).toContain("SCORE FINAL");
     expect(panelSource).toContain("result.level");
     expect(panelSource).toContain("result.ml.components");
     expect(panelSource).toContain("result.contributions");
     expect(panelSource).toContain('driver.source === "ml"');
     expect(panelSource).toContain('driver.source === "operational_rules"');
     expect(panelSource).toContain("Risk Engine V2 · operação avaliada");
-    expect(panelSource).toContain("clima {quality.weather");
+    expect(panelSource).toContain("Detalhes da disponibilidade dos dados");
+    expect(panelSource).not.toContain("quality.weather");
     expect(panelSource).not.toContain("evaluateRiskEngineV2Demo");
     expect(panelSource.toLowerCase()).not.toContain("probabilidade calibrada");
   });
