@@ -1,11 +1,14 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
   getRiskEngineV2Configuration,
+  getPersistedRiskEngineV2Configuration,
   isValidRiskEngineV2Configuration,
   saveRiskEngineV2Configuration,
 } from "../src/lib/risk-config.server";
 import { evaluateRiskEngineV2Demo } from "../src/lib/risk-engine-v2/demo-scenario";
+import { createMockRepository } from "../src/lib/data/mock-repository.server";
+import type { RiskWeightConfigurationRepository } from "../src/lib/data/repository";
 
 const panelSource = readFileSync(
   new URL("../src/components/admin-v2-risk-panel.tsx", import.meta.url),
@@ -16,11 +19,7 @@ const personaSource = readFileSync(
   "utf8",
 );
 
-afterEach(() => {
-  saveRiskEngineV2Configuration({ mlWeight: 70, operationalRulesWeight: 30 });
-});
-
-describe("Risk Engine V2 · salvamento temporário de pesos", () => {
+describe("Risk Engine V2 · salvamento persistente de pesos", () => {
   test("usa configuração padrão 70/30 e preserva draft separado do saved", () => {
     const saved = getRiskEngineV2Configuration();
     expect(saved.mlWeight).toBe(70);
@@ -30,33 +29,39 @@ describe("Risk Engine V2 · salvamento temporário de pesos", () => {
     expect(panelSource).toContain("Alterações não salvas");
   });
 
-  test("salva configuração válida, atualiza o ativo e mantém soma 100", () => {
-    const saved = saveRiskEngineV2Configuration({
+  test("salva configuração válida, atualiza o ativo e mantém soma 100", async () => {
+    const repository = createMockRepository() as RiskWeightConfigurationRepository;
+    const saved = await saveRiskEngineV2Configuration({
       mlWeight: 80,
       operationalRulesWeight: 20,
-    });
+    }, repository);
     expect(saved.mlWeight).toBe(80);
     expect(saved.operationalRulesWeight).toBe(20);
     expect(saved.mlWeight + saved.operationalRulesWeight).toBe(100);
-    expect(getRiskEngineV2Configuration()).toEqual(saved);
+    expect(await getPersistedRiskEngineV2Configuration(repository)).toEqual(saved);
   });
 
-  test("não salva valores inválidos", () => {
+  test("não salva valores inválidos", async () => {
+    const repository = createMockRepository() as RiskWeightConfigurationRepository;
     expect(
       isValidRiskEngineV2Configuration({ mlWeight: 80, operationalRulesWeight: 30 }),
     ).toBe(false);
-    expect(() =>
-      saveRiskEngineV2Configuration({ mlWeight: 80, operationalRulesWeight: 30 }),
-    ).toThrow("totalizar 100%");
-    expect(getRiskEngineV2Configuration().mlWeight).toBe(70);
+    await expect(
+      saveRiskEngineV2Configuration(
+        { mlWeight: 80, operationalRulesWeight: 30 },
+        repository,
+      ),
+    ).rejects.toThrow("totalizar 100%");
+    expect((await getPersistedRiskEngineV2Configuration(repository)).mlWeight).toBe(70);
   });
 
-  test("recalcula a simulação com o novo peso sem alterar scores de origem", () => {
+  test("recalcula a simulação com o novo peso sem alterar scores de origem", async () => {
+    const repository = createMockRepository() as RiskWeightConfigurationRepository;
     const before = evaluateRiskEngineV2Demo(70);
-    const saved = saveRiskEngineV2Configuration({
+    const saved = await saveRiskEngineV2Configuration({
       mlWeight: 80,
       operationalRulesWeight: 20,
-    });
+    }, repository);
     const after = evaluateRiskEngineV2Demo(saved.mlWeight);
     expect(after.finalScore).not.toBe(before.finalScore);
     expect(after.ml.mlRelativeScore).toBe(before.ml.mlRelativeScore);
@@ -76,11 +81,12 @@ describe("Risk Engine V2 · salvamento temporário de pesos", () => {
     expect(panelSource).toContain("hasUnsavedChanges &&");
   });
 
-  test("pesos 40/60 salvos podem ser usados pelo painel compartilhado das personas", () => {
-    const saved = saveRiskEngineV2Configuration({
+  test("pesos 40/60 salvos podem ser usados pelo painel compartilhado das personas", async () => {
+    const repository = createMockRepository() as RiskWeightConfigurationRepository;
+    const saved = await saveRiskEngineV2Configuration({
       mlWeight: 40,
       operationalRulesWeight: 60,
-    });
+    }, repository);
     const personaResult = evaluateRiskEngineV2Demo(saved.mlWeight);
     expect(personaResult.weights).toEqual({ ml: 40, operationalRules: 60 });
     expect(personaSource).toContain("result: RiskEngineV2Result");

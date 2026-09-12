@@ -16,6 +16,17 @@ import type {
   SerializableJson,
 } from "../risk-engine-v2/operation-input.server";
 import type { PreparedOperationRiskInput } from "../risk-engine-v2/prepared-input";
+import {
+  assertValidRiskWeightValues,
+  assertValidExpectedRevision,
+  assertValidStoredRiskWeightConfiguration,
+  RiskWeightClientNotFoundError,
+  RiskWeightConfigurationConflictError,
+  type EffectiveRiskWeightConfiguration,
+  type RiskWeightValues,
+  type SaveRiskWeightConfigurationOptions,
+  type StoredRiskWeightConfiguration,
+} from "./risk-weight-configuration";
 
 let client: ReturnType<typeof postgres> | undefined;
 
@@ -753,6 +764,192 @@ export async function upsertOperationRiskInputSnapshot(
   `;
 }
 
+const DEFAULT_RISK_WEIGHTS = { mlWeight: 70, operationalRulesWeight: 30 } as const;
+
+function parseRiskWeightConfiguration(row: Record<string, unknown>): StoredRiskWeightConfiguration {
+  const updatedAt = row.updatedAt instanceof Date
+    ? row.updatedAt.toISOString()
+    : new Date(String(row.updatedAt)).toISOString();
+  const configuration: StoredRiskWeightConfiguration = {
+    clientId: row.clientId === null ? null : String(row.clientId),
+    mlWeight: Number(row.mlWeight),
+    operationalRulesWeight: Number(row.operationalRulesWeight),
+    revision: Number(row.revision),
+    updatedAt,
+    updatedBy: row.updatedBy === null ? null : String(row.updatedBy),
+  };
+  assertValidStoredRiskWeightConfiguration(configuration);
+  return configuration;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
+}
+
+async function ensureRiskWeightClientExists(clientId: string): Promise<void> {
+  const sql = db();
+  const rows = await sql`SELECT id FROM agrorisk.clients WHERE id = ${clientId} LIMIT 1`;
+  if (rows.length === 0) throw new RiskWeightClientNotFoundError(clientId);
+}
+
+export async function getGlobalRiskWeightConfiguration():
+Promise<StoredRiskWeightConfiguration | undefined> {
+  const sql = db();
+  const rows = await sql`
+    SELECT client_id AS "clientId", ml_weight AS "mlWeight",
+      operational_rules_weight AS "operationalRulesWeight", revision,
+      updated_at AS "updatedAt", updated_by AS "updatedBy"
+    FROM agrorisk.risk_weight_configurations
+    WHERE client_id IS NULL
+    LIMIT 1
+  `;
+  return rows[0] ? parseRiskWeightConfiguration(rows[0]) : undefined;
+}
+
+export async function saveGlobalRiskWeightConfiguration(
+  weights: RiskWeightValues,
+  options: SaveRiskWeightConfigurationOptions,
+): Promise<StoredRiskWeightConfiguration> {
+  assertValidRiskWeightValues(weights);
+  assertValidExpectedRevision(options.expectedRevision);
+  const sql = db();
+  try {
+    const rows = options.expectedRevision === null
+      ? await sql`
+          INSERT INTO agrorisk.risk_weight_configurations (
+            client_id, ml_weight, operational_rules_weight, updated_by
+          ) VALUES (
+            NULL, ${weights.mlWeight}, ${weights.operationalRulesWeight}, ${options.updatedBy ?? null}
+          )
+          RETURNING client_id AS "clientId", ml_weight AS "mlWeight",
+            operational_rules_weight AS "operationalRulesWeight", revision,
+            updated_at AS "updatedAt", updated_by AS "updatedBy"
+        `
+      : await sql`
+          UPDATE agrorisk.risk_weight_configurations
+          SET ml_weight = ${weights.mlWeight},
+            operational_rules_weight = ${weights.operationalRulesWeight},
+            revision = nextval('agrorisk.risk_weight_configuration_revision_seq'),
+            updated_at = now(),
+            updated_by = ${options.updatedBy ?? null}
+          WHERE client_id IS NULL AND revision = ${options.expectedRevision}
+          RETURNING client_id AS "clientId", ml_weight AS "mlWeight",
+            operational_rules_weight AS "operationalRulesWeight", revision,
+            updated_at AS "updatedAt", updated_by AS "updatedBy"
+        `;
+    if (!rows[0]) throw new RiskWeightConfigurationConflictError();
+    return parseRiskWeightConfiguration(rows[0]);
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new RiskWeightConfigurationConflictError();
+    throw error;
+  }
+}
+
+export async function getClientRiskWeightOverride(
+  clientId: string,
+): Promise<StoredRiskWeightConfiguration | undefined> {
+  await ensureRiskWeightClientExists(clientId);
+  const sql = db();
+  const rows = await sql`
+    SELECT client_id AS "clientId", ml_weight AS "mlWeight",
+      operational_rules_weight AS "operationalRulesWeight", revision,
+      updated_at AS "updatedAt", updated_by AS "updatedBy"
+    FROM agrorisk.risk_weight_configurations
+    WHERE client_id = ${clientId}
+    LIMIT 1
+  `;
+  return rows[0] ? parseRiskWeightConfiguration(rows[0]) : undefined;
+}
+
+export async function saveClientRiskWeightOverride(
+  clientId: string,
+  weights: RiskWeightValues,
+  options: SaveRiskWeightConfigurationOptions,
+): Promise<StoredRiskWeightConfiguration> {
+  assertValidRiskWeightValues(weights);
+  assertValidExpectedRevision(options.expectedRevision);
+  await ensureRiskWeightClientExists(clientId);
+  const sql = db();
+  try {
+    const rows = options.expectedRevision === null
+      ? await sql`
+          INSERT INTO agrorisk.risk_weight_configurations (
+            client_id, ml_weight, operational_rules_weight, updated_by
+          ) VALUES (
+            ${clientId}, ${weights.mlWeight}, ${weights.operationalRulesWeight}, ${options.updatedBy ?? null}
+          )
+          RETURNING client_id AS "clientId", ml_weight AS "mlWeight",
+            operational_rules_weight AS "operationalRulesWeight", revision,
+            updated_at AS "updatedAt", updated_by AS "updatedBy"
+        `
+      : await sql`
+          UPDATE agrorisk.risk_weight_configurations
+          SET ml_weight = ${weights.mlWeight},
+            operational_rules_weight = ${weights.operationalRulesWeight},
+            revision = nextval('agrorisk.risk_weight_configuration_revision_seq'),
+            updated_at = now(),
+            updated_by = ${options.updatedBy ?? null}
+          WHERE client_id = ${clientId} AND revision = ${options.expectedRevision}
+          RETURNING client_id AS "clientId", ml_weight AS "mlWeight",
+            operational_rules_weight AS "operationalRulesWeight", revision,
+            updated_at AS "updatedAt", updated_by AS "updatedBy"
+        `;
+    if (!rows[0]) throw new RiskWeightConfigurationConflictError();
+    return parseRiskWeightConfiguration(rows[0]);
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new RiskWeightConfigurationConflictError();
+    throw error;
+  }
+}
+
+export async function deleteClientRiskWeightOverride(
+  clientId: string,
+  expectedRevision?: number,
+): Promise<void> {
+  await ensureRiskWeightClientExists(clientId);
+  const sql = db();
+  const rows = expectedRevision === undefined
+    ? await sql`
+        DELETE FROM agrorisk.risk_weight_configurations
+        WHERE client_id = ${clientId}
+        RETURNING revision
+      `
+    : await sql`
+        DELETE FROM agrorisk.risk_weight_configurations
+        WHERE client_id = ${clientId} AND revision = ${expectedRevision}
+        RETURNING revision
+      `;
+  if (expectedRevision !== undefined && rows.length === 0) {
+    throw new RiskWeightConfigurationConflictError();
+  }
+}
+
+export async function resolveEffectiveRiskWeights(
+  clientId?: string,
+): Promise<EffectiveRiskWeightConfiguration> {
+  const clientOverride = clientId
+    ? await getClientRiskWeightOverride(clientId)
+    : undefined;
+  const configuration = clientOverride ?? await getGlobalRiskWeightConfiguration();
+  if (!configuration) {
+    return {
+      weights: { ...DEFAULT_RISK_WEIGHTS },
+      source: "default",
+      revision: null,
+      updatedAt: null,
+    };
+  }
+  return {
+    weights: {
+      mlWeight: configuration.mlWeight,
+      operationalRulesWeight: configuration.operationalRulesWeight,
+    },
+    source: clientOverride ? "client" : "global",
+    revision: configuration.revision,
+    updatedAt: configuration.updatedAt,
+  };
+}
+
 export const postgresRepository: AgroRiskRepository = {
   listClients: () => queryClients(),
   listAreas: () => queryAreas(),
@@ -766,4 +963,10 @@ export const postgresRepository: AgroRiskRepository = {
   async getOperation(id) { return (await queryOperations(id))[0]; },
   getOperationRiskInputSnapshot,
   upsertOperationRiskInputSnapshot,
+  getGlobalRiskWeightConfiguration,
+  saveGlobalRiskWeightConfiguration,
+  getClientRiskWeightOverride,
+  saveClientRiskWeightOverride,
+  deleteClientRiskWeightOverride,
+  resolveEffectiveRiskWeights,
 };

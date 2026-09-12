@@ -3,6 +3,15 @@ import {
   isValidRiskWeights,
   type RiskWeights,
 } from "./risk-score";
+import { postgresRepository } from "./data/postgres-repository.server";
+import type { RiskWeightConfigurationRepository } from "./data/repository";
+import {
+  assertValidRiskWeightValues,
+  type EffectiveRiskWeightConfiguration,
+  type RiskWeightValues,
+  type SaveRiskWeightConfigurationOptions,
+  type StoredRiskWeightConfiguration,
+} from "./data/risk-weight-configuration";
 
 export interface RiskConfiguration extends RiskWeights {
   updatedAt: string | null;
@@ -36,14 +45,15 @@ export interface RiskEngineV2Configuration {
   updatedAt: string | null;
 }
 
+export interface PersistedRiskEngineV2Configuration extends RiskEngineV2Configuration {
+  revision: number | null;
+  source: "global" | "default";
+}
+
 const DEFAULT_RISK_ENGINE_V2_CONFIGURATION: RiskEngineV2Configuration = {
   mlWeight: 70,
   operationalRulesWeight: 30,
   updatedAt: null,
-};
-
-let currentRiskEngineV2Configuration: RiskEngineV2Configuration = {
-  ...DEFAULT_RISK_ENGINE_V2_CONFIGURATION,
 };
 
 export function isValidRiskEngineV2Configuration(
@@ -62,19 +72,89 @@ export function isValidRiskEngineV2Configuration(
 }
 
 export function getRiskEngineV2Configuration(): RiskEngineV2Configuration {
-  return { ...currentRiskEngineV2Configuration };
+  return { ...DEFAULT_RISK_ENGINE_V2_CONFIGURATION };
 }
 
-export function saveRiskEngineV2Configuration(
+export async function getPersistedRiskEngineV2Configuration(
+  repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
+): Promise<PersistedRiskEngineV2Configuration> {
+  const effective = await repository.resolveEffectiveRiskWeights();
+  return {
+    ...effective.weights,
+    updatedAt: effective.updatedAt,
+    revision: effective.revision,
+    source: effective.source === "client" ? "global" : effective.source,
+  };
+}
+
+export async function getGlobalRiskWeightConfiguration(
+  repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
+): Promise<StoredRiskWeightConfiguration | undefined> {
+  return repository.getGlobalRiskWeightConfiguration();
+}
+
+export async function saveGlobalRiskWeightConfiguration(
+  weights: RiskWeightValues,
+  options: SaveRiskWeightConfigurationOptions,
+  repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
+): Promise<StoredRiskWeightConfiguration> {
+  assertValidRiskWeightValues(weights);
+  return repository.saveGlobalRiskWeightConfiguration(weights, options);
+}
+
+export async function getClientRiskWeightOverride(
+  clientId: string,
+  repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
+): Promise<StoredRiskWeightConfiguration | undefined> {
+  return repository.getClientRiskWeightOverride(clientId);
+}
+
+export async function saveClientRiskWeightOverride(
+  clientId: string,
+  weights: RiskWeightValues,
+  options: SaveRiskWeightConfigurationOptions,
+  repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
+): Promise<StoredRiskWeightConfiguration> {
+  assertValidRiskWeightValues(weights);
+  return repository.saveClientRiskWeightOverride(clientId, weights, options);
+}
+
+export async function deleteClientRiskWeightOverride(
+  clientId: string,
+  expectedRevision?: number,
+  repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
+): Promise<void> {
+  return repository.deleteClientRiskWeightOverride(clientId, expectedRevision);
+}
+
+export async function resolveEffectiveRiskWeights(
+  clientId?: string,
+  repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
+): Promise<EffectiveRiskWeightConfiguration> {
+  return repository.resolveEffectiveRiskWeights(clientId);
+}
+
+export async function saveRiskEngineV2Configuration(
   configuration: Pick<RiskEngineV2Configuration, "mlWeight" | "operationalRulesWeight">,
-): RiskEngineV2Configuration {
+  repository: RiskWeightConfigurationRepository = postgresRepository as RiskWeightConfigurationRepository,
+  expectedRevision?: number | null,
+): Promise<PersistedRiskEngineV2Configuration> {
   if (!isValidRiskEngineV2Configuration(configuration)) {
     throw new Error("Os pesos ML e Regras devem ser inteiros entre 0 e 100 e totalizar 100%.");
   }
-
-  currentRiskEngineV2Configuration = {
-    ...configuration,
-    updatedAt: new Date().toISOString(),
+  const current = expectedRevision === undefined
+    ? await repository.getGlobalRiskWeightConfiguration()
+    : undefined;
+  const saved = await repository.saveGlobalRiskWeightConfiguration(configuration, {
+    expectedRevision: expectedRevision === undefined
+      ? current?.revision ?? null
+      : expectedRevision,
+  });
+  return {
+    mlWeight: saved.mlWeight,
+    operationalRulesWeight: saved.operationalRulesWeight,
+    updatedAt: saved.updatedAt,
+    revision: saved.revision,
+    source: "global",
   };
-  return getRiskEngineV2Configuration();
 }
