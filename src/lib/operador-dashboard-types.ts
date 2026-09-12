@@ -31,7 +31,7 @@ export interface OperatorHistoryEntry extends HistoryEntry {
   source: "postgres" | "demo";
 }
 
-export interface OperadorDashboardSnapshot {
+export interface OperadorDashboardPhaseASnapshot {
   source: "postgres" | "mock";
   degraded: boolean;
   loadedAt: string;
@@ -47,6 +47,14 @@ export interface OperadorDashboardSnapshot {
   geo: OperatorGeoContext;
   telemetry: OperatorTelemetry;
   weights: RiskWeights;
+  alerts: OperatorAlert[];
+  alertsSource: "postgres" | "demo";
+  history: OperatorHistoryEntry[];
+  historySource: "postgres" | "demo";
+}
+
+/** Phase B result for the current authenticated operation only. */
+export interface OperadorDashboardSnapshot extends OperadorDashboardPhaseASnapshot {
   risk: RiskResult;
   engineResult: RiskEngineV2Result;
   evaluationContext: OperationRiskEvaluation;
@@ -54,8 +62,4 @@ export interface OperadorDashboardSnapshot {
   recommendation: GeneratedRecommendation;
   nextAction: NextBestAction;
   telemetryRecommendations: GeneratedRecommendation[];
-  alerts: OperatorAlert[];
-  alertsSource: "postgres" | "demo";
-  history: OperatorHistoryEntry[];
-  historySource: "postgres" | "demo";
 }

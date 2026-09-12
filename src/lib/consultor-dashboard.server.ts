@@ -5,6 +5,7 @@ import {
   listClientRelationalScope,
   listConsultorRelationalPhaseA,
   listConsultorPreventiveOverview,
+  listOperationRiskContexts,
   postgresRepository,
 } from "./data/postgres-repository.server";
 import {
@@ -105,6 +106,7 @@ function buildClientView(
     areasData: base.areas.filter((area) => area.clientId === client.id),
     operations: base.operations.filter((operation) => operation.clientId === client.id),
     evaluatedOperationIds: base.operationRows.map((row) => row.operation.id),
+    riskErrorsByOperationId: {},
     summary,
     machines,
     areas,
@@ -137,6 +139,7 @@ function buildRelationalClientView(
     areasData: relational.areas.filter((area) => area.clientId === client.id),
     operations: relational.operations.filter((operation) => operation.clientId === client.id),
     evaluatedOperationIds: [],
+    riskErrorsByOperationId: {},
     machines: [],
     areas: [],
     recurringFactors: [],
@@ -144,9 +147,13 @@ function buildRelationalClientView(
   };
 }
 
-async function readScope(repository: AgroRiskRepository, scope: ConsultorAccessScope) {
+async function readScope(
+  repository: AgroRiskRepository,
+  scope: ConsultorAccessScope,
+  includeRiskContexts = true,
+) {
   if (repository === postgresRepository) {
-    const relational = await listClientRelationalScope(scope.clientIds);
+    const relational = await listClientRelationalScope(scope.clientIds, includeRiskContexts);
     const ids = new Set(relational.machines.map((machine) => machine.id));
     return { ...relational, alerts: demoAlerts.filter((alert) => ids.has(alert.machineId)) };
   }
@@ -329,7 +336,7 @@ export async function evaluateConsultorRiskBatch(
   const config = getRiskEngineV2Configuration();
   const weights = { ml: config.mlWeight, operationalRules: config.operationalRulesWeight };
   const run = async () => {
-    const relational = await readScope(repository, scope);
+    const relational = await readScope(repository, scope, false);
     const client = relational.clients.find((item) => item.id === clientId);
     if (!client) throw new Error("Cliente fora do escopo autorizado.");
     const clientOperations = relational.operations.filter((operation) => operation.clientId === clientId);
@@ -355,9 +362,12 @@ export async function evaluateConsultorRiskBatch(
     const clientById = new Map(base.clients.map((item) => [item.id, item]));
     const areaById = new Map(base.areas.map((area) => [area.id, area]));
     const machineById = new Map(base.machines.map((machine) => [machine.id, machine]));
-    const contexts = new Map((relational.riskContexts ?? []).map((context) => [context.operation.id, context]));
+    const contexts = new Map((repository === postgresRepository
+      ? await listOperationRiskContexts({ clientIds: [clientId], operationIds: selected.map((operation) => operation.id) })
+      : relational.riskContexts ?? []
+    ).map((context) => [context.operation.id, context]));
     const services = externalServices ?? consultorExternalServices;
-    const rows = await mapWithConcurrency(selected, 6, async (operation) => {
+    const settled = await Promise.allSettled(selected.map(async (operation) => {
       const context = contexts.get(operation.id) ?? buildFallbackOperationRiskContext(
         operation,
         machineById.get(operation.machineId)!,
@@ -377,7 +387,13 @@ export async function evaluateConsultorRiskBatch(
         level: evaluation.result.level,
         mainFactor: evaluation.result.drivers[0]?.label ?? "Sem fator dominante",
       };
-    });
+    }));
+    const rows = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const riskErrorsByOperationId = Object.fromEntries(settled.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [[selected[index].id, result.reason instanceof Error ? result.reason.message : "Não foi possível calcular o risco."]]
+        : [],
+    ));
     const accumulatedKey = `${scope.userId}:${clientId}:${weights.ml}:${weights.operationalRules}`;
     const previous = consultorRowsByClient.get(accumulatedKey);
     const accumulated = previous && previous.expiresAt > Date.now()
@@ -387,7 +403,7 @@ export async function evaluateConsultorRiskBatch(
     const merged = mergeAdminOperationRows(base, accumulated);
     const resultByMachine = new Map<string, RiskEngineV2Result>();
     merged.machineRows.forEach((row) => resultByMachine.set(row.machine.id, row.evaluation.result));
-    return buildClientView(client, merged, resultByMachine, relational.alerts);
+    return { ...buildClientView(client, merged, resultByMachine, relational.alerts), riskErrorsByOperationId };
   };
   if (externalServices) return run();
   const key = `${scope.userId}:${clientId}:${ids.slice().sort().join(",")}:${Math.min(limit, 12)}:${weights.ml}:${weights.operationalRules}`;

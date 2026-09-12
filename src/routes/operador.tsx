@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppLayout, Card, SectionTitle } from "@/components/app-layout";
 import { RiskBadge } from "@/components/risk-badge";
 import { NextBestActionCard } from "@/components/next-best-action";
@@ -9,8 +9,11 @@ import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { getWeather } from "@/lib/api/weather.functions";
 import type { WeatherData } from "@/lib/external-data.types";
 import { getStoredSessionToken } from "@/lib/auth";
-import { getOperadorDashboard } from "@/lib/api/operador-dashboard.functions";
-import type { OperadorDashboardSnapshot } from "@/lib/operador-dashboard-types";
+import { evaluateOperadorRisk, getOperadorDashboard } from "@/lib/api/operador-dashboard.functions";
+import type {
+  OperadorDashboardPhaseASnapshot,
+  OperadorDashboardSnapshot,
+} from "@/lib/operador-dashboard-types";
 import { OperationRegistrationCard } from "@/components/operation-registration-card";
 import { PreventiveMaintenanceCard } from "@/components/preventive-maintenance-card";
 
@@ -24,9 +27,13 @@ export const Route = createFileRoute("/operador")({
 });
 
 function OperadorPage() {
-  const [snapshot, setSnapshot] = useState<OperadorDashboardSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<OperadorDashboardPhaseASnapshot | null>(null);
+  const [riskSnapshot, setRiskSnapshot] = useState<OperadorDashboardSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [riskError, setRiskError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [riskAttempt, setRiskAttempt] = useState(0);
+  const riskRequestGeneration = useRef(0);
 
   // O clima permanece disponível como resumo operacional; os demais dados
   // externos continuam no backend, mas não são exibidos nesta persona.
@@ -45,6 +52,9 @@ function OperadorPage() {
       .then((response) => {
         if (cancelled) return;
         if (!response.ok) throw new Error(response.error);
+        riskRequestGeneration.current += 1;
+        setRiskSnapshot(null);
+        setRiskError(null);
         setSnapshot(response.snapshot);
       })
       .catch((error) => {
@@ -52,6 +62,30 @@ function OperadorPage() {
       });
     return () => { cancelled = true; };
   }, [attempt]);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const token = getStoredSessionToken();
+    if (!token) return;
+    const generation = ++riskRequestGeneration.current;
+    void evaluateOperadorRisk({ data: { token, operationId: snapshot.operation.id } })
+      .then((response) => {
+        if (generation !== riskRequestGeneration.current) return;
+        if (!response.ok) throw new Error(response.error);
+        if (response.snapshot.operation.id !== snapshot.operation.id) {
+          throw new Error("A operação atual mudou; atualize o painel antes de calcular o risco.");
+        }
+        // Phase B carries a coherent Phase A view built from the same
+        // relational read as its risk context.
+        setSnapshot(response.snapshot);
+        setRiskSnapshot(response.snapshot);
+        setRiskError(null);
+      })
+      .catch((error) => {
+        if (generation !== riskRequestGeneration.current) return;
+        setRiskError(error instanceof Error ? error.message : "Não foi possível calcular o risco da operação.");
+      });
+  }, [snapshot?.operation.id, riskAttempt]);
 
   useEffect(() => {
     if (!snapshot) return;
@@ -86,10 +120,11 @@ function OperadorPage() {
     );
   }
 
-  const { operation, machine, area, client, risk: scoreContext } = snapshot;
-  const score = scoreContext.finalScore;
-  const level = scoreContext.level;
-  const nextAction = snapshot.nextAction;
+  const { operation, machine, area, client } = snapshot;
+  const scoreContext = riskSnapshot?.risk;
+  const score = scoreContext?.finalScore;
+  const level = scoreContext?.level;
+  const nextAction = riskSnapshot?.nextAction;
   const climate = loadingWeather
     ? { condition: "Carregando…", temperature: "—", precipitation: "—", wind: "—" }
     : weather
@@ -144,12 +179,29 @@ function OperadorPage() {
         <Card>
           <SectionTitle title="Risco agora" />
           <div className="flex flex-col items-center justify-center py-2">
-            <ScoreGauge score={score} />
-            <RiskBadge level={level} className="mt-3" score={score} />
-            <div className="mt-4 w-full rounded-lg bg-muted/50 p-3 text-sm">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Fator principal</div>
-              <div className="mt-1 font-medium text-foreground">{nextAction.factor}</div>
-            </div>
+            {scoreContext && score !== undefined && level ? (
+              <>
+                <ScoreGauge score={score} />
+                <RiskBadge level={level} className="mt-3" score={score} />
+                <div className="mt-4 w-full rounded-lg bg-muted/50 p-3 text-sm">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Fator principal</div>
+                  <div className="mt-1 font-medium text-foreground">{nextAction?.factor}</div>
+                </div>
+              </>
+            ) : (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                {riskError ?? "Calculando..."}
+                {riskError && (
+                  <button
+                    type="button"
+                    className="mt-3 block rounded-md border border-border px-3 py-1.5 text-foreground hover:bg-muted"
+                    onClick={() => setRiskAttempt((value) => value + 1)}
+                  >
+                    Tentar novamente
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </Card>
       </div>
@@ -157,7 +209,9 @@ function OperadorPage() {
       <div id="recomendacoes" className="mt-6 grid scroll-mt-20 gap-4 lg:grid-cols-2">
         <Card>
           <SectionTitle title="Próxima melhor ação" description="Prioridade para a operação atual" />
-          <NextBestActionCard action={nextAction} />
+          {nextAction ? <NextBestActionCard action={nextAction} /> : (
+            <p className="text-sm text-muted-foreground">{riskError ?? "Calculando..."}</p>
+          )}
         </Card>
         <Card>
           <SectionTitle title="Clima e segurança" description={climate.condition} />

@@ -1,7 +1,12 @@
 import type { Alert, Area, Client, Machine, Operation, RiskLevel } from "./mock-data";
 import type { AgroRiskRepository } from "./data/repository";
 import { mockRepository } from "./data/mock-repository.server";
-import { listAdminOperationalOverview, listClientRelationalScope, postgresRepository } from "./data/postgres-repository.server";
+import {
+  listAdminOperationalOverview,
+  listClientRelationalScope,
+  listOperationRiskContexts,
+  postgresRepository,
+} from "./data/postgres-repository.server";
 import { cacheOrFetch } from "./cache.server";
 import { getRiskEngineV2Configuration } from "./risk-config.server";
 import {
@@ -80,7 +85,12 @@ const newestOperation = (operations: readonly Operation[]): Operation | undefine
     );
   })[0];
 
-const adminRiskBatchInFlight = new Map<string, Promise<AdminOperationRow[]>>();
+export interface AdminRiskBatchEvaluation {
+  operationRows: AdminOperationRow[];
+  riskErrorsByOperationId: Record<string, string>;
+}
+
+const adminRiskBatchInFlight = new Map<string, Promise<AdminRiskBatchEvaluation>>();
 const adminSnapshotInFlight = new Map<string, Promise<AdminDashboardSnapshot>>();
 export const ADMIN_RISK_BATCH_LIMIT = 20;
 const adminExternalServices: OperationRiskExternalServices = {
@@ -154,26 +164,26 @@ export function memoizeAdminRiskServices(
   };
 }
 
-export async function evaluateAdminDashboardRiskBatch(
+export async function evaluateAdminDashboardRiskBatchDetails(
   operationIds: readonly string[] = [],
   limit = 12,
   externalServices?: OperationRiskExternalServices,
-): Promise<AdminOperationRow[]> {
+): Promise<AdminRiskBatchEvaluation> {
   const ids = [...new Set(operationIds)].slice(0, ADMIN_RISK_BATCH_LIMIT);
   const batchSize = Math.max(1, Math.min(limit, ADMIN_RISK_BATCH_LIMIT));
   const configuration = getRiskEngineV2Configuration();
   const weights = { ml: configuration.mlWeight, operationalRules: configuration.operationalRulesWeight };
   const run = async () => {
-    const relational = await readRepository(postgresRepository);
+    const relational = await readRepository(postgresRepository, false);
     const selected = selectPrioritizedAdminOperations(relational.operations, ids, batchSize);
     const clientById = new Map(relational.clients.map((client) => [client.id, client]));
     const areaById = new Map(relational.areas.map((area) => [area.id, area]));
     const machineById = new Map(relational.machines.map((machine) => [machine.id, machine]));
-    const contextByOperationId = new Map(
-      (relational.riskContexts ?? []).map((context) => [context.operation.id, context]),
-    );
+    const contextByOperationId = new Map((await listOperationRiskContexts({
+      operationIds: selected.map((operation) => operation.id),
+    })).map((context) => [context.operation.id, context]));
     const memoizedServices = externalServices ?? adminExternalServices;
-    return mapWithConcurrency(selected, 6, async (operation) => {
+    const settled = await Promise.allSettled(selected.map(async (operation) => {
       const context = contextByOperationId.get(operation.id) ??
         buildFallbackOperationRiskContext(
           operation,
@@ -188,7 +198,15 @@ export async function evaluateAdminDashboardRiskBatch(
         { priority: batchSize === 1 ? "interactive" : "background" },
       );
       return { operation, evaluation, ...toEntityRisk(evaluation.result) };
-    });
+    }));
+    return {
+      operationRows: settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []),
+      riskErrorsByOperationId: Object.fromEntries(settled.flatMap((result, index) =>
+        result.status === "rejected"
+          ? [[selected[index].id, result.reason instanceof Error ? result.reason.message : "Não foi possível calcular o risco."]]
+          : [],
+      )),
+    };
   };
   if (externalServices) return run();
 
@@ -202,6 +220,15 @@ export async function evaluateAdminDashboardRiskBatch(
   } finally {
     adminRiskBatchInFlight.delete(key);
   }
+}
+
+/** Compatibility wrapper for callers that only need successful rows. */
+export async function evaluateAdminDashboardRiskBatch(
+  operationIds: readonly string[] = [],
+  limit = 12,
+  externalServices?: OperationRiskExternalServices,
+): Promise<AdminOperationRow[]> {
+  return (await evaluateAdminDashboardRiskBatchDetails(operationIds, limit, externalServices)).operationRows;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -399,10 +426,13 @@ export async function buildAdminDashboardRelationalSnapshot(
   };
 }
 
-const readRepository = async (repository: AgroRiskRepository): Promise<RelationalSnapshot> => {
+const readRepository = async (
+  repository: AgroRiskRepository,
+  includeRiskContexts = true,
+): Promise<RelationalSnapshot> => {
   if (repository === postgresRepository) {
     const [relational, alerts] = await Promise.all([
-      listClientRelationalScope(null),
+      listClientRelationalScope(null, includeRiskContexts),
       repository.listAlerts(),
     ]);
     return { ...relational, alerts };
@@ -430,8 +460,10 @@ export async function loadAdminDashboardSnapshot(
 
   const load = async () => {
     try {
+      const useProgressiveAdminLoad =
+        primary === postgresRepository && fallback === mockRepository && !externalServices;
       const [relational, operationalOverview] = await Promise.all([
-        readRepository(primary),
+        readRepository(primary, !useProgressiveAdminLoad),
         primary === postgresRepository
           ? listAdminOperationalOverview()
           : Promise.resolve({ maintenance: { overdueCount: 0, dueSoonCount: 0, top: [] }, activity: [] }),
@@ -439,8 +471,6 @@ export async function loadAdminDashboardSnapshot(
       // Explicit service injection is retained for integrations/tests that
       // need the complete legacy snapshot. Production Admin loads relational
       // data first and evaluates only through the authenticated batch API.
-      const useProgressiveAdminLoad =
-        primary === postgresRepository && fallback === mockRepository && !externalServices;
       return useProgressiveAdminLoad
         ? await buildAdminDashboardRelationalSnapshot(
             relational, "postgres", false, weights, operationalOverview,

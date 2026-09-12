@@ -58,6 +58,8 @@ const createTabs = (snapshot: AdminDashboardSnapshot, actionableAlertCount: numb
 const AdminDashboardContext = createContext<{
   snapshot: AdminDashboardSnapshot;
   setSnapshot: React.Dispatch<React.SetStateAction<AdminDashboardSnapshot | null>>;
+  requestMoreRisk: (operationIds: string[]) => void;
+  riskErrorsByOperationId: Record<string, string>;
 } | null>(null);
 
 function useAdminDashboardData() {
@@ -116,8 +118,14 @@ function useAdminDashboardLoader() {
 function AdminPage() {
   const { snapshot, error } = useAdminDashboardLoader();
   const [riskSnapshot, setRiskSnapshot] = useState<AdminDashboardSnapshot | null>(null);
+  const [priorityRiskError, setPriorityRiskError] = useState<string | null>(null);
+  const [priorityPublished, setPriorityPublished] = useState(false);
+  const [riskErrorsByOperationId, setRiskErrorsByOperationId] = useState<Record<string, string>>({});
+  const [priorityOperationId, setPriorityOperationId] = useState<string | null>(null);
   const requestedRiskIds = useRef(new Set<string>());
   const requestedRiskTabs = useRef(new Set<TabId>());
+  const priorityGeneration = useRef(0);
+  const secondaryGeneration = useRef(0);
   const [tab, setTab] = useState<TabId>("visao-geral");
   const { snapshot: actionableAlerts } = useActionableAlerts();
   const tabs = useMemo(
@@ -129,35 +137,130 @@ function AdminPage() {
     if (!snapshot) return;
     requestedRiskIds.current.clear();
     requestedRiskTabs.current.clear();
+    priorityGeneration.current += 1;
+    secondaryGeneration.current += 1;
     setRiskSnapshot(snapshot);
+    setPriorityRiskError(null);
+    setPriorityPublished(false);
+    setRiskErrorsByOperationId({});
     const token = getStoredSessionToken();
     if (!token || snapshot.operations.length === 0) return;
-    const ids = [...snapshot.operations]
+    const id = [...snapshot.operations]
       .sort((left, right) =>
         (right.status === "Em andamento" ? 1 : 0) -
           (left.status === "Em andamento" ? 1 : 0) ||
         Date.parse(right.scheduledAt) - Date.parse(left.scheduledAt),
       )
-      .slice(0, 12)
-      .map((operation) => operation.id);
-    ids.forEach((id) => requestedRiskIds.current.add(id));
-    void evaluateAdminRiskBatch({ data: { token, operationIds: ids, limit: 12 } })
+      .map((operation) => operation.id)[0];
+    if (!id) return;
+    setPriorityOperationId(id);
+    requestedRiskIds.current.add(id);
+    const generation = ++priorityGeneration.current;
+    void evaluateAdminRiskBatch({ data: { token, operationIds: [id], limit: 1 } })
       .then((result) => {
-        if (result.ok) setRiskSnapshot((current) => current
-          ? mergeAdminOperationRows(current, result.operationRows)
-          : current);
+        if (generation !== priorityGeneration.current) {
+          requestedRiskIds.current.delete(id);
+          return;
+        }
+        if (!result.ok) {
+          requestedRiskIds.current.delete(id);
+          setPriorityRiskError(result.error);
+          return;
+        }
+        if (!result.operationRows.some((row) => row.operation.id === id)) {
+          requestedRiskIds.current.delete(id);
+          setPriorityRiskError(result.riskErrorsByOperationId?.[id] ?? "Não foi possível calcular o risco da operação prioritária.");
+          return;
+        }
+        setRiskSnapshot((current) => current ? mergeAdminOperationRows(current, result.operationRows) : current);
+        setPriorityRiskError(null);
+        setPriorityPublished(true);
       })
       .catch(() => {
-        // The relational dashboard remains usable; each score keeps its
-        // granular "Calculando..." state instead of inventing a value.
+        if (generation !== priorityGeneration.current) return;
+        requestedRiskIds.current.delete(id);
+        setPriorityRiskError("Não foi possível calcular o risco da operação prioritária.");
       });
   }, [snapshot]);
 
-  // Each section requests only the operation IDs needed for its first visible
-  // page. In particular, opening Operations never evaluates the remaining
-  // portfolio eagerly.
+  const retryPriorityRisk = () => {
+    if (!riskSnapshot || !priorityOperationId) return;
+    requestedRiskIds.current.delete(priorityOperationId);
+    const token = getStoredSessionToken();
+    if (!token) return;
+    const generation = ++priorityGeneration.current;
+    requestedRiskIds.current.add(priorityOperationId);
+    void evaluateAdminRiskBatch({ data: { token, operationIds: [priorityOperationId], limit: 1 } })
+      .then((result) => {
+        if (generation !== priorityGeneration.current) {
+          requestedRiskIds.current.delete(priorityOperationId);
+          return;
+        }
+        if (!result.ok || !result.operationRows.some((row) => row.operation.id === priorityOperationId)) {
+          requestedRiskIds.current.delete(priorityOperationId);
+          setPriorityRiskError(result.ok
+            ? result.riskErrorsByOperationId?.[priorityOperationId] ?? "Não foi possível calcular o risco da operação prioritária."
+            : result.error);
+          return;
+        }
+        setRiskSnapshot((current) => current ? mergeAdminOperationRows(current, result.operationRows) : current);
+        setPriorityRiskError(null);
+        setPriorityPublished(true);
+      })
+      .catch(() => {
+        if (generation !== priorityGeneration.current) return;
+        requestedRiskIds.current.delete(priorityOperationId);
+        setPriorityRiskError("Não foi possível calcular o risco da operação prioritária.");
+      });
+  };
+
+  const requestMoreRisk = (operationIds: string[]) => {
+    const token = getStoredSessionToken();
+    const ids = operationIds
+      .filter((id) => !requestedRiskIds.current.has(id))
+      .slice(0, 12);
+    if (!token || ids.length === 0) return;
+    ids.forEach((id) => requestedRiskIds.current.add(id));
+    setRiskErrorsByOperationId((current) => {
+      const next = { ...current };
+      ids.forEach((id) => delete next[id]);
+      return next;
+    });
+    const generation = ++secondaryGeneration.current;
+    void evaluateAdminRiskBatch({ data: { token, operationIds: ids, limit: ids.length } })
+      .then((result) => {
+        if (generation !== secondaryGeneration.current) {
+          ids.forEach((id) => requestedRiskIds.current.delete(id));
+          return;
+        }
+        if (!result.ok) {
+          ids.forEach((id) => requestedRiskIds.current.delete(id));
+          setRiskErrorsByOperationId((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, result.error])) }));
+          return;
+        }
+        const completed = new Set(result.operationRows.map((row) => row.operation.id));
+        const failed = result.failedOperationIds ?? ids.filter((id) => !completed.has(id));
+        failed.forEach((id) => requestedRiskIds.current.delete(id));
+        setRiskErrorsByOperationId((current) => ({
+          ...current,
+          ...Object.fromEntries(failed.map((id) => [
+            id,
+            result.riskErrorsByOperationId?.[id] ?? "Não foi possível calcular o risco desta operação.",
+          ])),
+        }));
+        setRiskSnapshot((current) => current ? mergeAdminOperationRows(current, result.operationRows) : current);
+      })
+      .catch((error) => {
+        if (generation !== secondaryGeneration.current) return;
+        ids.forEach((id) => requestedRiskIds.current.delete(id));
+        const message = error instanceof Error ? error.message : "Não foi possível calcular o risco desta operação.";
+        setRiskErrorsByOperationId((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, message])) }));
+      });
+  };
+
+  // Secondary batches are gated until the priority result has been published.
   useEffect(() => {
-    if (!riskSnapshot || tab === "visao-geral" || tab === "alerts" || tab === "motor-risco") return;
+    if (!riskSnapshot || !priorityPublished || tab === "visao-geral" || tab === "alerts" || tab === "motor-risco") return;
     if (requestedRiskTabs.current.has(tab)) return;
     const token = getStoredSessionToken();
     if (!token) return;
@@ -190,16 +293,8 @@ function AdminPage() {
       .filter((id) => !requestedRiskIds.current.has(id))
       .slice(0, 12);
     if (ids.length === 0) return;
-    ids.forEach((id) => requestedRiskIds.current.add(id));
-    void evaluateAdminRiskBatch({ data: { token, operationIds: ids, limit: ids.length } })
-      .then((result) => {
-        if (!result.ok) return;
-        setRiskSnapshot((current) => current
-          ? mergeAdminOperationRows(current, result.operationRows)
-          : current);
-      })
-      .catch(() => undefined);
-  }, [tab, riskSnapshot]);
+    requestMoreRisk(ids);
+  }, [tab, riskSnapshot, priorityPublished]);
 
   useEffect(() => {
     if (!riskSnapshot) return;
@@ -233,9 +328,13 @@ function AdminPage() {
    const current = tabs.find((t) => t.id === tab)!;
   const currentCount = tab === "recs" ? riskSnapshot.operationRows.length : current.count;
   const Icon = current.icon;
+   const remainingRiskIds = riskSnapshot.operations
+     .map((operation) => operation.id)
+     .filter((id) => !requestedRiskIds.current.has(id) && !riskErrorsByOperationId[id])
+     .slice(0, 12);
 
-  return (
-       <AdminDashboardContext.Provider value={{ snapshot: riskSnapshot, setSnapshot: setRiskSnapshot }}>
+   return (
+       <AdminDashboardContext.Provider value={{ snapshot: riskSnapshot, setSnapshot: setRiskSnapshot, requestMoreRisk, riskErrorsByOperationId }}>
       <AppLayout
       title="Dashboard da Sompo"
       subtitle="Visão consolidada dos clientes, frota, áreas, riscos e recomendações do MVP"
@@ -271,6 +370,22 @@ function AdminPage() {
       </div>
 
       <div id={tab} className="scroll-mt-20">
+         {priorityRiskError && (
+           <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+              <span>{priorityOperationId}: {priorityRiskError}</span>
+             <button type="button" onClick={retryPriorityRisk} className="rounded-md border border-danger/40 px-3 py-1 text-xs font-medium">
+               Tentar novamente
+             </button>
+           </div>
+         )}
+          {Object.entries(riskErrorsByOperationId).map(([operationId, message]) => (
+            <div key={operationId} className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+              <span>{operationId}: {message}</span>
+              <button type="button" onClick={() => requestMoreRisk([operationId])} className="rounded-md border border-danger/40 px-3 py-1 text-xs font-medium">
+                Tentar novamente
+              </button>
+            </div>
+          ))}
         {tab === "visao-geral" && <OverviewPanel />}
         {tab === "rankings" && <RankingsPanel />}
         {tab === "scores" && <ScoresPanel />}
@@ -285,6 +400,13 @@ function AdminPage() {
           </div>
         )}
         {tab === "motor-risco" && <RiskEngineConfigurationPanel />}
+        {priorityPublished && !["visao-geral", "alerts", "motor-risco"].includes(tab) && remainingRiskIds.length > 0 && (
+          <div className="mt-4">
+            <button type="button" onClick={() => requestMoreRisk(remainingRiskIds)} className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted">
+              Carregar mais itens visíveis
+            </button>
+          </div>
+        )}
       </div>
       </AppLayout>
     </AdminDashboardContext.Provider>
@@ -302,6 +424,14 @@ function OverviewPanel() {
   const data = useAdminDashboardData();
   const mDist = data.machineDistribution;
   const aDist = data.areaDistribution;
+  const priorityRisk = data.operationRows[0];
+  const coverageState = data.riskCoverageComplete
+    ? "Completo"
+    : data.operationRows.length > 0 ? "Parcial" : "Calculando...";
+  const completeAverage = data.machineRows.length
+    ? Math.round(data.machineRows.reduce((sum, row) => sum + row.score, 0) / data.machineRows.length)
+    : 0;
+  const completeAtRisk = data.operationRows.filter((row) => row.score >= 71).length;
   const { snapshot: actionableAlerts } = useActionableAlerts();
   const criticalAlerts = actionableAlerts.alerts.filter((alert) => alert.severity === "critical").length;
   const topRecs = adminV2RecommendationRows(data)
@@ -312,8 +442,9 @@ function OverviewPanel() {
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Máquinas monitoradas" value={String(data.machines.length)} tone="info" />
-         <SummaryCard label="Operações em risco" value="Calculando..." tone="warning" />
-         <SummaryCard label="Score médio da frota" value="Calculando..." tone="info" />
+          <SummaryCard label="Operações em risco" value={data.riskCoverageComplete ? String(completeAtRisk) : coverageState} tone="warning" />
+          <SummaryCard label="Score médio da frota" value={data.riskCoverageComplete ? String(completeAverage) : coverageState} tone="info" />
+        <SummaryCard label="Score prioritário" value={priorityRisk ? String(priorityRisk.score) : "Calculando..."} tone="success" />
         <SummaryCard label="Alertas críticos" value={String(criticalAlerts)} tone="danger" />
       </div>
 
@@ -323,9 +454,9 @@ function OverviewPanel() {
         <Card>
           <div className="mb-3 text-sm font-semibold text-foreground">Distribuição da frota por risco</div>
           <div className="space-y-2 text-sm">
-             <DistRow label="Risco alto"  mq={mDist.total ? mDist.alto : "Calculando..."}  ar={aDist.total ? aDist.alto : "Calculando..."} tone="danger" />
-             <DistRow label="Risco médio" mq={mDist.total ? mDist.medio : "Calculando..."} ar={aDist.total ? aDist.medio : "Calculando..."} tone="warning" />
-             <DistRow label="Risco baixo" mq={mDist.total ? mDist.baixo : "Calculando..."} ar={aDist.total ? aDist.baixo : "Calculando..."} tone="success" />
+             <DistRow label="Risco alto"  mq={mDist.total ? mDist.alto : coverageState}  ar={aDist.total ? aDist.alto : coverageState} tone="danger" />
+             <DistRow label="Risco médio" mq={mDist.total ? mDist.medio : coverageState} ar={aDist.total ? aDist.medio : coverageState} tone="warning" />
+             <DistRow label="Risco baixo" mq={mDist.total ? mDist.baixo : coverageState} ar={aDist.total ? aDist.baixo : coverageState} tone="success" />
           </div>
         </Card>
 
@@ -343,7 +474,9 @@ function OverviewPanel() {
               </div>
             ))}
             {topRecs.length === 0 && (
-              <div className="text-sm text-muted-foreground">Sem recomendações de prioridade alta no momento.</div>
+              <div className="text-sm text-muted-foreground">
+                {data.riskCoverageComplete ? "Sem recomendações de prioridade alta no momento." : "Recomendações parciais — calculando os demais itens."}
+              </div>
             )}
           </div>
         </Card>
@@ -377,11 +510,17 @@ function RankingsPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <DistCard label="Risco alto"  alto={mDist.alto}  medio={aDist.alto}  tone="danger" />
-        <DistCard label="Risco médio" alto={mDist.medio} medio={aDist.medio} tone="warning" />
-        <DistCard label="Risco baixo" alto={mDist.baixo} medio={aDist.baixo} tone="success" />
-      </div>
+      {data.riskCoverageComplete ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <DistCard label="Risco alto"  alto={mDist.alto}  medio={aDist.alto}  tone="danger" />
+          <DistCard label="Risco médio" alto={mDist.medio} medio={aDist.medio} tone="warning" />
+          <DistCard label="Risco baixo" alto={mDist.baixo} medio={aDist.baixo} tone="success" />
+        </div>
+      ) : (
+        <Card><div className="text-sm text-muted-foreground">
+          {data.operationRows.length ? "Distribuição parcial — aguardando os demais itens visíveis." : "Calculando distribuição de risco..."}
+        </div></Card>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card className="p-0">
@@ -473,16 +612,17 @@ function RecsPanel() {
   const rows = adminV2RecommendationRows(data);
   const byCat = countByCategory(rows);
   const byPrio = countByPriority(rows);
+  const partial = !data.riskCoverageComplete;
 
   const catEntries = Object.entries(byCat).filter(([, n]) => n > 0) as [RecCategory, number][];
 
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-4">
-        <SummaryCard label="Recomendações geradas" value={String(rows.length)} tone="info" />
-        <SummaryCard label="Prioridade alta"  value={String(byPrio.alta)}    tone="danger" />
-        <SummaryCard label="Prioridade média" value={String(byPrio["média"])} tone="warning" />
-        <SummaryCard label="Prioridade baixa" value={String(byPrio.baixa)}   tone="success" />
+        <SummaryCard label="Recomendações geradas" value={partial ? "Parcial" : String(rows.length)} tone="info" />
+        <SummaryCard label="Prioridade alta"  value={partial ? "Parcial" : String(byPrio.alta)}    tone="danger" />
+        <SummaryCard label="Prioridade média" value={partial ? "Parcial" : String(byPrio["média"])} tone="warning" />
+        <SummaryCard label="Prioridade baixa" value={partial ? "Parcial" : String(byPrio.baixa)}   tone="success" />
       </div>
 
       <Card>
@@ -499,7 +639,7 @@ function RecsPanel() {
 
       <Card className="p-0">
         <div className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
-          Recomendações consolidadas ({rows.length})
+          Recomendações {partial ? "parciais" : "consolidadas"} ({rows.length})
         </div>
         <TableShell headers={["Cliente / Fazenda", "Alvo", "Score", "Recomendação", "Categoria", "Prioridade", "Destino", "Risco"]}>
           {rows.map((r, i) => (
@@ -766,6 +906,7 @@ function OperationsTable() {
       <TableShell headers={["ID", "Máquina", "Tipo", "Área", "Início", "Duração", "Status", "Score", "Risco"]}>
       {visibleOperations.map((o) => {
         const risk = riskByOperation.get(o.id);
+          const riskError = dashboardState?.riskErrorsByOperationId[o.id];
         return (
           <tr key={o.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{o.id}</TD>
@@ -780,8 +921,10 @@ function OperationsTable() {
                 tone={o.status === "Em andamento" ? "green" : o.status === "Concluída" ? "blue" : o.status === "Agendada" ? "yellow" : "red"}
               />
             </TD>
-            <TD>{risk ? <ScoreBar score={risk.score} /> : "Calculando..."}</TD>
-            <TD>{risk ? <RiskBadge score={risk.score} /> : "Calculando..."}</TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : riskError ? (
+              <button type="button" onClick={() => dashboardState?.requestMoreRisk([o.id])} className="text-xs text-danger underline">Tentar novamente</button>
+            ) : "Calculando..."}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : riskError ?? "Calculando..."}</TD>
           </tr>
         );
       })}
@@ -795,14 +938,8 @@ function OperationsTable() {
             onClick={() => {
               const next = page + 1;
               setPage(next);
-              const token = getStoredSessionToken();
               const ids = data.operations.slice(next * pageSize, (next + 1) * pageSize).map((operation) => operation.id);
-              if (!token || !dashboardState) return;
-              void evaluateAdminRiskBatch({ data: { token, operationIds: ids, limit: ids.length } }).then((result) => {
-                if (result.ok) dashboardState.setSnapshot((current) => current
-                  ? mergeAdminOperationRows(current, result.operationRows)
-                  : current);
-              });
+               dashboardState?.requestMoreRisk(ids);
             }}
           >Próxima página</button>
         )}

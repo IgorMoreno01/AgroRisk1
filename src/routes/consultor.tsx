@@ -31,9 +31,16 @@ function ConsultorPage() {
   const [clientId, setClientId] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [riskAttempt, setRiskAttempt] = useState(0);
   const [riskErrorByClient, setRiskErrorByClient] = useState<Record<string, string>>({});
+  const [preventiveOverview, setPreventiveOverview] = useState<ConsultorDashboardSnapshot["preventiveOverview"] | null>(null);
+  const [preventiveLoading, setPreventiveLoading] = useState(false);
+  const [preventiveError, setPreventiveError] = useState<string | null>(null);
   const requestedClients = useRef(new Set<string>());
-  const requestedPreventiveData = useRef(false);
+  const priorityPublishedClients = useRef(new Set<string>());
+  const priorityGeneration = useRef(0);
+  const secondaryGeneration = useRef(0);
+  const [priorityPublished, setPriorityPublished] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,7 +52,10 @@ function ConsultorPage() {
         if (cancelled) return;
         if (!result.ok) return setLoadError(result.error);
         requestedClients.current.clear();
-        requestedPreventiveData.current = false;
+        priorityPublishedClients.current.clear();
+        priorityGeneration.current += 1;
+        secondaryGeneration.current += 1;
+        setPriorityPublished(false);
         setSnapshot(result.snapshot);
         setClientId((current) => current || result.snapshot.clients[0]?.client.id || "");
       })
@@ -64,6 +74,71 @@ function ConsultorPage() {
   const recommendations = selected?.recommendation ? [selected.recommendation] : [];
   const topMachine = clientMachines[0];
 
+  const loadMoreVisible = () => {
+    if (!selected) return;
+    const token = getStoredSessionToken();
+    const operationIds = selectConsultorPriorityOperationIds({
+      operations: selected.operations,
+      machines: selected.machinesData,
+      areas: selected.areasData,
+      evaluatedOperationIds: selected.evaluatedOperationIds,
+      limit: 3,
+    });
+    if (!token || operationIds.length === 0) return;
+    if (!priorityPublished) return;
+    const generation = ++secondaryGeneration.current;
+    setRiskErrorByClient((current) => {
+      const next = { ...current };
+      delete next[selected.client.id];
+      return next;
+    });
+    void evaluateConsultorRiskBatch({
+      data: { token, clientId: selected.client.id, operationIds, limit: operationIds.length },
+    }).then((result) => {
+      if (generation !== secondaryGeneration.current) return;
+      if (!result.ok) throw new Error(result.error);
+      setSnapshot((current) => current ? {
+        ...current,
+        clients: current.clients.map((item) => item.client.id === result.client.client.id ? result.client : item),
+      } : current);
+      const errors = result.client.riskErrorsByOperationId ?? {};
+      if (Object.keys(errors).length) {
+        setRiskErrorByClient((current) => ({
+          ...current,
+          [selected.client.id]: Object.entries(errors).map(([id, message]) => `${id}: ${message}`).join(" "),
+        }));
+      }
+    }).catch((error) => {
+      if (generation !== secondaryGeneration.current) return;
+      setRiskErrorByClient((current) => ({
+        ...current,
+        [selected.client.id]: error instanceof Error ? error.message : "Não foi possível calcular os itens visíveis.",
+      }));
+    });
+  };
+
+  const loadPreventiveOverview = () => {
+    const token = getStoredSessionToken();
+    if (!token || preventiveLoading) return;
+    setPreventiveLoading(true);
+    setPreventiveError(null);
+    void getConsultorPreventiveData({ data: { token } })
+      .then((result) => {
+        if (!result.ok) throw new Error(result.error);
+        setPreventiveOverview(result.overview);
+      })
+      .catch((error) => setPreventiveError(error instanceof Error ? error.message : "Não foi possível carregar os dados preventivos."))
+      .finally(() => setPreventiveLoading(false));
+  };
+
+  useEffect(() => {
+    // A response for a previously selected client must never replace the
+    // currently visible client after the selection changes.
+    priorityGeneration.current += 1;
+    secondaryGeneration.current += 1;
+    setPriorityPublished(priorityPublishedClients.current.has(clientId));
+  }, [clientId]);
+
   useEffect(() => {
     if (!snapshot || !selected || selected.summary || requestedClients.current.has(selected.client.id)) return;
     const token = getStoredSessionToken();
@@ -73,13 +148,18 @@ function ConsultorPage() {
       machines: selected.machinesData,
       areas: selected.areasData,
       evaluatedOperationIds: selected.evaluatedOperationIds,
-      limit: 12,
+      limit: 1,
     });
     const timer = window.setTimeout(() => {
       requestedClients.current.add(selected.client.id);
+      const generation = priorityGeneration.current;
       void evaluateConsultorRiskBatch({
-        data: { token, clientId: selected.client.id, operationIds, limit: 12 },
+        data: { token, clientId: selected.client.id, operationIds, limit: 1 },
       }).then((result) => {
+        if (generation !== priorityGeneration.current) {
+          requestedClients.current.delete(selected.client.id);
+          return;
+        }
         if (!result.ok) throw new Error(result.error);
         setSnapshot((current) => current ? {
           ...current,
@@ -88,17 +168,17 @@ function ConsultorPage() {
         } : current);
         setRiskErrorByClient((current) => {
           const next = { ...current };
-          delete next[selected.client.id];
+          const errors = Object.entries(result.client.riskErrorsByOperationId ?? {});
+          if (errors.length) next[selected.client.id] = errors.map(([id, message]) => `${id}: ${message}`).join(" ");
+          else delete next[selected.client.id];
           return next;
         });
-        const machinesWithOperations = new Set(
-          result.client.operations.map((operation) => operation.machineId),
-        ).size;
-        if (!result.client.summary &&
-            result.client.evaluatedOperationIds.length < machinesWithOperations) {
-          requestedClients.current.delete(selected.client.id);
+        if (!Object.keys(result.client.riskErrorsByOperationId ?? {}).length) {
+          priorityPublishedClients.current.add(selected.client.id);
+          setPriorityPublished(true);
         }
       }).catch(() => {
+        if (generation !== priorityGeneration.current) return;
         requestedClients.current.delete(selected.client.id);
         setRiskErrorByClient((current) => ({
           ...current,
@@ -107,23 +187,7 @@ function ConsultorPage() {
       });
     }, 75);
     return () => window.clearTimeout(timer);
-  }, [snapshot, selected]);
-
-  useEffect(() => {
-    if (!snapshot || requestedPreventiveData.current) return;
-    const token = getStoredSessionToken();
-    if (!token) return;
-    const timer = window.setTimeout(() => {
-      requestedPreventiveData.current = true;
-      void getConsultorPreventiveData({ data: { token } }).then((result) => {
-        if (!result.ok) return;
-        setSnapshot((current) => current ? { ...current, preventiveOverview: result.overview } : current);
-      }).catch(() => {
-        requestedPreventiveData.current = false;
-      });
-    }, 100);
-    return () => window.clearTimeout(timer);
-  }, [snapshot]);
+  }, [snapshot, selected, clientId, riskAttempt]);
 
   if (loadError) {
     return (
@@ -260,6 +324,11 @@ function ConsultorPage() {
                 <RiskBadge score={row.score} />
               </div>
             ))}
+            {selected.evaluatedOperationIds.length < selected.operations.length && (
+              <button type="button" onClick={loadMoreVisible} disabled={!priorityPublished} className="w-full rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-60">
+                {priorityPublished ? "Carregar mais itens visíveis" : "Calculando item prioritário..."}
+              </button>
+            )}
           </div>
         </Card>
         </section>
@@ -380,13 +449,38 @@ function ConsultorPage() {
           )}
           {selected.nextAction && <div className="mt-4"><NextBestActionCard action={selected.nextAction} /></div>}
           {riskErrorByClient[selected.client.id] && (
-            <p className="mt-3 text-xs text-danger">{riskErrorByClient[selected.client.id]}</p>
+            <div className="mt-3 flex items-center gap-3 text-xs text-danger">
+              <p>{riskErrorByClient[selected.client.id]}</p>
+              <button
+                type="button"
+                className="rounded-md border border-danger/40 px-2 py-1 font-medium"
+                onClick={() => {
+                  requestedClients.current.delete(selected.client.id);
+                  priorityGeneration.current += 1;
+                  setRiskAttempt((value) => value + 1);
+                }}
+              >
+                Tentar novamente
+              </button>
+            </div>
           )}
         </Card>
         </section>
       </div>
 
-      <ConsultorPreventiveOverview overview={snapshot.preventiveOverview} />
+      <section className="mt-6">
+        {preventiveOverview ? (
+          <ConsultorPreventiveOverview overview={preventiveOverview} />
+        ) : (
+          <Card>
+            <SectionTitle title="Análise preventiva da carteira" description="Dados preventivos são carregados somente quando solicitados." />
+            {preventiveError && <p className="mb-3 text-sm text-danger">{preventiveError}</p>}
+            <button type="button" onClick={loadPreventiveOverview} disabled={preventiveLoading} className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-60">
+              {preventiveLoading ? "Carregando..." : "Carregar análise preventiva"}
+            </button>
+          </Card>
+        )}
+      </section>
     </AppLayout>
   );
 }

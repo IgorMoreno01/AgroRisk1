@@ -109,7 +109,10 @@ export async function listOperationRiskContexts(scope: {
   })) as OperationRiskRelationalContext[];
 }
 
-export async function listClientRelationalScope(clientIds: readonly string[] | null) {
+export async function listClientRelationalScope(
+  clientIds: readonly string[] | null,
+  includeRiskContexts = true,
+) {
   const sql = db();
   const ids = clientIds === null ? null : [...clientIds];
   const [clientRows, areaRows, machineRows, operationRows, riskContexts] = await Promise.all([
@@ -160,7 +163,7 @@ export async function listClientRelationalScope(clientIds: readonly string[] | n
       ${ids === null ? sql`` : sql`WHERE o.client_id = ANY(${ids})`}
       GROUP BY o.id, a.name ORDER BY o.id
     `,
-    listOperationRiskContexts({ clientIds }),
+    includeRiskContexts ? listOperationRiskContexts({ clientIds }) : Promise.resolve([]),
   ]);
   return {
     clients: parseClients([...clientRows]),
@@ -469,7 +472,7 @@ export async function listConsultorPreventiveOverview(
   };
 }
 
-export async function getOperatorRelationalScope(operatorId: string) {
+export async function getOperatorRelationalScope(operatorId: string, includeRiskContext = true) {
   const sql = db();
   const currentOperation = sql`
     SELECT o.*
@@ -520,7 +523,7 @@ export async function getOperatorRelationalScope(operatorId: string) {
       JOIN agrorisk.areas a ON a.id = o.area_id AND a.client_id = o.client_id
       JOIN agrorisk.clients c ON c.id = o.client_id
     `,
-    listOperationRiskContexts({ operatorId }),
+    includeRiskContext ? listOperationRiskContexts({ operatorId }) : Promise.resolve([]),
     sql`
       SELECT count(*)::int AS count
       FROM agrorisk.operations

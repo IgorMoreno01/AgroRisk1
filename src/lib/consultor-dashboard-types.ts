@@ -16,6 +16,8 @@ export interface ConsultorClientView {
   areasData: Area[];
   operations: Operation[];
   evaluatedOperationIds: string[];
+  /** Failed IDs remain retryable and never mean coverage is complete. */
+  riskErrorsByOperationId?: Record<string, string>;
   summary?: AdminClientRow;
   machines: AdminMachineRow[];
   areas: AdminAreaRow[];

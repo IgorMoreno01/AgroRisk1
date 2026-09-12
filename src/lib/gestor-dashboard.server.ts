@@ -137,6 +137,7 @@ export async function buildGestorRelationalSnapshot(
     alertCountsByMachine: counts,
     riskCoverageComplete: false,
     evaluatedOperationIds: [],
+    riskErrorsByOperationId: {},
     relationalCounts: {
       clients: relational.clients.length,
       areas: relational.areas.length,
@@ -348,6 +349,7 @@ const gestorExternalServices: OperationRiskExternalServices = {
 function snapshotWithRiskRows(
   base: GestorDashboardSnapshot,
   merged: Awaited<ReturnType<typeof buildAdminDashboardRelationalSnapshot>>,
+  riskErrorsByOperationId: Record<string, string> = {},
 ): GestorDashboardSnapshot {
   const machineRows = merged.machineRows.map((row) => ({
     ...row,
@@ -367,6 +369,7 @@ function snapshotWithRiskRows(
     machinesAtRisk: machineRows.filter((row) => row.score >= 70).length,
     riskCoverageComplete: merged.riskCoverageComplete,
     evaluatedOperationIds: merged.operationRows.map((row) => row.operation.id),
+    riskErrorsByOperationId,
   };
 }
 
@@ -404,7 +407,7 @@ export async function evaluateGestorRiskBatch(
       ).map((context) => [context.operation.id, context]),
     );
     const services = externalServices ?? gestorExternalServices;
-    const rows = await Promise.all(selected.map(async (operation) => {
+    const settled = await Promise.allSettled(selected.map(async (operation) => {
       const context = contextByOperationId.get(operation.id) ?? buildFallbackOperationRiskContext(
         operation,
         machines.get(operation.machineId)!,
@@ -425,6 +428,12 @@ export async function evaluateGestorRiskBatch(
         mainFactor: evaluation.result.drivers[0]?.label ?? "Sem fator dominante",
       };
     }));
+    const rows = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const riskErrorsByOperationId = Object.fromEntries(settled.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [[selected[index].id, result.reason instanceof Error ? result.reason.message : "Não foi possível calcular o risco."]]
+        : [],
+    ));
     const scopeKey = scope.clientIds === null ? "global" : [...scope.clientIds].sort().join(",");
     const accumulatedKey = `${scope.userId}:${scopeKey}:${weights.ml}:${weights.operationalRules}`;
     const previous = gestorRowsByScope.get(accumulatedKey);
@@ -438,6 +447,7 @@ export async function evaluateGestorRiskBatch(
     return snapshotWithRiskRows(
       relationalSnapshot,
       mergeAdminOperationRows(adminBase, accumulated),
+      riskErrorsByOperationId,
     );
   };
   if (externalServices) return run();

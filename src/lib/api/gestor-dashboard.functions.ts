@@ -20,14 +20,14 @@ export const getGestorDashboard = createServerFn({ method: "POST" })
     };
   });
 
-const batchInput = z.object({
+export const gestorRiskBatchInputSchema = z.object({
   token: z.string().min(1).max(2000),
   operationIds: z.array(z.string().min(1).max(120)).max(12),
   limit: z.number().int().min(1).max(12).default(12),
 });
 
 export const evaluateGestorRiskBatch = createServerFn({ method: "POST" })
-  .inputValidator(batchInput)
+  .inputValidator(gestorRiskBatchInputSchema)
   .handler(async ({ data }) => {
     const { authorize } = await import("../auth-session.server");
     const session = await authorize(data.token, "/gestor");

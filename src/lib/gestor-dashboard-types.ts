@@ -68,6 +68,8 @@ export interface GestorDashboardSnapshot {
   /** False while only a visible/selected batch has been evaluated. */
   riskCoverageComplete?: boolean;
   evaluatedOperationIds?: string[];
+  /** Failed IDs remain retryable and never mean coverage is complete. */
+  riskErrorsByOperationId?: Record<string, string>;
   relationalCounts?: {
     clients: number;
     areas: number;

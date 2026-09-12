@@ -186,9 +186,9 @@ describe("Migração do Operador para PostgreSQL", () => {
     expect(source).not.toContain("operationsByOperator");
     expect(source).not.toContain("riskResultForOperation");
     expect(source).not.toContain("recommendationsForOperation");
-    expect(source).toContain("scoreContext.finalScore");
-    expect(source).toContain("scoreContext.level");
-    expect(source).toContain("snapshot.nextAction");
+    expect(source).toContain("riskSnapshot?.risk");
+    expect(source).toContain("riskSnapshot?.nextAction");
+    expect(source).toContain("evaluateOperadorRisk");
     expect(source).not.toContain("<PersonaV2RiskPanel");
     expect(source).not.toContain("getProfileAlerts");
     expect(source).not.toContain("setInterval");

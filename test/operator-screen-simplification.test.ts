@@ -50,8 +50,8 @@ describe("Tela operacional simplificada", () => {
       "OperationRegistrationCard",
       "machine.type",
       "machine.id",
-      "scoreContext.finalScore",
-      "snapshot.nextAction",
+       "riskSnapshot?.risk",
+       "riskSnapshot?.nextAction",
     ]) {
       expect(route).toContain(visible);
     }

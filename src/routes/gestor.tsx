@@ -174,39 +174,76 @@ function GestorPage() {
   const [level,        setLevel]        = useState<RiskLevel | "all">("all");
   const [operationType, setOperationType] = useState<OperationType | "all">("all");
   const [areaId,       setAreaId]       = useState<string>("all");
+  const [activeRankingTab, setActiveRankingTab] = useState("machines");
+  const [filterDemandVersion, setFilterDemandVersion] = useState(0);
 
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [selectedArea, setSelectedArea] = useState<Area | null>(null);
 
   const [snapshot, setSnapshot] = useState<GestorDashboardSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [priorityError, setPriorityError] = useState<string | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [priorityPublished, setPriorityPublished] = useState(false);
   const requestedOperationIds = useRef(new Set<string>());
   const firstBatchScheduled = useRef(false);
+  const priorityResolved = useRef(false);
+  const pendingRankingTab = useRef<string | null>(null);
+  const priorityGeneration = useRef(0);
+  const secondaryGeneration = useRef(0);
 
-  const requestBatch = (operationIds: string[]) => {
+  useEffect(() => {
+    // Filter/tab changes invalidate older asynchronous ranking responses.
+    secondaryGeneration.current += 1;
+  }, [clientId, level, operationType, areaId]);
+
+  const requestBatch = (operationIds: string[], priority = false) => {
     const token = getStoredSessionToken();
     if (!token || operationIds.length === 0) return;
     const ids = operationIds.filter((id) => !requestedOperationIds.current.has(id)).slice(0, 12);
     if (ids.length === 0) return;
     ids.forEach((id) => requestedOperationIds.current.add(id));
     setBatchLoading(true);
+    const generation = priority ? priorityGeneration.current : secondaryGeneration.current;
     void evaluateGestorRiskBatch({ data: { token, operationIds: ids, limit: Math.min(ids.length, 12) } })
       .then((result) => {
+        if (generation !== (priority ? priorityGeneration.current : secondaryGeneration.current)) {
+          ids.forEach((id) => requestedOperationIds.current.delete(id));
+          return;
+        }
         if (!result.ok) {
           ids.forEach((id) => requestedOperationIds.current.delete(id));
           setLoadError(result.error);
+          if (priority) setPriorityError(`${ids[0]}: ${result.error}`);
+          return;
+        }
+        if (priority && !result.snapshot.evaluatedOperationIds?.includes(ids[0])) {
+          requestedOperationIds.current.delete(ids[0]);
+          const message = result.snapshot.riskErrorsByOperationId?.[ids[0]] ?? "Não foi possível calcular o risco prioritário.";
+          setLoadError(message);
+          setPriorityError(`${ids[0]}: ${message}`);
           return;
         }
         setSnapshot((previous) => previous
           ? { ...result.snapshot, operationalOverview: previous.operationalOverview }
           : result.snapshot);
+        const failed = new Set(Object.keys(result.snapshot.riskErrorsByOperationId ?? {}));
+        ids.filter((id) => failed.has(id)).forEach((id) => requestedOperationIds.current.delete(id));
         result.snapshot.evaluatedOperationIds?.forEach((id) =>
           requestedOperationIds.current.add(id));
+        if (priority) {
+          priorityResolved.current = true;
+          setLoadError(null);
+          setPriorityError(null);
+          setPriorityPublished(true);
+        }
       })
       .catch(() => {
+        if (generation !== (priority ? priorityGeneration.current : secondaryGeneration.current)) return;
         ids.forEach((id) => requestedOperationIds.current.delete(id));
-        setLoadError("Não foi possível calcular o risco selecionado.");
+        const message = "Não foi possível calcular o risco selecionado.";
+        setLoadError(message);
+        if (priority) setPriorityError(`${ids[0]}: ${message}`);
       })
       .finally(() => setBatchLoading(false));
   };
@@ -219,7 +256,17 @@ function GestorPage() {
       .then((result) => {
         if (cancelled) return;
         if (!result.ok) setLoadError(result.error);
-        else setSnapshot(result.snapshot);
+        else {
+          priorityGeneration.current += 1;
+          secondaryGeneration.current += 1;
+          requestedOperationIds.current.clear();
+          firstBatchScheduled.current = false;
+          priorityResolved.current = false;
+          setPriorityPublished(false);
+          setPriorityError(null);
+          pendingRankingTab.current = null;
+          setSnapshot(result.snapshot);
+        }
       })
       .catch(() => {
         if (!cancelled) setLoadError("Não foi possível carregar o dashboard.");
@@ -235,12 +282,12 @@ function GestorPage() {
       snapshot.operations
         .filter((operation) => visibleMachineIds.has(operation.machineId))
         .map((operation) => operation.id),
-      12,
+      1,
     );
     // Let the relational Phase A paint before starting external risk services.
     const timer = window.setTimeout(() => {
       firstBatchScheduled.current = true;
-      requestBatch(visibleIds);
+      requestBatch(visibleIds, true);
     }, 75);
     return () => window.clearTimeout(timer);
   }, [snapshot]);
@@ -266,6 +313,12 @@ function GestorPage() {
 
   const handleRankingTabChange = (tab: string) => {
     if (!snapshot) return;
+    setActiveRankingTab(tab);
+    if (!priorityResolved.current || !priorityPublished) {
+      pendingRankingTab.current = tab;
+      return;
+    }
+    secondaryGeneration.current += 1;
     const filtered = snapshot.operations.filter((operation) =>
       (clientId === "all" || operation.clientId === clientId) &&
       (areaId === "all" || operation.areaId === areaId) &&
@@ -281,6 +334,17 @@ function GestorPage() {
     );
     requestBatch(page);
   };
+
+  useEffect(() => {
+    if (!priorityPublished) return;
+    const deferredTab = pendingRankingTab.current;
+    pendingRankingTab.current = null;
+    if (deferredTab) {
+      handleRankingTabChange(deferredTab);
+    } else if (filterDemandVersion > 0) {
+      handleRankingTabChange(activeRankingTab);
+    }
+  }, [filterDemandVersion, priorityPublished]);
 
   const machineRows = useMemo(() => (snapshot?.machineRows ?? []).filter((row) =>
     (clientId === "all" || row.machine.clientId === clientId) &&
@@ -354,7 +418,7 @@ function GestorPage() {
         <Kpi label="Máquinas monitoradas" value={String(monitored)} hint="Frota ativa hoje" icon={Tractor} tone="default" />
         <Kpi
           label="Operações em risco"
-          value={!snapshot?.operationRows.length ? "Calculando..." : String(snapshot.machinesAtRisk)}
+          value={!snapshot?.operationRows.length ? "Calculando..." : snapshot.riskCoverageComplete ? String(snapshot.machinesAtRisk) : "Parcial"}
           hint={`Score ≥ 70 · cobertura ${aggregateCoverageLabel}`}
           icon={Activity}
           tone="warning"
@@ -362,7 +426,7 @@ function GestorPage() {
         />
         <Kpi
           label="Score médio da frota"
-          value={!snapshot?.operationRows.length ? "Calculando..." : String(avg)}
+          value={!snapshot?.operationRows.length ? "Calculando..." : snapshot.riskCoverageComplete ? String(avg) : "Parcial"}
           hint={`Escala 0–100 · cobertura ${aggregateCoverageLabel}`}
           icon={Gauge}
           tone="success"
@@ -385,7 +449,7 @@ function GestorPage() {
           : batchLoading ? "Calculando..." : "Carregando carteira do Gestor…")}
       </div>
 
-      {primaryRiskRow && (
+       {primaryRiskRow && (
         <PersonaV2RiskPanel
           persona="gestor"
           result={primaryRiskRow.evaluation.result}
@@ -395,6 +459,32 @@ function GestorPage() {
           )?.recommendation}
         />
       )}
+      {snapshot && !primaryRiskRow && snapshot.primaryOperation && (
+        <Card className="mt-4">
+          <p className="text-sm text-muted-foreground">
+            {priorityError ?? snapshot.riskErrorsByOperationId?.[snapshot.primaryOperation.id] ?? "Calculando..."}
+          </p>
+          {(priorityError || snapshot.riskErrorsByOperationId?.[snapshot.primaryOperation.id]) && (
+            <button
+              type="button"
+              className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+              onClick={() => requestBatch([snapshot.primaryOperation!.id], true)}
+            >
+              Tentar novamente
+            </button>
+          )}
+        </Card>
+      )}
+      {snapshot && Object.entries(snapshot.riskErrorsByOperationId ?? {})
+        .filter(([operationId]) => operationId !== snapshot.primaryOperation?.id)
+        .map(([operationId, message]) => (
+          <div key={operationId} className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+            <span>{operationId}: {message}</span>
+            <button type="button" onClick={() => requestBatch([operationId])} className="rounded-md border border-danger/40 px-3 py-1 text-xs font-medium">
+              Tentar novamente
+            </button>
+          </div>
+        ))}
 
       {snapshot && <GestorOperationalOverview overview={snapshot.operationalOverview} />}
 
@@ -487,17 +577,17 @@ function GestorPage() {
           Filtros
         </div>
         <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-          <FilterSelect label="Cliente / Fazenda" value={clientId} options={clientOptions as { id: string; name: string }[]} onChange={setClientId} />
-          <FilterSelect label="Nível de risco"    value={level}    options={levelOptions} onChange={setLevel} />
-          <FilterSelect label="Tipo de operação"  value={operationType} options={opTypeOptions} onChange={setOperationType} />
-          <FilterSelect label="Área / Região"     value={areaId}   options={areaOptions as { id: string; name: string }[]} onChange={setAreaId} />
+          <FilterSelect label="Cliente / Fazenda" value={clientId} options={clientOptions as { id: string; name: string }[]} onChange={(value) => { setClientId(value); setFilterDemandVersion((current) => current + 1); }} />
+          <FilterSelect label="Nível de risco"    value={level}    options={levelOptions} onChange={(value) => { setLevel(value); setFilterDemandVersion((current) => current + 1); }} />
+          <FilterSelect label="Tipo de operação"  value={operationType} options={opTypeOptions} onChange={(value) => { setOperationType(value); setFilterDemandVersion((current) => current + 1); }} />
+          <FilterSelect label="Área / Região"     value={areaId}   options={areaOptions as { id: string; name: string }[]} onChange={(value) => { setAreaId(value); setFilterDemandVersion((current) => current + 1); }} />
         </div>
       </Card>
 
       {/* Tabs de Ranking */}
       <section id="ranking" className="mt-6 block scroll-mt-20">
       <Card>
-        <Tabs defaultValue="machines" onValueChange={handleRankingTabChange}>
+        <Tabs value={activeRankingTab} onValueChange={handleRankingTabChange}>
           {snapshot && !snapshot.riskCoverageComplete && (
             <p className="mb-3 text-xs font-medium text-warning-foreground">
               Ranking parcial — carregando somente itens visíveis, até 12 por solicitação.
@@ -688,6 +778,11 @@ function GestorPage() {
             </div>
           </TabsContent>
         </Tabs>
+        {priorityPublished && (
+          <button type="button" onClick={() => handleRankingTabChange(activeRankingTab)} className="mt-4 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted">
+            Carregar mais itens do ranking
+          </button>
+        )}
       </Card>
       </section>
 
