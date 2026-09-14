@@ -1,0 +1,219 @@
+Faça SOMENTE uma melhoria de UI/UX na tela inicial de login do AgroRisk.
+
+NÃO alterar:
+- autenticação;
+- usuários;
+- senhas;
+- perfis existentes;
+- rotas protegidas;
+- permissões;
+- backend;
+- banco/schema;
+- Risk Engine;
+- dashboards.
+
+NÃO executar Git mutável.
+
+OBJETIVO:
+
+Transformar a tela atual em um fluxo sequencial simples:
+
+ETAPA 1
+→ usuário seleciona o perfil
+
+ETAPA 2
+→ somente depois aparecem e-mail + senha
+
+ETAPA 3
+→ Entrar
+
+==================================================
+1. ESTADO INICIAL
+==================================================
+
+Ao abrir a página mostrar:
+
+AgroRisk
+texto introdutório atual
+
+PASSO 1 — SELECIONE O PERFIL
+
+Cards:
+
+- Gestor
+- Operador
+- Consultor / Corretor
+- Admin / Sompo
+
+Nesse primeiro momento:
+
+NÃO mostrar ainda:
+- campo e-mail;
+- campo senha;
+- botão Entrar.
+
+==================================================
+2. APÓS SELECIONAR PERFIL
+==================================================
+
+Quando o usuário clicar em um perfil:
+
+- destacar visualmente o perfil selecionado;
+- manter os cards visíveis;
+- exibir abaixo deles o segundo bloco:
+
+PASSO 2 — INFORME AS CREDENCIAIS
+
+Mostrar:
+
+Perfil selecionado:
+[ Gestor / Operador / Consultor / Admin ]
+
+E-mail
+[ campo ]
+
+Senha
+[ campo ]
+
+[ Entrar ]
+
+O perfil selecionado não precisa ser digitado novamente.
+
+==================================================
+3. TROCA DE PERFIL
+==================================================
+
+O usuário pode clicar em outro card a qualquer momento.
+
+Ao trocar:
+
+- atualizar imediatamente "Perfil selecionado";
+- preservar o comportamento atual de autenticação;
+- evitar qualquer estado inconsistente.
+
+Se hoje existir e-mail pré-preenchido por perfil/demo,
+preservar a lógica existente.
+
+==================================================
+4. LAYOUT
+==================================================
+
+Quero uma composição CENTRALIZADA e VERTICAL.
+
+Exemplo:
+
+              AgroRisk
+     Gestão de Risco Agrícola
+
+        1. Selecione o perfil
+
+     [ Gestor ]
+     [ Operador ]
+     [ Consultor / Corretor ]
+     [ Admin / Sompo ]
+
+              ↓
+
+      2. Informe as credenciais
+
+     Perfil selecionado: Gestor
+
+     E-mail
+     [_____________________]
+
+     Senha
+     [_____________________]
+
+     [       Entrar        ]
+
+Pode manter os cards em 2 colunas em desktop se isso ficar visualmente
+melhor, mas o bloco de credenciais deve aparecer SOMENTE após selecionar
+um perfil.
+
+No mobile:
+→ uma coluna.
+
+==================================================
+5. UX
+==================================================
+
+- animação/transição discreta ao revelar credenciais, se simples;
+- foco automático no e-mail depois de selecionar o perfil;
+- Enter no campo senha deve continuar realizando login;
+- mostrar/ocultar senha se isso já existir;
+- erros de autenticação continuam funcionando normalmente;
+- preservar acessibilidade de teclado.
+
+Não adicionar complexidade desnecessária.
+
+==================================================
+6. VISUAL
+==================================================
+
+Preservar identidade atual:
+
+- branco/cinza claro;
+- vermelho AgroRisk;
+- cards;
+- tipografia;
+- ícones atuais.
+
+Não redesenhar o produto inteiro.
+
+Apenas melhorar a hierarquia:
+
+1. perfil
+2. credenciais
+3. entrar
+
+==================================================
+7. VALIDAÇÃO
+==================================================
+
+Testar:
+
+1. abrir página → credenciais ocultas;
+2. selecionar Gestor → credenciais aparecem;
+3. trocar para Operador → perfil selecionado muda;
+4. e-mail/senha continuam funcionando;
+5. login correto direciona para persona correta;
+6. login incorreto mostra erro normalmente;
+7. Admin/Sompo funciona;
+8. Gestor funciona;
+9. Consultor funciona;
+10. Operador funciona;
+11. mobile não quebra;
+12. nenhuma rota/autorização foi alterada.
+
+==================================================
+8. RELATÓRIO
+==================================================
+
+Responder:
+
+A. arquivos alterados
+
+B. credenciais ficam ocultas antes da seleção?
+SIM/NÃO
+
+C. fluxo agora é Perfil → Credenciais → Entrar?
+SIM/NÃO
+
+D. autenticação foi alterada?
+esperado: NÃO
+
+E. permissões foram alteradas?
+esperado: NÃO
+
+F. dashboards foram alterados?
+esperado: NÃO
+
+G. testes:
+PASS/FAIL
+
+H. build:
+PASS/FAIL
+
+PARE AO FINAL.
+
+Não faça nenhuma outra melhoria.
