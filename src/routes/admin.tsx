@@ -7,7 +7,7 @@ import {
   countByCategory, countByPriority,
   type AdminRecRow, type RecCategory, type RecPriority,
 } from "@/lib/recommendations";
-import { Tractor, Building2, Map as MapIcon, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Tractor, Building2, Map as MapIcon, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal, Search, RotateCcw, ArrowLeft } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
@@ -70,6 +70,7 @@ const AdminDashboardContext = createContext<{
   riskErrorsByOperationId: Record<string, string>;
   priorityPending: boolean;
   priorityOperationId: string | null;
+  goToTab: (tab: TabId) => void;
 } | null>(null);
 
 function useAdminDashboardData() {
@@ -451,6 +452,7 @@ function AdminPage() {
             riskErrorsByOperationId,
             priorityPending,
             priorityOperationId,
+           goToTab: setTab,
           }}
         >
       <AppLayout
@@ -613,6 +615,10 @@ function OverviewPanel() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+        Totais gerais da carteira · filtros abaixo afetam apenas as listas
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Clientes monitorados" value={String(data.clients.length)} tone="info" />
         <SummaryCard label="Máquinas monitoradas" value={String(data.machines.length)} tone="info" />
@@ -863,7 +869,19 @@ const priorityTone: Record<RecPriority, string> = {
 
 function RecsPanel() {
   const data = useAdminDashboardData();
-  const rows = adminV2RecommendationRows(data);
+  const [query, setQuery] = useState("");
+  const [priority, setPriority] = useState<RecPriority | "todas">("todas");
+  const [category, setCategory] = useState<RecCategory | "todas">("todas");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [audience, setAudience] = useState("todos");
+  const allRows = adminV2RecommendationRows(data);
+  const rows = allRows.filter((row) =>
+    (!query || `${row.clientName} ${row.target} ${row.rec.title}`.toLowerCase().includes(query.toLowerCase())) &&
+    (priority === "todas" || row.rec.priority === priority) &&
+    (category === "todas" || row.rec.category === category) &&
+    (audience === "todos" || row.rec.audience === audience) &&
+    matchesRiskFilter(row.score, risk),
+  );
   const byCat = countByCategory(rows);
   const byPrio = countByPriority(rows);
   const partial = !data.riskCoverageComplete;
@@ -872,6 +890,14 @@ function RecsPanel() {
 
   return (
     <div className="space-y-6">
+      <FilterBar query={query} onQueryChange={setQuery} placeholder="Buscar cliente, equipamento ou recomendação" onReset={() => { setQuery(""); setPriority("todas"); setCategory("todas"); setRisk("todos"); setAudience("todos"); }} hasFilters={Boolean(query) || priority !== "todas" || category !== "todas" || risk !== "todos" || audience !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={setRisk} />
+        <select aria-label="Prioridade" value={priority} onChange={(event) => setPriority(event.target.value as RecPriority | "todas")} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+          <option value="todas">Todas as prioridades</option><option value="alta">Alta</option><option value="média">Média</option><option value="baixa">Baixa</option>
+        </select>
+        <select aria-label="Categoria da recomendação" value={category} onChange={(event) => setCategory(event.target.value as RecCategory | "todas")} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todas">Todas as categorias</option>{Array.from(new Set(allRows.map((row) => row.rec.category))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <select aria-label="Destino da recomendação" value={audience} onChange={(event) => setAudience(event.target.value)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os destinos</option>{Array.from(new Set(allRows.map((row) => row.rec.audience))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+      </FilterBar>
       <div className="grid gap-3 sm:grid-cols-4">
         <SummaryCard label="Recomendações geradas" value={`${rows.length}${partial ? " · Parcial" : ""}`} tone="info" />
         <SummaryCard label="Prioridade alta"  value={`${byPrio.alta}${partial ? " · Parcial" : ""}`} tone="danger" />
@@ -919,6 +945,7 @@ function RecsPanel() {
             </tr>
           ))}
         </TableShell>
+        {rows.length === 0 && <EmptyFilterState />}
       </Card>
     </div>
   );
@@ -966,6 +993,56 @@ function TH({ children }: { children: React.ReactNode }) {
 }
 function TD({ children, className }: { children: React.ReactNode; className?: string }) {
   return <td className={cn("px-4 py-3 text-sm", className)}>{children}</td>;
+}
+
+function FilterBar({
+  query, onQueryChange, placeholder, onReset, hasFilters, children,
+}: {
+  query: string; onQueryChange: (value: string) => void; placeholder: string;
+  onReset: () => void; hasFilters: boolean; children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center">
+      <div className="relative min-w-0 flex-1">
+        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={placeholder} className="h-9 w-full rounded-md border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground" />
+      </div>
+      {children}
+      <button type="button" onClick={onReset} disabled={!hasFilters} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40">
+        <RotateCcw className="h-3.5 w-3.5" /> Limpar
+      </button>
+    </div>
+  );
+}
+
+function EmptyFilterState() {
+  return <div className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item corresponde aos filtros atuais. Limpe os filtros para ver todos os dados.</div>;
+}
+
+type RiskFilter = "todos" | "alto" | "medio" | "baixo" | "pendente";
+type EvaluationFilter = "todos" | "avaliado" | "pendente";
+
+function matchesRiskFilter(score: number | undefined, filter: RiskFilter) {
+  if (filter === "todos") return true;
+  if (filter === "pendente") return score === undefined;
+  if (score === undefined) return false;
+  return filter === "alto" ? score >= 71 : filter === "medio" ? score >= 41 && score < 71 : score < 41;
+}
+
+function RiskFilterSelect({ value, onChange }: { value: RiskFilter; onChange: (value: RiskFilter) => void }) {
+  return (
+    <select aria-label="Risco" value={value} onChange={(event) => onChange(event.target.value as RiskFilter)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+      <option value="todos">Todos os riscos</option><option value="alto">Risco alto</option><option value="medio">Risco médio</option><option value="baixo">Risco baixo</option><option value="pendente">Pendente</option>
+    </select>
+  );
+}
+
+function EvaluationFilterSelect({ value, onChange }: { value: EvaluationFilter; onChange: (value: EvaluationFilter) => void }) {
+  return (
+    <select aria-label="Avaliação" value={value} onChange={(event) => onChange(event.target.value as EvaluationFilter)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+      <option value="todos">Todas as avaliações</option><option value="avaliado">Avaliado</option><option value="pendente">Pendente</option>
+    </select>
+  );
 }
 
 function TableShell({ headers, children }: { headers: string[]; children: React.ReactNode }) {
@@ -1079,10 +1156,31 @@ function ScoresPanel() {
 function MachinesTable() {
   const data = useAdminDashboardData();
   const dashboardState = useContext(AdminDashboardContext);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<MachineStatus | "todos">("todos");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [type, setType] = useState("todos");
+  const [client, setClient] = useState("todos");
   const riskByMachine = new Map(data.machineRows.map((row) => [row.machine.id, row]));
+  const machines = data.machines.filter((machine) =>
+    (!query || `${machine.id} ${machine.name} ${machine.model} ${machine.client} ${machine.area} ${machine.operator}`.toLowerCase().includes(query.toLowerCase())) &&
+    (status === "todos" || machine.status === status) &&
+    (type === "todos" || machine.type === type) &&
+    (client === "todos" || machine.clientId === client) &&
+    matchesRiskFilter(riskByMachine.get(machine.id)?.score, risk),
+  );
   return (
-    <TableShell headers={["ID", "Equipamento", "Tipo", "Cliente", "Área", "Operador", "Status", "Score", "Risco"]}>
-      {data.machines.map((m) => {
+    <div className="space-y-3">
+      <FilterBar query={query} onQueryChange={setQuery} placeholder="Buscar equipamento, cliente, área ou operador" onReset={() => { setQuery(""); setStatus("todos"); setRisk("todos"); setType("todos"); setClient("todos"); }} hasFilters={Boolean(query) || status !== "todos" || risk !== "todos" || type !== "todos" || client !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={setRisk} />
+        <select aria-label="Status da máquina" value={status} onChange={(event) => setStatus(event.target.value as MachineStatus | "todos")} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+          <option value="todos">Todos os status</option>{Object.keys(machineStatusTone).map((value) => <option key={value} value={value}>{value === "ativa" ? "Ativa" : value === "em alerta" ? "Em alerta" : value === "crítica" ? "Crítica" : "Parada"}</option>)}
+        </select>
+        <select aria-label="Tipo de máquina" value={type} onChange={(event) => setType(event.target.value)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os tipos</option>{Array.from(new Set(data.machines.map((machine) => machine.type))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <select aria-label="Cliente da máquina" value={client} onChange={(event) => setClient(event.target.value)} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os clientes</option>{data.clients.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select>
+      </FilterBar>
+      <TableShell headers={["ID", "Equipamento", "Tipo", "Cliente", "Área", "Operador", "Status", "Score", "Risco"]}>
+      {machines.map((m) => {
         const risk = riskByMachine.get(m.id);
         const operationId = data.operations.find((operation) => operation.machineId === m.id)?.id;
         return (
@@ -1100,16 +1198,34 @@ function MachinesTable() {
         );
       })}
     </TableShell>
+    {machines.length === 0 && <EmptyFilterState />}
+    </div>
   );
 }
 
 function ClientsTable() {
   const data = useAdminDashboardData();
   const dashboardState = useContext(AdminDashboardContext);
+  const [query, setQuery] = useState("");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [evaluation, setEvaluation] = useState<EvaluationFilter>("todos");
+  const [location, setLocation] = useState("todos");
   const riskByClient = new Map(data.clientRows.map((row) => [row.client.id, row]));
+  const clients = data.clients.filter((client) =>
+    (!query || `${client.id} ${client.name} ${client.location} ${client.mainOperation}`.toLowerCase().includes(query.toLowerCase())) &&
+    (location === "todos" || client.state === location) &&
+    (evaluation === "todos" || (evaluation === "avaliado") === riskByClient.has(client.id)) &&
+    matchesRiskFilter(riskByClient.get(client.id)?.score, risk),
+  );
   return (
-    <TableShell headers={["ID", "Cliente", "Localização", "Operação", "Máquinas", "Score médio", "Risco"]}>
-      {data.clients.map((c) => {
+    <div className="space-y-3">
+      <FilterBar query={query} onQueryChange={setQuery} placeholder="Buscar cliente, cidade ou operação" onReset={() => { setQuery(""); setRisk("todos"); setEvaluation("todos"); setLocation("todos"); }} hasFilters={Boolean(query) || risk !== "todos" || evaluation !== "todos" || location !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={setRisk} />
+        <EvaluationFilterSelect value={evaluation} onChange={setEvaluation} />
+        <select aria-label="Localização ou UF" value={location} onChange={(event) => setLocation(event.target.value)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todas as UFs</option>{Array.from(new Set(data.clients.map((client) => client.state).filter(Boolean))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+      </FilterBar>
+      <TableShell headers={["ID", "Cliente", "Localização", "Operação", "Máquinas", "Score médio", "Risco"]}>
+      {clients.map((c) => {
         const risk = riskByClient.get(c.id);
         const operationId = data.operations.find((operation) => operation.clientId === c.id)?.id;
         return (
@@ -1125,16 +1241,42 @@ function ClientsTable() {
         );
       })}
     </TableShell>
+    {clients.length === 0 && <EmptyFilterState />}
+    </div>
   );
 }
 
 function AreasTable() {
   const data = useAdminDashboardData();
   const dashboardState = useContext(AdminDashboardContext);
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState("todos");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [condition, setCondition] = useState("todos");
+  const [water, setWater] = useState("todos");
+  const [client, setClient] = useState("todos");
   const riskByArea = new Map(data.areaRows.map((row) => [row.area.id, row]));
+  const areas = data.areas.filter((area) =>
+    (!query || `${area.id} ${area.name} ${area.client} ${area.condition}`.toLowerCase().includes(query.toLowerCase())) &&
+    (type === "todos" || area.type === type) &&
+    (condition === "todos" || area.condition === condition) &&
+    (water === "todos" || area.nearWater === water) &&
+    (client === "todos" || area.clientId === client) &&
+    matchesRiskFilter(riskByArea.get(area.id)?.score, risk),
+  );
   return (
-    <TableShell headers={["ID", "Área", "Cliente", "Tipo", "Condição", "Água", "Score", "Risco"]}>
-      {data.areas.map((a) => {
+    <div className="space-y-3">
+      <FilterBar query={query} onQueryChange={setQuery} placeholder="Buscar área, cliente ou condição" onReset={() => { setQuery(""); setType("todos"); setRisk("todos"); setCondition("todos"); setWater("todos"); setClient("todos"); }} hasFilters={Boolean(query) || type !== "todos" || risk !== "todos" || condition !== "todos" || water !== "todos" || client !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={setRisk} />
+        <select aria-label="Tipo de área" value={type} onChange={(event) => setType(event.target.value)} className="h-9 max-w-full rounded-md border border-border bg-card px-2 text-sm text-foreground">
+          <option value="todos">Todos os tipos</option>{Array.from(new Set(data.areas.map((area) => area.type))).map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+        <select aria-label="Condição da área" value={condition} onChange={(event) => setCondition(event.target.value)} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todas as condições</option>{Array.from(new Set(data.areas.map((area) => area.condition).filter(Boolean))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <select aria-label="Proximidade de água" value={water} onChange={(event) => setWater(event.target.value)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Toda proximidade de água</option>{Array.from(new Set(data.areas.map((area) => area.nearWater))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <select aria-label="Cliente da área" value={client} onChange={(event) => setClient(event.target.value)} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os clientes</option>{data.clients.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select>
+      </FilterBar>
+      <TableShell headers={["ID", "Área", "Cliente", "Tipo", "Condição", "Água", "Score", "Risco"]}>
+      {areas.map((a) => {
         const risk = riskByArea.get(a.id);
         const operationId = data.operations.find((operation) => operation.areaId === a.id)?.id;
         return (
@@ -1151,6 +1293,8 @@ function AreasTable() {
         );
       })}
     </TableShell>
+    {areas.length === 0 && <EmptyFilterState />}
+    </div>
   );
 }
 
@@ -1158,11 +1302,35 @@ function OperationsTable() {
   const data = useAdminDashboardData();
   const dashboardState = useContext(AdminDashboardContext);
   const [page, setPage] = useState(0);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("todos");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [type, setType] = useState("todos");
   const riskByOperation = new Map(data.operationRows.map((row) => [row.operation.id, row]));
   const pageSize = 12;
-  const visibleOperations = data.operations.slice(page * pageSize, (page + 1) * pageSize);
+  const operations = data.operations.filter((operation) =>
+    (!query || `${operation.id} ${operation.machineId} ${operation.type} ${operation.area}`.toLowerCase().includes(query.toLowerCase())) &&
+    (status === "todos" || operation.status === status) &&
+    (type === "todos" || operation.type === type) &&
+    matchesRiskFilter(riskByOperation.get(operation.id)?.score, risk),
+  );
+  const visibleOperations = operations.slice(page * pageSize, (page + 1) * pageSize);
+  const pageCount = Math.max(1, Math.ceil(operations.length / pageSize));
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button type="button" onClick={() => dashboardState?.goToTab("visao-geral")} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+          <ArrowLeft className="h-4 w-4" /> Voltar à visão geral
+        </button>
+        <span className="text-xs text-muted-foreground">Filtros locais · não recalculam risco</span>
+      </div>
+      <FilterBar query={query} onQueryChange={(value) => { setQuery(value); setPage(0); }} placeholder="Buscar operação, máquina, área ou tipo" onReset={() => { setQuery(""); setStatus("todos"); setRisk("todos"); setType("todos"); setPage(0); }} hasFilters={Boolean(query) || status !== "todos" || risk !== "todos" || type !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={(value) => { setRisk(value); setPage(0); }} />
+        <select aria-label="Status da operação" value={status} onChange={(event) => { setStatus(event.target.value); setPage(0); }} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+          <option value="todos">Todos os status</option><option value="Em andamento">Em andamento</option><option value="Agendada">Agendada</option><option value="Concluída">Concluída</option><option value="Interrompida">Interrompida</option>
+        </select>
+        <select aria-label="Tipo de operação" value={type} onChange={(event) => { setType(event.target.value); setPage(0); }} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os tipos</option>{Array.from(new Set(data.operations.map((operation) => operation.type))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+      </FilterBar>
       <TableShell headers={["ID", "Máquina", "Tipo", "Área", "Início", "Duração", "Status", "Score", "Risco"]}>
       {visibleOperations.map((o) => {
         const risk = riskByOperation.get(o.id);
@@ -1189,20 +1357,22 @@ function OperationsTable() {
         );
       })}
       </TableShell>
+      {operations.length === 0 && <EmptyFilterState />}
       <div className="flex items-center justify-between px-4 pb-4 text-sm text-muted-foreground">
-        <span>Página {page + 1}</span>
-        {page < Math.ceil(data.operations.length / pageSize) - 1 && (
+        <span>Página {Math.min(page + 1, pageCount)} · {operations.length} operações</span>
+        {page < pageCount - 1 && (
           <button
             type="button"
             className="rounded-md border border-border px-3 py-1.5 text-foreground hover:bg-muted"
             onClick={() => {
               const next = page + 1;
               setPage(next);
-              const ids = data.operations.slice(next * pageSize, (next + 1) * pageSize).map((operation) => operation.id);
+              const ids = operations.slice(next * pageSize, (next + 1) * pageSize).map((operation) => operation.id);
                dashboardState?.requestMoreRisk(ids);
             }}
           >Próxima página</button>
         )}
+        {page > 0 && <button type="button" className="rounded-md border border-border px-3 py-1.5 text-foreground hover:bg-muted" onClick={() => setPage((current) => current - 1)}>Página anterior</button>}
       </div>
     </div>
   );
