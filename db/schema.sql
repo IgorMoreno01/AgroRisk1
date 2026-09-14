@@ -60,9 +60,49 @@ CREATE TABLE IF NOT EXISTS agrorisk.users (
   name text NOT NULL,
   profile text NOT NULL CHECK (profile IN ('gestor', 'operador', 'consultor', 'admin')),
   permissions text[] NOT NULL DEFAULT '{}',
+  email text,
+  password_hash text,
+  status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  global_scope boolean NOT NULL DEFAULT false,
+  linked_operator_id text REFERENCES agrorisk.users(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (id, client_id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx
+  ON agrorisk.users (lower(email))
+  WHERE email IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS agrorisk.user_client_scopes (
+  user_id text NOT NULL REFERENCES agrorisk.users(id) ON DELETE CASCADE,
+  client_id text NOT NULL REFERENCES agrorisk.clients(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, client_id)
+);
+
+CREATE SEQUENCE IF NOT EXISTS agrorisk.risk_weight_configuration_revision_seq;
+
+CREATE TABLE IF NOT EXISTS agrorisk.risk_weight_configurations (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  client_id text REFERENCES agrorisk.clients(id) ON DELETE CASCADE,
+  ml_weight integer NOT NULL CHECK (ml_weight BETWEEN 0 AND 100),
+  operational_rules_weight integer NOT NULL
+    CHECK (operational_rules_weight BETWEEN 0 AND 100),
+  revision bigint NOT NULL
+    DEFAULT nextval('agrorisk.risk_weight_configuration_revision_seq')
+    CHECK (revision > 0),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text REFERENCES agrorisk.users(id) ON DELETE SET NULL,
+  CHECK (ml_weight + operational_rules_weight = 100)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS risk_weight_configurations_global_unique_idx
+  ON agrorisk.risk_weight_configurations ((true))
+  WHERE client_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS risk_weight_configurations_client_unique_idx
+  ON agrorisk.risk_weight_configurations (client_id)
+  WHERE client_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS agrorisk.machines (
   id text PRIMARY KEY,
@@ -124,6 +164,22 @@ CREATE TABLE IF NOT EXISTS agrorisk.operations (
   UNIQUE (id, machine_id)
 );
 
+-- Inputs prepared outside the request path. No score, level, driver, or
+-- dominant component is stored here: those are always computed by the engine.
+CREATE TABLE IF NOT EXISTS agrorisk.operation_risk_input_snapshots (
+  operation_id text PRIMARY KEY
+    REFERENCES agrorisk.operations(id) ON DELETE CASCADE,
+  reference_date date NOT NULL,
+  ml_input jsonb NOT NULL,
+  operational_rules_input jsonb NOT NULL,
+  latitude double precision,
+  longitude double precision,
+  provenance jsonb NOT NULL DEFAULT '{}'::jsonb,
+  generated_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  version text NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS agrorisk.operation_risk_factors (
   operation_id text NOT NULL REFERENCES agrorisk.operations(id) ON DELETE CASCADE,
   risk_factor_id text NOT NULL REFERENCES agrorisk.risk_factors(id),
@@ -156,9 +212,126 @@ CREATE TABLE IF NOT EXISTS agrorisk.operation_history (
   FOREIGN KEY (operation_id, machine_id) REFERENCES agrorisk.operations(id, machine_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS agrorisk.operation_logs (
+  id text PRIMARY KEY,
+  operator_id text NOT NULL REFERENCES agrorisk.users(id) ON DELETE RESTRICT,
+  operation_id text NOT NULL,
+  machine_id text NOT NULL,
+  started_at timestamptz,
+  finished_at timestamptz,
+  status text NOT NULL CHECK (status IN ('not_started', 'in_progress', 'completed')),
+  observation text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  FOREIGN KEY (operation_id, machine_id)
+    REFERENCES agrorisk.operations(id, machine_id)
+    ON DELETE CASCADE,
+  CHECK (
+    (status = 'not_started' AND started_at IS NULL AND finished_at IS NULL)
+    OR (status = 'in_progress' AND started_at IS NOT NULL AND finished_at IS NULL)
+    OR (status = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS agrorisk.maintenance_records (
+  id text PRIMARY KEY,
+  machine_id text NOT NULL REFERENCES agrorisk.machines(id) ON DELETE CASCADE,
+  maintenance_type text NOT NULL,
+  performed_at timestamptz NOT NULL,
+  next_due_at timestamptz NOT NULL,
+  observation text NOT NULL DEFAULT '',
+  status text NOT NULL CHECK (status IN ('ok', 'due_soon', 'overdue')),
+  source text NOT NULL DEFAULT 'synthetic' CHECK (source IN ('real', 'demo', 'synthetic')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (next_due_at > performed_at)
+);
+
+CREATE TABLE IF NOT EXISTS agrorisk.actionable_alerts (
+  id text PRIMARY KEY,
+  recipient_user_id text NOT NULL REFERENCES agrorisk.users(id) ON DELETE CASCADE,
+  type text NOT NULL,
+  severity text NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+  title text NOT NULL,
+  message text NOT NULL,
+  status text NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'viewed', 'acknowledged', 'resolved')),
+  client_id text REFERENCES agrorisk.clients(id) ON DELETE CASCADE,
+  operator_id text REFERENCES agrorisk.users(id) ON DELETE SET NULL,
+  machine_id text REFERENCES agrorisk.machines(id) ON DELETE CASCADE,
+  operation_id text REFERENCES agrorisk.operations(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  viewed_at timestamptz,
+  acknowledged_at timestamptz,
+  resolved_at timestamptz,
+  source text NOT NULL,
+  event_key text NOT NULL,
+  condition_key text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK ((status = 'new' AND viewed_at IS NULL AND acknowledged_at IS NULL AND resolved_at IS NULL)
+    OR (status = 'viewed' AND viewed_at IS NOT NULL AND acknowledged_at IS NULL AND resolved_at IS NULL)
+    OR (status = 'acknowledged' AND viewed_at IS NOT NULL AND acknowledged_at IS NOT NULL AND resolved_at IS NULL)
+    OR (status = 'resolved' AND viewed_at IS NOT NULL AND acknowledged_at IS NOT NULL AND resolved_at IS NOT NULL)),
+  CHECK (acknowledged_at IS NULL OR viewed_at IS NOT NULL),
+  CHECK (resolved_at IS NULL OR acknowledged_at IS NOT NULL)
+);
+
 CREATE INDEX IF NOT EXISTS farms_client_idx ON agrorisk.farms(client_id);
 CREATE INDEX IF NOT EXISTS areas_client_farm_idx ON agrorisk.areas(client_id, farm_id);
 CREATE INDEX IF NOT EXISTS machines_client_area_idx ON agrorisk.machines(client_id, area_id);
 CREATE INDEX IF NOT EXISTS operations_client_area_machine_idx ON agrorisk.operations(client_id, area_id, machine_id);
+CREATE INDEX IF NOT EXISTS operation_risk_input_snapshots_reference_date_idx
+  ON agrorisk.operation_risk_input_snapshots(reference_date);
+CREATE INDEX IF NOT EXISTS operation_risk_input_snapshots_updated_at_idx
+  ON agrorisk.operation_risk_input_snapshots(updated_at DESC);
 CREATE INDEX IF NOT EXISTS alerts_operation_machine_idx ON agrorisk.alerts(operation_id, machine_id);
 CREATE INDEX IF NOT EXISTS history_operation_machine_idx ON agrorisk.operation_history(operation_id, machine_id);
+CREATE INDEX IF NOT EXISTS user_client_scopes_client_idx ON agrorisk.user_client_scopes(client_id);
+CREATE UNIQUE INDEX IF NOT EXISTS operation_logs_one_active_per_operation_idx
+  ON agrorisk.operation_logs(operator_id, operation_id)
+  WHERE status = 'in_progress';
+CREATE INDEX IF NOT EXISTS operation_logs_operator_operation_recent_idx
+  ON agrorisk.operation_logs(operator_id, operation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS maintenance_records_machine_due_idx
+  ON agrorisk.maintenance_records(machine_id, next_due_at DESC);
+CREATE INDEX IF NOT EXISTS actionable_alerts_recipient_status_created_idx
+  ON agrorisk.actionable_alerts(recipient_user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS actionable_alerts_client_idx ON agrorisk.actionable_alerts(client_id);
+CREATE INDEX IF NOT EXISTS actionable_alerts_operator_idx ON agrorisk.actionable_alerts(operator_id);
+CREATE INDEX IF NOT EXISTS actionable_alerts_machine_idx ON agrorisk.actionable_alerts(machine_id);
+CREATE INDEX IF NOT EXISTS actionable_alerts_operation_idx ON agrorisk.actionable_alerts(operation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS actionable_alerts_active_event_idx
+  ON agrorisk.actionable_alerts(recipient_user_id, event_key)
+  WHERE status <> 'resolved';
+CREATE UNIQUE INDEX IF NOT EXISTS actionable_alerts_active_maintenance_condition_idx
+  ON agrorisk.actionable_alerts(recipient_user_id, machine_id, type, condition_key)
+  WHERE status <> 'resolved' AND type = 'maintenance';
+CREATE UNIQUE INDEX IF NOT EXISTS actionable_alerts_active_maintenance_machine_idx
+  ON agrorisk.actionable_alerts(recipient_user_id, machine_id, type)
+  WHERE status <> 'resolved' AND type = 'maintenance';
+
+CREATE OR REPLACE FUNCTION agrorisk.resolve_previous_maintenance_condition()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.type = 'maintenance' AND NEW.status <> 'resolved'
+     AND NEW.machine_id IS NOT NULL THEN
+    UPDATE agrorisk.actionable_alerts
+    SET status = 'resolved',
+        viewed_at = COALESCE(viewed_at, now()),
+        acknowledged_at = COALESCE(acknowledged_at, now()),
+        resolved_at = COALESCE(resolved_at, now()),
+        updated_at = now()
+    WHERE recipient_user_id = NEW.recipient_user_id
+      AND machine_id = NEW.machine_id
+      AND type = NEW.type
+      AND status <> 'resolved'
+      AND condition_key <> NEW.condition_key
+      AND id <> COALESCE(NEW.id, '');
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS actionable_alerts_maintenance_condition_trigger
+  ON agrorisk.actionable_alerts;
+CREATE TRIGGER actionable_alerts_maintenance_condition_trigger
+BEFORE INSERT OR UPDATE OF condition_key, status ON agrorisk.actionable_alerts
+FOR EACH ROW EXECUTE FUNCTION agrorisk.resolve_previous_maintenance_condition();

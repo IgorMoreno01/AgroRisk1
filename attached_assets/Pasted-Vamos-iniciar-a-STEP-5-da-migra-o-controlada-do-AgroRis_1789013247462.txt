@@ -1,0 +1,841 @@
+Vamos iniciar a STEP 5 da migração controlada do AgroRisk.
+
+IMPORTANTE SOBRE GIT:
+
+EU realizo commits e atualizações Git manualmente.
+
+Portanto:
+
+NÃO execute git add.
+NÃO execute git commit.
+NÃO execute git push.
+NÃO execute git merge.
+NÃO execute git rebase.
+NÃO execute git reset.
+
+Checkpoints automáticos do ambiente podem ocorrer.
+Não tente reorganizar o histórico.
+
+==================================================
+ESTADO ATUAL VALIDADO
+==================================================
+
+STEP 1:
+auditoria arquitetural concluída.
+
+STEP 2:
+Risk Engine V1 caracterizado.
+
+Testes V1:
+23 pass
+0 fail.
+
+STEP 3:
+contratos isolados do Risk Engine V2 criados em:
+
+src/lib/risk-engine-v2/types.ts
+
+STEP 4:
+modelo ML portátil implementado isoladamente em:
+
+src/lib/ml-risk/
+
+Paridade TypeScript × Python:
+
+25 Golden Vectors
+25 PASS
+0 FAIL
+
+Maior erro absoluto de probabilidade:
+
+9.71445146547012e-17
+
+Maior erro absoluto de score relativo:
+
+1.4210854715202004e-14
+
+bun test:
+
+24 pass
+0 fail
+
+bun run build:
+
+PASS
+
+O ML ainda NÃO possui consumidores produtivos.
+
+==================================================
+OBJETIVO DA STEP 5
+==================================================
+
+Implementar SOMENTE o componente determinístico de:
+
+REGRAS OPERACIONAIS V2
+
+Ele será responsável por produzir:
+
+OperationalRulesResult
+
+conforme o contrato existente em:
+
+src/lib/risk-engine-v2/types.ts
+
+IMPORTANTE:
+
+Nesta etapa NÃO combinar ML + regras.
+
+Não implementar ainda:
+
+finalScore
+weights
+dominantComponent
+RiskEngineV2Result completo
+
+Queremos somente:
+
+INPUT DAS REGRAS
+        ↓
+REGRAS DETERMINÍSTICAS
+        ↓
+OperationalRulesResult
+
+==================================================
+PRINCÍPIO FUNDAMENTAL
+==================================================
+
+As regras operacionais V2 devem conter fatores que NÃO estejam
+sendo contabilizados pelo ML de forma equivalente.
+
+O ML já utiliza:
+
+- clima;
+- COD_MOD;
+- UF;
+- histórico seguro de sinistro.
+
+Portanto NÃO introduzir novamente nas regras:
+
+- clima;
+- histórico de sinistros;
+- UF;
+- COD_MOD como proxy estrutural puro;
+- qualquer score baseado nas mesmas features do ML.
+
+O objetivo é evitar DOUBLE COUNTING.
+
+==================================================
+CATEGORIAS PERMITIDAS
+==================================================
+
+O contrato V2 já definiu:
+
+OperationalRuleCategory:
+
+"water_proximity"
+"operation_type"
+"terrain"
+"sompo_policy"
+
+Trabalhar somente com essas categorias.
+
+NÃO adicionar:
+
+"climate"
+"history"
+"inclination"
+
+==================================================
+REGRAS V1 COMO REFERÊNCIA
+==================================================
+
+Antes de implementar:
+
+inspecione SOMENTE LEITURA:
+
+src/lib/risk-score.ts
+src/lib/mock-data.ts
+
+Identifique a lógica V1 existente para:
+
+- proximidade de água;
+- tipo de operação;
+- terreno.
+
+A implementação V2 pode reaproveitar os conceitos de negócio,
+mas NÃO deve importar ou chamar diretamente o cálculo V1.
+
+Queremos uma implementação nova e isolada.
+
+==================================================
+REGRAS BASE V2
+==================================================
+
+Use inicialmente uma versão simples, transparente e determinística.
+
+--------------------------------------------------
+1. PROXIMIDADE DE ÁGUA
+--------------------------------------------------
+
+Categorias atuais conhecidas:
+
+"acima_150"
+"100_150"
+"50_100"
+"abaixo_50"
+
+Pontuação base:
+
+acima_150:
+0 pontos
+
+100_150:
+6 pontos
+
+50_100:
+12 pontos
+
+abaixo_50:
+18 pontos
+
+Máximo:
+
+18
+
+--------------------------------------------------
+2. TIPO DE OPERAÇÃO
+--------------------------------------------------
+
+Inspecione os valores reais de OperationType existentes
+antes de codificar.
+
+Pontuação conceitual V1 conhecida:
+
+campo:
+6
+
+transporte:
+9
+
+pulverizacao:
+8
+
+colheita:
+8
+
+deslocamento_interno:
+4
+
+proximo_agua:
+15
+
+Máximo:
+
+15
+
+IMPORTANTE:
+
+Use os valores reais dos enums/types existentes.
+
+Não invente nomes se houver diferença no código.
+
+--------------------------------------------------
+3. TERRENO
+--------------------------------------------------
+
+Categorias atuais conhecidas:
+
+"normal"
+"umido"
+"critico"
+"baixa_aderencia"
+
+Pontuação:
+
+normal:
+0
+
+umido:
+7
+
+critico:
+13
+
+baixa_aderencia:
+15
+
+Máximo:
+
+15
+
+--------------------------------------------------
+4. POLÍTICA SOMPO
+--------------------------------------------------
+
+Nesta primeira versão:
+
+NÃO inventar regras reais da Sompo.
+
+A categoria:
+
+sompo_policy
+
+deve existir no contrato, mas nenhuma regra fictícia deve ser
+ativada automaticamente.
+
+Pode ser suportada tecnicamente como lista opcional de regras
+externas já avaliadas, mas NÃO criar políticas imaginárias.
+
+==================================================
+IMPORTANTE SOBRE operation_type
+==================================================
+
+COD_MOD já existe dentro do ML.
+
+Isso NÃO significa automaticamente que operation_type é proibido.
+
+Mas confirme semanticamente que:
+
+OperationType do produto representa a OPERAÇÃO ATUAL realizada
+pela máquina,
+
+enquanto:
+
+COD_MOD representa modalidade estrutural histórica do seguro.
+
+Se essa distinção não estiver clara no código atual:
+
+PARE e reporte antes de implementar operation_type no V2.
+
+Não queremos duplicar a mesma informação com nomes diferentes.
+
+==================================================
+INPUT DAS REGRAS
+==================================================
+
+Crie um contrato isolado, preferencialmente em:
+
+src/lib/risk-engine-v2/operational-rules.ts
+
+ou, se necessário:
+
+src/lib/risk-engine-v2/operational-rules.types.ts
+
+O input deve conter somente os dados necessários às regras.
+
+Exemplo conceitual:
+
+{
+  waterDistance: ...;
+  operationType: ...;
+  terrain: ...;
+  sompoPolicyFactors?: ...
+}
+
+NÃO incluir:
+
+weather
+historyAlertCount
+inclination
+mlRelativeScore
+UF
+COD_MOD
+
+==================================================
+SCORE OPERACIONAL
+==================================================
+
+Temos máximos base:
+
+water:
+18
+
+operationType:
+15
+
+terrain:
+15
+
+Total base:
+
+48
+
+O operationalRulesScore deve ser normalizado para 0–100:
+
+rawPoints =
+waterPoints
++
+operationTypePoints
++
+terrainPoints
++
+eventuais regras Sompo válidas
+
+Para a versão base SEM política Sompo:
+
+operationalRulesScore =
+round(
+  rawPoints / 48 * 100
+)
+
+Antes de implementar regras Sompo futuras,
+o denominador deverá ser revisto explicitamente.
+
+NÃO criar denominador dinâmico silencioso agora.
+
+==================================================
+ARREDONDAMENTO
+==================================================
+
+Utilize Math.round apenas no:
+
+operationalRulesScore final.
+
+Preserve pontos individuais como números originais.
+
+==================================================
+OperationalRuleFactor
+==================================================
+
+Para cada categoria avaliada, gerar fator compatível com o tipo
+existente:
+
+{
+  id
+  category
+  label
+  detail?
+  points
+  maxPoints
+  active
+}
+
+active deve indicar se aquela regra adicionou risco:
+
+points > 0
+
+Não usar active como equivalente a "input existente".
+
+==================================================
+dominantFactor
+==================================================
+
+OperationalRulesResult possui:
+
+dominantFactor?: string
+
+Defina como o ID do fator com maior número de pontos.
+
+Em empate:
+
+use ordem determinística:
+
+1. water_proximity
+2. operation_type
+3. terrain
+4. sompo_policy
+
+Documente essa regra.
+
+==================================================
+rulesVersion
+==================================================
+
+Use:
+
+"1.0"
+
+para esta primeira implementação das regras V2.
+
+==================================================
+ARQUIVOS PERMITIDOS
+==================================================
+
+Preferencialmente criar somente:
+
+src/lib/risk-engine-v2/operational-rules.ts
+
+e:
+
+test/risk-engine-v2-operational-rules.test.ts
+
+Se precisar de tipos auxiliares próprios:
+
+pode criar UM arquivo adicional dentro de:
+
+src/lib/risk-engine-v2/
+
+Mas NÃO modificar:
+
+src/lib/risk-engine-v2/types.ts
+
+Se achar que types.ts precisa mudar:
+
+PARE.
+
+Explique antes.
+
+==================================================
+TESTES OBRIGATÓRIOS
+==================================================
+
+Criar testes isolados para pelo menos:
+
+1. risco operacional mínimo;
+
+water:
+acima_150
+
+operation:
+menor pontuação disponível
+
+terrain:
+normal
+
+2. cenário intermediário;
+
+3. cenário máximo;
+
+4. normalização correta para 0–100;
+
+5. dominantFactor;
+
+6. desempate determinístico;
+
+7. nenhum climate input;
+
+8. nenhum history input;
+
+9. nenhuma inclination input;
+
+10. nenhum ML input.
+
+==================================================
+CASO MÁXIMO
+==================================================
+
+Com:
+
+water abaixo_50:
+18
+
+operation maior risco:
+15
+
+terrain baixa_aderencia:
+15
+
+raw:
+
+48
+
+Esperado:
+
+operationalRulesScore = 100
+
+==================================================
+CASO DE EXEMPLO
+==================================================
+
+Exemplo conceitual:
+
+water:
+50_100 → 12
+
+operation:
+campo → 6
+
+terrain:
+umido → 7
+
+raw:
+
+25
+
+score:
+
+round(25 / 48 * 100)
+
+Esperado:
+
+52
+
+dominantFactor:
+
+water proximity
+
+Adapte apenas o identificador ao naming real implementado.
+
+==================================================
+NÃO IMPLEMENTAR AINDA
+==================================================
+
+NÃO criar:
+
+combine-scores.ts
+evaluate.ts
+engine.ts
+adapter
+feature flag
+server function
+API
+recommendations V2
+
+NÃO importar ML.
+
+NÃO importar:
+
+src/lib/ml-risk/
+
+==================================================
+ARQUIVOS PROIBIDOS
+==================================================
+
+NÃO modificar:
+
+src/lib/risk-score.ts
+src/lib/recommendations.ts
+src/lib/ranking.ts
+src/lib/mock-data.ts
+
+src/lib/risk-engine-v2/types.ts
+
+src/lib/ml-risk/*
+
+src/routes/admin.tsx
+src/routes/gestor.tsx
+src/routes/operador.tsx
+src/routes/consultor.tsx
+src/routes/__root.tsx
+
+src/lib/risk-config.tsx
+src/lib/risk-config.server.ts
+src/lib/api/risk-config.functions.ts
+
+package.json
+bun.lock
+
+test/risk-score-v1.characterization.test.ts
+test/risk-aggregation-v1.characterization.test.ts
+test/recommendations-v1.characterization.test.ts
+test/ml-risk-v1.parity.test.ts
+
+==================================================
+VALIDAÇÃO
+==================================================
+
+Depois da implementação execute:
+
+bun test
+
+Esperado:
+
+23 testes V1
++
+1 teste de paridade ML
++
+novos testes das regras V2
+
+todos PASS.
+
+Depois:
+
+bun run build
+
+Esperado:
+
+PASS.
+
+==================================================
+ISOLAMENTO
+==================================================
+
+Confirme:
+
+consumidores produtivos de operational-rules.ts:
+
+0
+
+Nenhuma UI deve utilizar essas regras ainda.
+
+Nenhum Risk Engine deve utilizá-las ainda.
+
+==================================================
+DOUBLE COUNTING
+==================================================
+
+No relatório final confirme explicitamente:
+
+weather presente no input?
+NÃO
+
+histórico presente no input?
+NÃO
+
+inclinação presente no input?
+NÃO
+
+UF presente no input?
+NÃO
+
+COD_MOD presente no input?
+NÃO
+
+ML presente no input?
+NÃO
+
+==================================================
+GIT
+==================================================
+
+NÃO faça:
+
+git add
+git commit
+git push
+git reset
+git rebase
+git merge
+
+Eu farei versionamento manual.
+
+Apenas inspecione ao final.
+
+==================================================
+RELATÓRIO FINAL
+==================================================
+
+Responda com:
+
+A. INSPEÇÃO V1
+
+Informe os valores reais encontrados para:
+
+- water distance;
+- OperationType;
+- terrain.
+
+Confirme também a diferença semântica entre:
+
+OperationType
+e
+COD_MOD.
+
+B. ARQUIVOS CRIADOS
+
+Liste todos.
+
+C. INPUT DAS REGRAS
+
+Mostre o contrato criado.
+
+D. PONTUAÇÃO
+
+Mostre tabela:
+
+categoria
+valor
+pontos
+máximo
+
+E. NORMALIZAÇÃO
+
+Informe fórmula exata.
+
+F. DOMINANT FACTOR
+
+Explique regra e desempate.
+
+G. TESTES V2
+
+Quantidade pass/fail.
+
+H. TESTES TOTAIS
+
+bun test:
+
+V1:
+ML:
+V2:
+TOTAL:
+
+I. BUILD
+
+bun run build:
+PASS/FAIL
+
+J. ISOLAMENTO
+
+Consumidores produtivos:
+quantidade
+
+ML conectado?
+SIM/NÃO
+
+V1 alterado?
+SIM/NÃO
+
+UI alterada?
+SIM/NÃO
+
+K. DOUBLE COUNTING
+
+Confirme ausência de:
+
+climate
+history
+inclination
+UF
+COD_MOD
+ML score
+
+L. GIT
+
+branch
+HEAD
+working tree
+arquivos técnicos pendentes
+attached_assets/checkpoints automáticos
+
+M. DECISÃO
+
+REGRAS OPERACIONAIS V2 IMPLEMENTADAS E TESTADAS?
+SIM/NÃO
+
+BASE SEGURA PARA FUTURA COMPOSIÇÃO ML + REGRAS?
+SIM/NÃO
+
+==================================================
+CRITÉRIO DE PARADA
+==================================================
+
+Se descobrir que OperationType e COD_MOD representam essencialmente
+a mesma variável:
+
+PARE antes de implementar.
+
+Se qualquer teste V1 falhar:
+
+PARE.
+
+Se paridade ML falhar:
+
+PARE.
+
+Se build falhar:
+
+PARE.
+
+==================================================
+PARE AO FINAL
+==================================================
+
+NÃO combine ML + regras.
+
+NÃO altere pesos Sompo.
+
+NÃO altere UI.
+
+NÃO altere personas.
+
+NÃO avance automaticamente.

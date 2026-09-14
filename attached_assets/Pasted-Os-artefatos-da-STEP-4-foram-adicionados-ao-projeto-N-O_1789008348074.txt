@@ -1,0 +1,102 @@
+Os artefatos da STEP 4 foram adicionados ao projeto.
+
+NÃO implemente código ainda.
+NÃO crie arquivos.
+NÃO altere arquivos existentes.
+NÃO faça git add.
+NÃO faça commit.
+NÃO faça push.
+NÃO faça reset.
+NÃO faça rebase.
+
+Faça SOMENTE uma inspeção dos arquivos recebidos.
+
+Esperados:
+
+agrorisk_modelo_portatil_v1.json
+agrorisk_golden_vectors_v1.csv
+agrorisk_teste_paridade_v1.csv
+agrorisk_referencia_score_valid_2019.parquet
+agrorisk_coeficientes_v1.csv
+agrorisk_manifesto_modelo_v1.json
+agrorisk_distribuicao_score_v1.csv
+
+Para cada arquivo encontrado, informe:
+
+1. caminho completo no projeto;
+2. tamanho;
+3. formato;
+4. se consegue ser lido;
+5. estrutura principal.
+
+Para os CSVs, informe também:
+- nomes das colunas;
+- quantidade de linhas;
+- 3 primeiras linhas de exemplo, sem truncar nomes de colunas.
+
+Para o JSON portátil, informe especificamente:
+- modelVersion;
+- intercept;
+- quantidade de features numéricas;
+- quantidade de categóricas;
+- nomes das features numéricas;
+- categorias de COD_MOD;
+- categorias de UF;
+- quantidade total de coeficientes;
+- médias do scaler;
+- escalas do scaler;
+- ordem exata das features;
+- tratamento de categorias desconhecidas;
+- tamanho da referência usada para o score relativo;
+- qualquer metadado adicional relevante.
+
+Para o arquivo agrorisk_golden_vectors_v1.csv, informe especificamente:
+- quantidade de vetores;
+- colunas disponíveis;
+- se contém:
+  - inputs do modelo;
+  - probabilidade Python;
+  - score relativo Python;
+  - logit;
+  - outros valores intermediários.
+
+Para agrorisk_teste_paridade_v1.csv, informe:
+- quantidade de linhas;
+- colunas;
+- o que ele valida;
+- se existem divergências registradas.
+
+Para agrorisk_referencia_score_valid_2019.parquet, informe:
+- quantidade de linhas;
+- nomes das colunas;
+- qual coluna representa PROBA_AMOSTRAL de referência;
+- min;
+- mediana;
+- max.
+
+Depois faça uma verificação de consistência entre os artefatos:
+
+- modelVersion é compatível entre os arquivos?
+- quantidade de features bate?
+- coeficientes batem com o JSON portátil?
+- Golden Vectors usam o mesmo schema do modelo?
+- referência VALID 2019 está compatível com o score relativo?
+- existe alguma inconsistência, ausência ou corrupção?
+
+IMPORTANTE:
+
+Se algum arquivo não puder ser lido, estiver faltando ou houver inconsistência entre versões, PARE e reporte.
+
+NÃO tente corrigir.
+NÃO reconstrua artefatos.
+NÃO implemente o modelo ainda.
+
+Ao final, responda apenas com:
+
+A. Arquivos encontrados
+B. Estrutura dos artefatos
+C. Consistência entre arquivos
+D. Problemas encontrados
+E. Pronto para implementação da STEP 4? SIM/NÃO
+
+PARE depois disso.

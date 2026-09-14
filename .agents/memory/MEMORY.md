@@ -3,3 +3,14 @@
 - [Configuração de pesos de risco](risk-weight-configuration.md) — pesos Sompo são server-side; inclinação é segurança operacional e nunca participa do score.
 - [Risco explicável](recommendation-origin.md) — recomendações e explicações compartilham score, componente e fator; inclinação permanece em telemetria separada.
 - [Fundação de dados](data-foundation.md) — PostgreSQL gerenciado fica atrás de repositórios compatíveis; mocks seguem como origem até uma migração explícita.
+- [Nomenclatura de risco](risk-component-naming.md) — Admin usa Score ML/Operacional/Final por instrução explícita; outras personas mantêm Climático/Operacional.
+- [Registro de execução do Operador](operator-execution-logs.md) — execução persiste separada de operações planejadas e não altera o cálculo de risco.
+- [Foco visual do Operador](operator-ui-focus.md) — a tela do Operador prioriza decisão e execução; detalhes técnicos permanecem fora da interface.
+- [Manutenção preventiva](preventive-maintenance.md) — manutenção segue a máquina autorizada da operação e permanece fora do cálculo de risco.
+- [Alertas acionáveis por destinatário](actionable-alerts.md) — cada usuário mantém estado próprio; toda leitura e transição revalida o escopo atual server-side.
+- [Watcher Vite e caches](vite-watcher-cache.md) — o watcher deve ignorar caches e saídas geradas; observar `.cache` esgota descritores e trava o Preview.
+- [Carregamento progressivo do Admin](admin-progressive-loading.md) — dados relacionais nunca aguardam avaliações V2 da carteira; scores entram em lotes lazy com cobertura explícita.
+- [Carregamento progressivo do Consultor](consultor-progressive-loading.md) — primeira tela traz relações do cliente inicial; V2 roda por cliente em lotes on-demand.
+- [Carregamento progressivo do Gestor](gestor-progressive-loading.md) — carteira relacional e alertas persistentes precedem V2; rankings avançam em lotes on-demand.
+- [Orquestração de carregamento](loading-orchestration.md) — somente IMMEDIATE, PRIORITY e ON_DEMAND; primeiro score unitário antes de qualquer demanda secundária.
+- [Inputs de risco preparados](prepared-risk-inputs.md) — providers rodam só na preparação; runtime recalcula o V2 com snapshots por operação, sem rede.

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Bell, LogOut, UserCircle, Repeat, ShieldCheck, Building2, CheckCheck,
@@ -11,78 +11,28 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  operations, machines, clients,
-  type AlertCriticality, type AlertStatus, type ProfileId,
-} from "@/lib/mock-data";
-import { useAuth, profileLabels, userFor, clientFor } from "@/lib/auth";
+import { type ProfileId } from "@/lib/mock-data";
+import { useAuth, profileLabels } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import { getProfileAlerts, pendingCount, type ProfileAlert } from "@/lib/profile-alerts";
-
-// ---------- Alerts ----------
-const critColor: Record<AlertCriticality, string> = {
-  alta: "bg-danger/15 text-danger border-danger/30",
-  média: "bg-warning/15 text-warning border-warning/30",
-  baixa: "bg-success/15 text-success border-success/30",
-};
-
-const statusColor: Record<AlertStatus, string> = {
-  aberto: "bg-danger/10 text-danger",
-  "em análise": "bg-warning/10 text-warning",
-  resolvido: "bg-success/10 text-success",
-};
-
-function AlertRow({ a, read }: { a: ProfileAlert; read?: boolean }) {
-  return (
-    <div className={cn(
-      "flex flex-col gap-1 border-b border-border p-3 last:border-b-0 hover:bg-muted/40",
-      read && "opacity-60",
-    )}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-foreground">{a.title}</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {a.context} · {a.detail}
-          </div>
-        </div>
-        <span className={cn("shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase", critColor[a.criticality])}>
-          {a.criticality}
-        </span>
-      </div>
-      <div className="flex items-center justify-between text-[11px]">
-        <span className="text-muted-foreground">{a.time}</span>
-        <span className={cn("rounded px-1.5 py-0.5 font-medium", statusColor[a.status])}>{a.status}</span>
-      </div>
-    </div>
-  );
-}
+import { ActionableAlertRow } from "@/components/actionable-alerts";
+import { useActionableAlerts } from "@/lib/actionable-alerts";
 
 export function HeaderAlerts() {
-  const { profile } = useAuth();
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const { snapshot, markViewed, acknowledge } = useActionableAlerts();
   const [allOpen, setAllOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const bundle = useMemo(
-    () => (profile ? getProfileAlerts(profile) : null),
-    [profile],
-  );
-  const alerts = bundle?.alerts ?? [];
+  const alerts = snapshot.alerts;
   const recent = alerts.slice(0, 5);
-  const pending = bundle ? pendingCount(alerts, readIds) : 0;
-
-  const markAllRead = () => {
-    setReadIds(new Set(alerts.map((a) => a.id)));
-  };
+  const pending = snapshot.unreadCount;
 
   const goToSection = () => {
     setMenuOpen(false);
-    if (!bundle) return;
     requestAnimationFrame(() => {
-      const el = document.getElementById(bundle.sectionId);
+      const el = document.getElementById("alertas-operacao") ?? document.getElementById("alertas-gerenciais") ?? document.getElementById("alertas-cliente") ?? document.getElementById("central-alertas");
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "start" });
-        window.history.replaceState(null, "", `#${bundle.sectionId}`);
+        window.history.replaceState(null, "", `#${el.id}`);
       } else {
         setAllOpen(true);
       }
@@ -91,7 +41,13 @@ export function HeaderAlerts() {
 
   return (
     <>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu open={menuOpen} onOpenChange={(open) => {
+        setMenuOpen(open);
+        if (open) {
+          const ids = recent.filter((a) => a.status === "new").map((a) => a.id);
+          if (ids.length) void markViewed(ids);
+        }
+      }}>
         <DropdownMenuTrigger asChild>
           <button
             aria-label="Abrir notificações de alertas"
@@ -115,13 +71,13 @@ export function HeaderAlerts() {
             {recent.length === 0 ? (
               <div className="p-6 text-center text-xs text-muted-foreground">Sem alertas no momento.</div>
             ) : (
-              recent.map((a) => <AlertRow key={a.id} a={a} read={readIds.has(a.id)} />)
+            recent.map((a) => <ActionableAlertRow key={a.id} alert={a} onAcknowledge={() => acknowledge(a.id)} />)
             )}
           </div>
           <DropdownMenuSeparator className="my-0" />
           <div className="flex items-center justify-between gap-2 p-2">
             <button
-              onClick={markAllRead}
+              onClick={() => markViewed(alerts.filter((a) => a.status === "new").map((a) => a.id))}
               className="inline-flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <CheckCheck className="h-3.5 w-3.5" />
@@ -142,14 +98,14 @@ export function HeaderAlerts() {
           <DialogHeader className="border-b border-border p-4">
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-danger" />
-              {bundle?.sectionTitle ?? "Alertas"}
+              Alertas acionáveis
             </DialogTitle>
             <DialogDescription>
-              {alerts.length} alertas simulados para o perfil atual.
+              {alerts.length} alertas persistidos para o perfil atual.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto">
-            {alerts.map((a) => <AlertRow key={a.id} a={a} read={readIds.has(a.id)} />)}
+            {alerts.map((a) => <ActionableAlertRow key={a.id} alert={a} onAcknowledge={() => acknowledge(a.id)} />)}
           </div>
         </DialogContent>
       </Dialog>
@@ -164,20 +120,25 @@ type ProfileContext = {
   permissions: string[];
 };
 
-function buildContext(profile: ProfileId): ProfileContext {
-  const user = userFor(profile);
-  const client = clientFor(user);
+export interface HeaderAccountContext {
+  userId: string;
+  name: string;
+  clientName?: string;
+  clientLocation?: string;
+  operationId?: string;
+  machineName?: string;
+  areaName?: string;
+}
 
+function buildContext(profile: ProfileId, account?: HeaderAccountContext): ProfileContext {
   if (profile === "operador") {
-    const op = operations.find((o) => o.operatorId === user?.id) ?? operations[0];
-    const machine = machines.find((m) => m.id === op?.machineId);
     return {
       scope: "Visão restrita à sua operação atual",
       rows: [
-        { icon: Building2, label: "Fazenda",       value: client?.name ?? "—" },
-        { icon: Activity,  label: "Operação",      value: op?.id ?? "—" },
-        { icon: Tractor,   label: "Equipamento",   value: machine?.name ?? "—" },
-        { icon: MapPin,    label: "Área atual",    value: op?.area ?? "—" },
+        { icon: Building2, label: "Fazenda",       value: account?.clientName ?? "—" },
+        { icon: Activity,  label: "Operação",      value: account?.operationId ?? "—" },
+        { icon: Tractor,   label: "Equipamento",   value: account?.machineName ?? "—" },
+        { icon: MapPin,    label: "Área atual",    value: account?.areaName ?? "—" },
       ],
       permissions: [
         "Visualizar própria operação",
@@ -189,12 +150,8 @@ function buildContext(profile: ProfileId): ProfileContext {
   }
   if (profile === "gestor") {
     return {
-      scope: "Visão gerencial da operação",
-      rows: [
-        { icon: Building2, label: "Cliente",  value: client?.name ?? "—" },
-        { icon: MapPin,    label: "Região",   value: client?.location ?? "—" },
-        { icon: Tractor,   label: "Frota",    value: `${client?.machines ?? 0} equipamentos` },
-      ],
+      scope: "Carteira autorizada pela sessão",
+      rows: [],
       permissions: [
         "Visualizar dashboard gerencial",
         "Visualizar ranking de risco",
@@ -205,14 +162,9 @@ function buildContext(profile: ProfileId): ProfileContext {
     };
   }
   if (profile === "consultor") {
-    const selected = clients[0];
     return {
-      scope: "Análise consolidada por cliente",
-      rows: [
-        { icon: Briefcase, label: "Carteira",          value: `${clients.length} clientes` },
-        { icon: Building2, label: "Cliente atual",     value: selected?.name ?? "—" },
-        { icon: MapPin,    label: "Região",            value: selected?.location ?? "—" },
-      ],
+      scope: "Carteira autorizada pela sessão",
+      rows: [],
       permissions: [
         "Visualizar clientes",
         "Top equipamentos em risco",
@@ -224,33 +176,27 @@ function buildContext(profile: ProfileId): ProfileContext {
   }
   // admin
   return {
-    scope: "Acesso total ao MVP",
-    rows: [
-      { icon: Briefcase, label: "Clientes",     value: `${clients.length}` },
-      { icon: Tractor,   label: "Equipamentos", value: `${machines.length}` },
-      { icon: Activity,  label: "Operações",    value: `${operations.length}` },
-    ],
+    scope: "Acesso global autorizado",
+    rows: [],
     permissions: [
       "Visualizar todos os clientes",
       "Visualizar todas as máquinas",
       "Visualizar todas as áreas",
       "Visualizar todos os alertas",
       "Scores, rankings e recomendações",
-      "Acessar todas as telas simuladas",
+      "Acessar a visão consolidada",
     ],
   };
 }
 
-export function HeaderUserMenu() {
+export function HeaderUserMenu({ account }: { account?: HeaderAccountContext }) {
   const { profile, logout } = useAuth();
   const navigate = useNavigate();
   const [accountOpen, setAccountOpen] = useState(false);
 
-  const user = profile ? userFor(profile) : undefined;
-  const client = clientFor(user);
-  const name = user?.name ?? "Usuário";
+  const name = account?.name ?? (profile ? profileLabels[profile] : "Usuário");
   const label = profile ? profileLabels[profile] : "—";
-  const ctx = profile ? buildContext(profile) : null;
+  const ctx = profile ? buildContext(profile, account) : null;
 
   const handleLogout = () => {
     logout();
@@ -362,17 +308,24 @@ export function HeaderUserMenu() {
               <ShieldCheck className="h-4 w-4 text-primary" />
               Minha conta
             </DialogTitle>
-            <DialogDescription>Dados simulados do usuário logado.</DialogDescription>
+            <DialogDescription>
+              {profile === "operador" ? "Dados da conta autenticada." : "Dados do usuário logado."}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
             <Row label="Nome" value={name} />
             <Row label="Perfil" value={label} />
-            <Row label="ID do usuário" value={user?.id ?? "—"} />
-            {client && <Row label="Cliente / Fazenda" value={`${client.name} · ${client.location}`} />}
+            <Row label="ID do usuário" value={account?.userId ?? "—"} />
+            {account?.clientName && (
+              <Row
+                label="Cliente / Fazenda"
+                value={`${account.clientName} · ${account.clientLocation ?? "—"}`}
+              />
+            )}
             <div>
               <div className="text-xs font-medium text-muted-foreground">Permissões principais</div>
               <div className="mt-1 flex flex-wrap gap-1">
-                {(ctx?.permissions ?? user?.permissions ?? []).map((p) => (
+                {(ctx?.permissions ?? []).map((p) => (
                   <span key={p} className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-[11px] text-foreground">
                     <Eye className="h-3 w-3 text-muted-foreground" />
                     {p}

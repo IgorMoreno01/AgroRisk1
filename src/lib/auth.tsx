@@ -39,7 +39,7 @@ const DEFAULT_ROUTE: Record<ProfileId, string> = {
 interface AuthContextValue {
   profile: ProfileId | null;
   status: "loading" | "ready";
-  login: (profile: ProfileId, password: string) => Promise<boolean>;
+  login: (profile: ProfileId, email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
   canAccess: (path: string) => boolean;
   allowedRoutes: string[];
@@ -84,18 +84,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = async (p: ProfileId, password: string) => {
+  const login = async (p: ProfileId, email: string, password: string) => {
     try {
-      const result = await signIn({ data: { profile: p, password } });
-      if (!result.ok) return false;
+      const result = await signIn({ data: { profile: p, email, password } });
+      if (!result.ok) return { ok: false, error: result.error };
       setProfile(result.profile as ProfileId);
       setAllowedRoutes(result.allowedRoutes);
       try {
         localStorage.setItem(SESSION_STORAGE_KEY, result.token);
       } catch {}
-      return true;
+      return { ok: true };
     } catch {
-      return false;
+      return { ok: false, error: "Não foi possível validar a conta." };
     }
   };
 

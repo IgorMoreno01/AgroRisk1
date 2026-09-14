@@ -25,6 +25,12 @@ Nunca chamar APIs externas diretamente do frontend.
 ## Cache
 `src/lib/cache.server.ts` — TTL: clima 10min, água 30min, rota 15min, terreno 1h.
 
+O enriquecimento V2 usa também um runtime compartilhado com cache positivo/negativo, deduplicação in-flight e prioridade interativa. Chaves geográficas preservam 6 casas decimais; o cache é LRU e limitado.
+
+**Why:** arredondamento mais agressivo pode cruzar os thresholds hídricos de 50/100/150 m; cache sem limite cresce indefinidamente; filas sem fairness podem bloquear background ou a operação visível.
+
+**How to apply:** use funções de provider estáveis entre batches, converta em ausência apenas erros transitórios e mantenha promoção por chave com progresso obrigatório do background após burst limitado.
+
 ## Coordenadas aproximadas (mock GPS)
 `src/lib/area-coordinates.ts` — lookup por areaId/clientId. Sorriso/MT, Cascavel/PR, Rio Verde/GO.
 
@@ -35,6 +41,15 @@ Nunca chamar APIs externas diretamente do frontend.
 - **Fix aplicado**: usar `outputFormat=AAIGrid` (ASCII puro, parseável) + bounding box mínima de `0.011°` em cada lado (total 0.022°). Box menor causa HTTP 400.
 - Parser AAIGrid implementado em `parseAAIGrid()` no mesmo arquivo.
 
+### Open-Meteo histórico para o Risk Engine V2
+- O Archive API não oferece média diária de `wind_speed_10m`; solicite vento horário e calcule a média de D-1 antes de converter km/h para m/s.
+- Para evitar leakage e dados parciais, só publique clima quando houver exatamente os 7/30 dias esperados e 24 horas finitas em D-1; caso contrário, mantenha `null`.
+- Cacheie a série por coordenada/ano e derive cada data localmente. Compartilhe requests em andamento e use TTL curto para falhas, evitando fan-out e 429 na carteira.
+
+**Why:** solicitar vento médio em `daily` causou HTTP 400, e uma chamada por operação gerou rate limit na carteira de 500 cenários.
+
+**How to apply:** novos consumidores de histórico devem reutilizar a série anual normalizada e nunca preencher janelas incompletas.
+
 ### openrouteservice
 - Perfil `driving-hgv` não encontra pontos roteáveis em áreas rurais/agrícolas (raio máximo 350m sem estrada HGV certificada).
 - **Fix aplicado**: usar perfil `driving-car` que cobre estradas rurais.
@@ -42,6 +57,12 @@ Nunca chamar APIs externas diretamente do frontend.
 
 ### Overpass / OSM
 - HTTP 406 aparece intermitentemente (rate limit ou query format). Adapter já tem fallback para mock.
+- Para risco por distância, `center` de way/relation não representa o ponto mais próximo da água. Solicite `out geom`, calcule a menor distância aos segmentos e descarte feições sem geometria.
+- Não arredonde `nearestDistanceM` antes dos limites de 50/100/150 m; cache hidrográfico deve preservar precisão submétrica da coordenada.
+
+**Why:** centros de rios e reservatórios longos classificavam operações próximas como distantes, e arredondamento podia atravessar thresholds operacionais.
+
+**How to apply:** somente geometria Overpass real pode gerar `hydrography_api`; respostas mock, incompletas ou sem distância finita permanecem sintéticas.
 
 ## Integração no dashboard Operador
 `src/routes/operador.tsx` — usa `useEffect` + `useState` para buscar clima, hidrografia, rota e elevação.

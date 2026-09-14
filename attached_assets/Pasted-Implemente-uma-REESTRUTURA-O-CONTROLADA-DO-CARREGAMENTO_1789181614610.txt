@@ -1,0 +1,644 @@
+Implemente uma REESTRUTURAÇÃO CONTROLADA DO CARREGAMENTO das 4 personas do AgroRisk.
+
+Esta alteração deve resolver de forma definitiva o problema de UX causado
+por telas aguardando cálculos e enriquecimentos externos.
+
+IMPORTANTE:
+o objetivo NÃO é fazer 500 operações calcularem mais rápido.
+
+O objetivo é:
+
+1. mostrar a tela imediatamente;
+2. calcular primeiro SOMENTE o risco que o usuário está vendo;
+3. carregar o restante somente quando necessário.
+
+NÃO criar nova arquitetura de Risk Engine.
+NÃO retreinar ML.
+NÃO alterar fórmula.
+NÃO alterar thresholds.
+NÃO alterar pesos Sompo.
+NÃO alterar banco/schema.
+NÃO alterar Vite.
+NÃO alterar V1.
+
+EU faço os commits Git manualmente.
+
+NÃO executar:
+git add
+git commit
+git push
+git merge
+git rebase
+git reset
+
+==================================================
+PRINCÍPIO ARQUITETURAL OBRIGATÓRIO
+==================================================
+
+Toda informação deve pertencer a uma destas 3 classes:
+
+1. IMMEDIATE
+2. PRIORITY
+3. ON_DEMAND
+
+Não criar quarta estratégia paralela.
+
+--------------------------------------------------
+IMMEDIATE
+--------------------------------------------------
+
+Dados necessários para montar a tela e permitir navegação.
+
+Devem vir prioritariamente do PostgreSQL.
+
+NÃO podem depender de:
+
+- Open-Meteo
+- OpenTopography
+- Open-Elevation
+- Overpass
+- Risk Engine V2
+- score de outras operações
+
+A primeira tela deve aparecer assim que esses dados estiverem disponíveis.
+
+--------------------------------------------------
+PRIORITY
+--------------------------------------------------
+
+É o risco da operação/entidade que o usuário está vendo.
+
+Após a primeira renderização:
+
+→ calcular UMA operação prioritária;
+→ prioridade interactive;
+→ devolver resultado assim que terminar;
+→ atualizar imediatamente a UI.
+
+NÃO esperar batch secundário.
+
+--------------------------------------------------
+ON_DEMAND
+--------------------------------------------------
+
+Tudo que não é necessário naquele momento.
+
+Exemplos:
+
+- rankings completos;
+- operações de páginas não visíveis;
+- outros clientes;
+- histórico detalhado;
+- scores de máquinas não abertas;
+- distribuições completas;
+- recomendações secundárias.
+
+Somente calcular quando a tela/aba/detalhe exigir.
+
+==================================================
+1. REGRA DE PRIMEIRA TELA
+==================================================
+
+Meta:
+
+Admin/Sompo < 1 segundo
+Gestor < 1 segundo
+Consultor < 1 segundo
+Operador < 1 segundo para conteúdo relacional
+
+Não bloquear a tela aguardando enriquecimento externo.
+
+Header, menu, navegação, entidades e dados relacionais devem estar
+utilizáveis imediatamente.
+
+Se score ainda não existir:
+
+mostrar:
+
+"Calculando..."
+
+ou skeleton local.
+
+NUNCA bloquear a página inteira.
+
+==================================================
+2. ADMIN / SOMPO
+==================================================
+
+O Admin já possui Fase A progressiva.
+
+PRESERVAR esse comportamento.
+
+IMMEDIATE:
+
+- clientes
+- máquinas
+- áreas
+- operações
+- alertas persistidos
+- manutenção
+- atividade recente
+- navegação
+- contagens PostgreSQL
+
+PRIORITY:
+
+avaliar somente a operação realmente necessária para a visão atual.
+
+IMPORTANTE:
+
+hoje o Admin envia até 12 operações e só publica depois do batch completo.
+
+CORRIGIR.
+
+Fluxo novo:
+
+Fase A
+→ operationId prioritário
+→ request limit=1
+→ priority=interactive
+→ resultado publicado imediatamente
+→ demais operações somente depois
+
+Não esperar lote de 12 para exibir primeiro score.
+
+Corrigir também:
+
+- se request prioritário falhar, permitir retry;
+- não deixar IDs permanentemente marcados como carregados após erro.
+
+==================================================
+3. GESTOR
+==================================================
+
+Há um BUG CONFIRMADO na seleção de operações.
+
+O seletor mistura:
+
+string operationId
++
+objetos Operation
+
+enquanto a API exige:
+
+string[]
+
+CORRIGIR obrigatoriamente.
+
+O seletor deve retornar SOMENTE:
+
+operation.id
+
+como string.
+
+Adicionar teste usando o schema REAL da API.
+
+IMMEDIATE:
+
+- clientes autorizados
+- máquinas
+- áreas
+- operações básicas
+- alertas
+- contagens
+- contexto PostgreSQL da operação visível
+
+PRIORITY:
+
+somente a operação exibida na visão principal.
+
+Fluxo:
+
+Fase A
+→ request com exatamente 1 operationId válido
+→ resultado
+→ atualizar card Risk Engine imediatamente
+
+Somente depois considerar outras avaliações.
+
+Score médio e Operações em risco:
+
+se cobertura ainda for parcial:
+
+mostrar "Calculando..." / "Parcial"
+
+NÃO esperar carteira inteira.
+
+==================================================
+4. CONSULTOR
+==================================================
+
+PRESERVAR a Fase A rápida já implementada.
+
+IMMEDIATE:
+
+- clientes autorizados
+- cliente selecionado
+- fazendas/áreas
+- máquinas
+- operações básicas
+- contagens
+
+Outros clientes NÃO devem ser calculados automaticamente.
+
+PRIORITY:
+
+selecionar UMA operação representativa/ativa do cliente visível
+e avaliá-la primeiro.
+
+Hoje o Consultor pode esperar até 7 operações do batch.
+
+CORRIGIR:
+
+primeiro request = 1 operação interactive.
+
+Assim que retornar:
+
+publicar o score.
+
+Depois, itens adicionais do cliente podem carregar progressivamente.
+
+Outros clientes:
+
+ON_DEMAND.
+
+==================================================
+5. OPERADOR
+==================================================
+
+Hoje o Operador avalia apenas uma operação,
+mas toda a primeira tela espera o enrichment completo.
+
+Separar em:
+
+FASE A — IMMEDIATE
+
+- operador
+- cliente
+- área
+- máquina
+- operação
+- status
+- alertas
+- contexto PostgreSQL disponível
+
+Renderizar imediatamente.
+
+FASE B — PRIORITY
+
+avaliar a operação atual V2.
+
+Quando terminar:
+
+atualizar os cards de risco.
+
+Clima atual e ORS continuam posteriores/sob demanda.
+
+Não alterar resultado do Risk Engine.
+
+==================================================
+6. ENRICHMENT EXTERNO
+==================================================
+
+Para a operação PRIORITY:
+
+geocodificação
+      ↓
+clima + altitude + água EM PARALELO
+      ↓
+Risk Engine
+
+Manter:
+
+- cache positivo;
+- in-flight dedup;
+- agrupamento;
+- cache negativo;
+- circuit breaker.
+
+NÃO fazer enrichment de operações ON_DEMAND antecipadamente.
+
+==================================================
+7. OVERPASS
+==================================================
+
+Overpass possui alta variância confirmada.
+
+NÃO permitir que uma consulta de água longa bloqueie a TELA.
+
+A operação prioritária pode aguardar o enrichment necessário ao seu score,
+mas o restante da interface já deve estar utilizável.
+
+Preservar:
+
+fallback synthetic_demo
++
+proveniência correta
+
+quando o provider falhar conforme as regras atuais.
+
+NÃO inventar distância.
+
+==================================================
+8. BATCHES
+==================================================
+
+Regra nova:
+
+PRIMEIRO SCORE NÃO É BATCH.
+
+Primeira avaliação:
+
+limit=1
+priority=interactive
+
+Batches existem somente DEPOIS.
+
+Para batches secundários:
+
+- máximo atual pode permanecer 12;
+- background;
+- somente itens realmente necessários.
+
+==================================================
+9. RESULTADO INDIVIDUAL
+==================================================
+
+Não esperar todo um batch para publicar uma operação prioritária.
+
+Assim que:
+
+evaluateRiskEngineV2(operation)
+
+terminar:
+
+o frontend deve receber e exibir o resultado.
+
+Não condicionar o primeiro score à cobertura de outras operações.
+
+==================================================
+10. ERROS ISOLADOS
+==================================================
+
+Uma operação falhar:
+
+NÃO pode abortar todas as outras.
+
+Garantir que:
+
+- erro individual fica associado à operação;
+- operação pode ser tentada novamente;
+- IDs com erro não ficam marcados permanentemente como completos;
+- UI não fica eternamente em "Calculando...".
+
+==================================================
+11. REQUESTS ANTIGOS / RACE CONDITIONS
+==================================================
+
+Adicionar controle simples para evitar resposta antiga sobrescrevendo
+estado mais novo quando:
+
+- muda cliente;
+- muda aba;
+- muda operação;
+- inicia novo batch.
+
+Usar abordagem mínima compatível com o projeto, por exemplo:
+
+request generation/id
+
+ou mecanismo equivalente já existente.
+
+Não criar framework novo.
+
+==================================================
+12. DADOS QUE NÃO DEVEM SER PRÉ-CALCULADOS
+==================================================
+
+No primeiro load NÃO calcular automaticamente:
+
+- todas as operações;
+- todos os clientes;
+- ranking completo;
+- distribuição completa;
+- recomendações de itens invisíveis;
+- páginas não abertas.
+
+Esses dados são ON_DEMAND.
+
+==================================================
+13. AGREGAÇÕES
+==================================================
+
+Agregados como:
+
+- score médio;
+- operações em risco;
+- ranking;
+- distribuição de risco;
+
+podem exigir várias operações.
+
+Estados permitidos:
+
+Calculando
+Parcial
+Completo
+
+Enquanto parcial:
+
+NÃO apresentar o valor como consolidado definitivo.
+
+==================================================
+14. NÃO CRIAR DELAY ARTIFICIAL
+==================================================
+
+Não adicionar sleeps ou atrasos apenas para aparência.
+
+Se houver escalonamento de 50–100 ms,
+usar somente para iniciar trabalho BACKGROUND após primeiro paint.
+
+Dados prontos devem ser mostrados imediatamente.
+
+==================================================
+15. PARIDADE
+==================================================
+
+A mesma operação deve gerar exatamente o mesmo:
+
+- MlRiskInput
+- OperationalRulesInput
+- Score ML
+- Score Operacional
+- Score Final
+- level
+- drivers
+
+independentemente da persona.
+
+Esta alteração muda SOMENTE:
+
+QUANDO e O QUE é carregado.
+
+Não muda COMO o risco é calculado.
+
+==================================================
+16. CRITÉRIOS DE ACEITE
+==================================================
+
+ADMIN
+
+- Fase A < 1 s
+- primeira avaliação = 1 operação
+- primeiro score não espera batch secundário
+
+GESTOR
+
+- selector retorna somente string IDs
+- API real aceita payload
+- Fase A < 1 s
+- primeira avaliação = 1 operação
+- não permanece indefinidamente em Calculando
+
+CONSULTOR
+
+- Fase A < 1 s
+- primeira avaliação = 1 operação
+- outros clientes on-demand
+
+OPERADOR
+
+- conteúdo relacional aparece antes do V2
+- primeira tela não espera enrichment
+- score chega posteriormente
+
+TODAS
+
+- 0 chamadas externas antes da Fase A
+- nenhuma tela inteira bloqueada por Risk Engine
+- nenhuma avaliação massiva automática
+
+==================================================
+17. TESTES
+==================================================
+
+Adicionar/ajustar testes para:
+
+1. Admin Fase A sem APIs;
+2. Admin primeiro request V2 = 1 operação;
+3. Gestor selector retorna string[];
+4. payload Gestor passa no schema real;
+5. Gestor publica primeiro score;
+6. Consultor primeiro request = 1 operação;
+7. outros clientes Consultor on-demand;
+8. Operador possui Fase A separada do V2;
+9. falha individual não aborta restante;
+10. request antigo não sobrescreve novo;
+11. agregados parciais são identificados;
+12. Golden Vector continua fora do runtime;
+13. mesma operação mantém paridade entre personas;
+14. fórmula/modelo/thresholds não mudaram.
+
+Executar:
+
+bun test
+bun run build
+
+==================================================
+18. MEDIÇÃO REAL
+==================================================
+
+Após implementar, medir em processo novo:
+
+ADMIN
+Fase A:
+Primeiro score:
+Avaliações antes da tela:
+
+GESTOR
+Fase A:
+Primeiro score:
+Avaliações antes da tela:
+
+CONSULTOR
+Fase A:
+Primeiro score:
+Avaliações antes da tela:
+
+OPERADOR
+Fase A:
+Primeiro score:
+Avaliações antes da tela:
+
+Também informar:
+
+quantas chamadas externas existem ANTES de cada Fase A.
+
+Esperado:
+
+0.
+
+==================================================
+19. RELATÓRIO FINAL
+==================================================
+
+Responder:
+
+A. ARQUIVOS ALTERADOS
+
+B. ADMIN
+Fase A:
+Primeiro score:
+Primeiro request possui quantas operações?
+
+C. GESTOR
+Fase A:
+Bug string[] corrigido? SIM/NÃO
+Primeiro score:
+Ainda fica indefinidamente em Calculando? SIM/NÃO
+
+D. CONSULTOR
+Fase A:
+Primeiro score:
+Outros clientes on-demand? SIM/NÃO
+
+E. OPERADOR
+Fase A:
+Primeiro score:
+Tela ainda espera Risk Engine para aparecer? SIM/NÃO
+
+F. CHAMADAS EXTERNAS ANTES DA PRIMEIRA TELA
+Admin:
+Gestor:
+Consultor:
+Operador:
+
+G. ALGUMA PERSONA CALCULA TODA A CARTEIRA NO LOAD?
+SIM/NÃO
+
+Esperado: NÃO
+
+H. PARIDADE ENTRE PERSONAS
+PASS/FAIL
+
+I. TESTES
+pass/fail
+
+J. BUILD
+PASS/FAIL
+
+K. MODELO/FÓRMULA/THRESHOLDS ALTERADOS?
+NÃO
+
+L. BANCO/SCHEMA ALTERADOS?
+NÃO
+
+M. VITE ALTERADO?
+NÃO
+
+PARE AO FINAL.
+
+NÃO abra nova frente.
+NÃO faça refactor fora do necessário.
+NÃO tente otimizar providers além do que já existe.
+O foco desta etapa é exclusivamente a ORQUESTRAÇÃO DO CARREGAMENTO.

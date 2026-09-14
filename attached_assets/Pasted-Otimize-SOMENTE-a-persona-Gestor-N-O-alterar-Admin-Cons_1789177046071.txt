@@ -1,0 +1,219 @@
+Otimize SOMENTE a persona Gestor.
+
+NÃO alterar:
+- Admin
+- Consultor
+- Operador
+- Risk Engine
+- modelo ML
+- fórmula
+- thresholds
+- pesos
+- banco/schema
+- Vite
+- V1
+
+NÃO executar Git mutável.
+
+PROBLEMA ATUAL:
+
+O Gestor avalia todas as operações do escopo antes de concluir o snapshot.
+
+Isso deixa a primeira tela lenta.
+
+OBJETIVO:
+
+Primeira tela útil idealmente < 1 segundo.
+
+A tela deve aparecer com dados relacionais reais antes das avaliações V2 completas.
+
+==================================================
+1. FASE A RÁPIDA
+==================================================
+
+Carregar imediatamente:
+
+- clientes autorizados
+- máquinas monitoradas
+- áreas
+- operações básicas
+- alertas persistentes
+- contagens relacionais
+- contexto da operação principal/ativa
+
+Nenhuma API externa pode bloquear a primeira tela.
+
+Não calcular toda a carteira antes da renderização.
+
+==================================================
+2. PRIMEIRO SCORE VISÍVEL
+==================================================
+
+Após a primeira tela:
+
+avaliar primeiro a operação/entidade realmente mostrada no painel
+Risk Engine V2.
+
+Prioridade:
+
+1. operação em andamento/ativa;
+2. máquina/operação exibida na visão principal;
+3. itens visíveis nos primeiros cards/listas.
+
+Não avaliar operações invisíveis antes das visíveis.
+
+==================================================
+3. CARDS GLOBAIS
+==================================================
+
+Cards como:
+
+- Operações em risco
+- Score médio da frota
+
+não devem bloquear a primeira tela.
+
+Enquanto não houver cobertura suficiente:
+
+mostrar "Calculando..."
+
+ou estado parcial claramente identificado.
+
+Nunca mostrar agregado parcial como definitivo.
+
+Máquinas monitoradas e alertas persistentes podem aparecer imediatamente
+se vierem do PostgreSQL.
+
+==================================================
+4. RANKINGS
+==================================================
+
+Rankings completos NÃO devem ser calculados antes da primeira tela.
+
+Carregar sob demanda ao abrir a aba Ranking ou quando necessário.
+
+Scores das páginas não visíveis também devem ser on-demand.
+
+==================================================
+5. BATCH
+==================================================
+
+Usar pequenos lotes de avaliações V2.
+
+Pode reutilizar padrão de até 12 operações por lote.
+
+Primeiro lote deve priorizar entidades visíveis.
+
+Nunca avaliar todo o escopo automaticamente no load inicial.
+
+==================================================
+6. BACKGROUND
+==================================================
+
+Dados secundários podem começar após o primeiro paint
+com escalonamento pequeno (~50–100 ms).
+
+Isso serve apenas para escalonar requests.
+
+NÃO atrasar artificialmente dados já disponíveis.
+
+==================================================
+7. CACHE / DEDUPLICAÇÃO
+==================================================
+
+Aplicar ao Gestor a mesma reutilização segura de contexto externo:
+
+- município/UF
+- coordenada
+- data
+
+Deduplicar requests em andamento para:
+
+- geocodificação
+- clima
+- altitude
+- hidrografia
+
+==================================================
+8. FRONTEND
+==================================================
+
+Não usar loading global longo.
+
+Menu, header, contagens e estrutura do dashboard devem aparecer rapidamente.
+
+Usar loading local:
+
+"Calculando..."
+
+somente onde score/agregado ainda estiver pendente.
+
+==================================================
+9. CONSISTÊNCIA
+==================================================
+
+A mesma operação deve continuar produzindo exatamente:
+
+- mesmo Score ML
+- mesmo Score Operacional
+- mesmo Score Final
+- mesmo level
+
+Alterar somente a estratégia de carregamento.
+
+==================================================
+10. TESTES
+==================================================
+
+Cobrir:
+
+1. primeira tela não espera V2 completo;
+2. APIs externas não bloqueiam Fase A;
+3. operação visível recebe prioridade;
+4. score médio não exige toda a carteira antes da tela;
+5. rankings completos são lazy/on-demand;
+6. batch é limitado;
+7. requests equivalentes são deduplicados;
+8. Consultor permanece inalterado;
+9. Admin permanece inalterado;
+10. Operador permanece inalterado;
+11. matemática do Risk Engine não muda.
+
+Rodar:
+
+bun test
+bun run build
+
+==================================================
+RELATÓRIO FINAL
+==================================================
+
+A. arquivos alterados
+
+B. tempo primeira tela ANTES:
+informar medição anterior disponível
+
+C. tempo primeira tela DEPOIS:
+
+D. avaliações V2 antes da primeira tela:
+ANTES:
+DEPOIS:
+
+E. chamadas externas antes da primeira tela:
+
+F. primeiro score visível em:
+
+G. score médio/rankings são progressivos?
+SIM/NÃO
+
+H. outras personas alteradas?
+NÃO
+
+I. testes
+
+J. build
+
+K. Risk Engine/fórmula alterados?
+NÃO
+
+PARE AO FINAL.

@@ -1,0 +1,157 @@
+Ajuste de UI — filtros no Admin/Sompo (escopo simples e seguro)
+
+Quero uma melhoria de usabilidade apenas no perfil Admin/Sompo, com filtros visuais e client-side quando possível, sem mexer na lógica do Risk Engine e sem criar regressão de performance.
+
+Objetivo
+
+Adicionar filtros nas telas do Admin/Sompo para facilitar a navegação e a análise dos dados já exibidos, especialmente para casos como:
+
+ver apenas máquinas com risco médio;
+ver apenas itens com risco baixo/médio/alto/pendente;
+filtrar por status, cliente, tipo, etc.
+
+Também quero que, na tela de Operações monitoradas (print 5), exista:
+
+uma área de filtros;
+um botão de voltar para a Visão geral.
+Escopo
+1) Tela Máquinas monitoradas
+
+Adicionar uma barra de filtros acima da tabela com:
+
+Busca textual: por ID, equipamento, cliente, operador ou área;
+Filtro de risco:
+Todos
+Baixo
+Médio
+Alto
+Pendente
+Filtro de status:
+Todos
+Ativa
+Em alerta
+Crítica
+Filtro por tipo de máquina:
+Todos
+Trator
+Pulverizador
+Plantadeira
+outros existentes
+Filtro por cliente
+Botão “Limpar filtros”
+
+Regras:
+
+aplicar os filtros sobre os dados da tabela;
+atualizar a contagem/linhas visíveis sem quebrar paginação;
+manter visual coerente com o sistema atual;
+não disparar novas avaliações só por trocar filtro.
+2) Tela Clientes monitorados
+
+Adicionar filtros acima da tabela com:
+
+Busca textual: ID, cliente, localização, operação;
+Filtro de risco:
+Todos
+Baixo
+Médio
+Alto
+Pendente
+Filtro de avaliação:
+Todos
+Avaliado
+Pendente
+Filtro por localização/UF (simples, se viável com os dados já exibidos)
+Botão “Limpar filtros”
+3) Tela Áreas e regiões
+
+Adicionar filtros acima da tabela com:
+
+Busca textual: ID, área, cliente;
+Filtro de risco:
+Todos
+Baixo
+Médio
+Alto
+Pendente
+Filtro por condição
+Filtro por água
+Filtro por cliente
+Botão “Limpar filtros”
+4) Tela Recomendações prioritárias
+
+Adicionar filtros acima da listagem com:
+
+Busca textual: cliente/fazenda, alvo, recomendação;
+Filtro de prioridade:
+Todas
+Alta
+Média
+Baixa
+Filtro de categoria
+Filtro de risco
+Filtro de destino
+Botão “Limpar filtros”
+
+Também quero que os cards/KPIs do topo continuem consistentes com o subconjunto filtrado ou, se isso ficar arriscado, mantenham os totais gerais e apenas a tabela seja filtrada. Se optar por manter os totais gerais, deixe isso consistente visualmente e não ambíguo.
+
+5) Tela Operações monitoradas (print 5)
+
+Adicionar uma barra de filtros acima da tabela com:
+
+Busca textual: ID, máquina, área, tipo;
+Filtro de status:
+Todos
+Em andamento
+Concluída
+Agendada
+Filtro de risco:
+Todos
+Baixo
+Médio
+Alto
+Pendente
+Filtro por tipo de operação
+Botão “Limpar filtros”
+Botão “Voltar para Visão geral”
+
+Sobre o botão:
+
+ele deve ficar visível no topo da tela;
+deve levar o usuário de volta para a Visão geral do Admin/Sompo;
+pode ser um botão simples com ícone de seta, sem complexidade extra.
+Requisitos de implementação
+Escopo apenas Admin/Sompo;
+Não alterar:
+Risk Engine;
+fórmula;
+pesos;
+banco/schema;
+prepared inputs;
+regras de scoring;
+integrações;
+outras personas.
+Priorizar UI + estado local e filtragem sobre dados já carregados;
+Se algum filtro precisar de suporte server-side, fazer da forma mais simples possível e sem risco, mas evitar aumentar latência;
+Preservar paginação e navegação existentes;
+Preservar layout, identidade visual e responsividade desktop/mobile;
+Não criar loading desnecessário ao trocar filtro;
+Não disparar avaliações em loop.
+UX esperada
+filtros compactos, claros e fáceis de usar;
+boa leitura no desktop e mobile;
+estado vazio amigável quando nenhum item atender aos filtros;
+opção clara de limpar filtros;
+visual consistente com o restante do sistema.
+Entrega esperada
+
+Quero a resposta no formato abaixo, de forma objetiva:
+
+A. Arquivos alterados
+B. Filtros adicionados por tela
+C. Botão de voltar implementado?
+D. Impacto em performance
+E. Algum comportamento de score/risk engine foi alterado?
+F. Outras personas foram afetadas?
+G. Testes
+H. Build

@@ -1,0 +1,163 @@
+Faça uma AUDITORIA TRANSVERSAL SOMENTE LEITURA da latência atual das 4 personas:
+
+- Admin/Sompo
+- Gestor
+- Operador
+- Consultor
+
+NÃO altere arquivos.
+NÃO altere banco.
+NÃO altere Risk Engine.
+NÃO altere Vite.
+NÃO execute Git mutável.
+
+OBJETIVO:
+descobrir, no estado ATUAL do código após todas as otimizações,
+por que alguns dados/scores ainda demoram para aparecer.
+
+Não use conclusões antigas sem verificar o código atual.
+
+==================================================
+1. PARA CADA PERSONA
+==================================================
+
+Medir separadamente:
+
+A. tempo até Fase A / dados relacionais
+B. tempo até request V2 prioritário iniciar
+C. geocodificação
+D. clima
+E. altitude
+F. água/Overpass
+G. mapper total
+H. Risk Engine local
+I. retorno HTTP
+J. merge no frontend
+K. atualização do state React
+L. primeiro score visível
+M. KPIs agregados completos/parciais
+
+Formato:
+
+PERSONA | FASE A | PRIMEIRO SCORE | PRINCIPAL GARGALO
+
+==================================================
+2. TRACE END-TO-END
+==================================================
+
+Para a primeira operação prioritária de cada persona:
+
+operationId
+→ request
+→ autorização
+→ mapper
+→ enrichment
+→ Risk Engine
+→ response
+→ merge
+→ React state
+→ UI
+
+Marque cada etapa:
+
+OK
+LENTA
+FALHA
+NÃO UTILIZADA
+
+==================================================
+3. ENRICHMENT
+==================================================
+
+Informe quantas chamadas reais ocorrem para:
+
+- geocodificação
+- clima
+- altitude
+- hidrografia
+
+e quantas são eliminadas por:
+
+- cache
+- in-flight dedup
+- agrupamento por localização/data
+- cache negativo
+
+==================================================
+4. BLOQUEIOS DE UI
+==================================================
+
+Para cada persona, diga se existe algum componente que:
+
+- espera batch inteiro;
+- espera cobertura total;
+- espera todas as operações;
+- não atualiza por resultado individual;
+- mantém "Calculando..." mesmo após existir resultado válido.
+
+==================================================
+5. BATCH / MERGE
+==================================================
+
+Verifique especialmente:
+
+- batch solicitado mas não retornado;
+- Promise rejeitada abortando lote;
+- IDs divergentes;
+- resultado calculado sendo descartado;
+- coverage não atualizada;
+- stale state/closure;
+- duplicate request suppression incorreta;
+- loading que nunca vira false.
+
+==================================================
+6. COMPARAÇÃO
+==================================================
+
+Explique por que hoje:
+
+Admin:
+Gestor:
+Operador:
+Consultor:
+
+possuem tempos diferentes.
+
+Basear apenas no código e medições atuais.
+
+==================================================
+7. RESUMO FINAL
+==================================================
+
+Responder:
+
+A. Admin
+principal gargalo atual:
+
+B. Gestor
+principal gargalo atual:
+
+C. Operador
+principal gargalo atual:
+
+D. Consultor
+principal gargalo atual:
+
+E. gargalo transversal #1:
+
+F. gargalo transversal #2:
+
+G. existe problema no enrichment?
+SIM/NÃO
+
+H. existe problema após o enrichment (batch/merge/UI)?
+SIM/NÃO
+
+I. Vite influencia a latência funcional?
+SIM/NÃO
+
+J. quais 3 correções dariam maior ganho hoje?
+
+NÃO implemente nada.
+
+PARE AO FINAL.

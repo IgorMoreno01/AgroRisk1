@@ -1,0 +1,190 @@
+Faça uma AUDITORIA SOMENTE LEITURA do fluxo atual do Risk Engine V2.
+
+NÃO altere arquivos.
+NÃO altere banco.
+NÃO altere modelo.
+NÃO altere UI.
+NÃO altere Vite.
+NÃO execute Git mutável.
+
+OBJETIVO:
+
+Queremos remover as integrações externas do RUNTIME do Risk Engine,
+mas manter TODO o restante da arquitetura atual:
+
+- PostgreSQL e população
+- operação como unidade de risco
+- Risk Engine V2
+- ML atual
+- regras operacionais
+- pesos Sompo
+- score final
+- Baixo/Médio/Alto
+- personas
+- UI
+
+Apenas queremos deixar de depender de APIs externas no momento em que
+o usuário abre a tela ou solicita um score.
+
+==================================================
+1. FLUXO ATUAL
+==================================================
+
+Mapeie exatamente:
+
+Operação PostgreSQL
+→ mapper
+→ geocodificação
+→ clima
+→ altitude
+→ água
+→ inputs ML/regras
+→ Risk Engine
+→ score
+
+Informe arquivos e funções.
+
+==================================================
+2. INTEGRAÇÕES EXTERNAS
+==================================================
+
+Para cada uma:
+
+- Open-Meteo geocoding
+- Open-Meteo historical
+- OpenTopography
+- Open-Elevation
+- Overpass
+
+Informe:
+
+A. qual função chama;
+B. qual input produz;
+C. se participa do score;
+D. se existe fallback;
+E. se o valor já pode ser persistido/preparado antes.
+
+==================================================
+3. INPUTS DO ML
+==================================================
+
+Para as 17 features atuais, informe:
+
+FEATURE | ORIGEM ATUAL | PRECISA DE API EM RUNTIME? SIM/NÃO
+
+Marcar claramente quais hoje vêm de:
+
+- PostgreSQL
+- API externa
+- imputação oficial
+- synthetic_demo
+
+==================================================
+4. REGRAS OPERACIONAIS
+==================================================
+
+Audite:
+
+operationType
+waterDistance
+terrain
+
+Informe:
+
+- origem atual;
+- se depende de API runtime;
+- se pode ser armazenado/preparado previamente;
+- fallback atual.
+
+==================================================
+5. PONTO DE CORTE
+==================================================
+
+Identifique o menor ponto de alteração para que o runtime passe a ser:
+
+PostgreSQL
+→ inputs já preparados
+→ Risk Engine V2
+→ score
+
+sem chamadas externas durante a avaliação.
+
+NÃO implementar.
+
+==================================================
+6. O QUE PODEMOS PRESERVAR
+==================================================
+
+Confirme se podemos manter intactos:
+
+- model-v1.ts
+- evaluate.ts
+- operational-rules.ts
+- combine-scores.ts
+- pesos Sompo
+- thresholds
+- drivers
+- recomendações
+- personas
+- classificação final
+
+Responder SIM/NÃO para cada.
+
+==================================================
+7. DADOS PRÉ-PREPARADOS
+==================================================
+
+Informe qual seria a estrutura mínima necessária para guardar,
+por operação ou contexto equivalente:
+
+- inputs ML
+- waterDistance
+- terrain
+- proveniência
+- data de geração/atualização
+
+Não criar tabela ainda.
+
+Só propor a menor estrutura compatível com o projeto atual.
+
+==================================================
+8. IMPACTO
+==================================================
+
+Responder:
+
+A. quais APIs deixam de participar do runtime?
+
+B. quais inputs continuariam reais do PostgreSQL?
+
+C. quais inputs poderiam ser pré-calculados?
+
+D. quais ainda ficariam imputados/sintéticos?
+
+E. o score continuaria calculado pelo mesmo Risk Engine?
+SIM/NÃO
+
+F. o modelo continuaria real?
+SIM/NÃO
+
+G. qual parte do código precisaria ser alterada?
+
+H. qual parte poderia permanecer intacta?
+
+==================================================
+9. REGRA FINAL
+==================================================
+
+NÃO implemente nada.
+
+Não proponha nova arquitetura além do necessário.
+
+Queremos apenas desacoplar:
+
+APIs externas ao vivo
+
+do:
+
+cálculo runtime do Risk Engine.
+
+PARE AO FINAL.

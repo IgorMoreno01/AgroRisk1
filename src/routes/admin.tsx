@@ -1,31 +1,33 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout, Card } from "@/components/app-layout";
 import { RiskBadge, ScoreBar } from "@/components/risk-badge";
+import { type MachineStatus } from "@/lib/mock-data";
 import {
-  machines, clients, areas, operations, alerts, users,
-  type MachineStatus, type AlertCriticality, type AlertStatus,
-} from "@/lib/mock-data";
-import {
-  riskResultForMachine, scoreClientWithWeights, scoreAreaWithWeights,
-  scoreByOperationTypeWithWeights, riskResultForOperation, dominantFactorLabel,
-} from "@/lib/risk-score";
-import { rankMachines, rankAreas, machineDistribution, areaDistribution } from "@/lib/ranking";
-import {
-  allRecommendationsConsolidated, countByCategory, countByPriority,
-  recommendationsForOperation, type RecCategory, type RecPriority,
+  countByCategory, countByPriority,
+  type AdminRecRow, type RecCategory, type RecPriority,
 } from "@/lib/recommendations";
-import { Tractor, Building2, Map, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal, Save, CheckCircle2, Loader2, CloudSun, Wrench } from "lucide-react";
+import { Tractor, Building2, Map as MapIcon, ListChecks, Bell, Gauge, Trophy, Flame, Lightbulb, ShieldCheck, SlidersHorizontal, Search, RotateCcw, ArrowLeft } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { RequireProfile } from "@/components/require-profile";
-import { ProfileAlertsSection } from "@/components/profile-alerts-section";
-import { getProfileAlerts } from "@/lib/profile-alerts";
+import { ActionableAlertsList } from "@/components/actionable-alerts";
 import { useRiskConfig } from "@/lib/risk-config";
-import { Slider } from "@/components/ui/slider";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { RecommendationCard } from "@/components/recommendation-card";
-import { RiskExplanation } from "@/components/risk-explanation";
+import { AdminV2RiskPanel, recommendationForV2Result } from "@/components/admin-v2-risk-panel";
+import { getStoredSessionToken } from "@/lib/auth";
+import { evaluateAdminRiskBatch } from "@/lib/api/admin-dashboard.functions";
+import type { AdminDashboardSnapshot } from "@/lib/admin-dashboard-types";
+import { mergeAdminOperationRows } from "@/lib/admin-dashboard-merge";
+import { AdminOperationalOverview } from "@/components/admin-operational-overview";
+import { useActionableAlerts } from "@/lib/actionable-alerts";
+import {
+  ADMIN_PRIORITY_TIMEOUT_MESSAGE,
+  ADMIN_RISK_REQUEST_TIMEOUT_MS,
+  ADMIN_SECONDARY_TIMEOUT_MESSAGE,
+  createSingleFlightRequestController,
+  preserveAdminRiskSnapshot,
+  useAdminDashboardLoader,
+} from "@/lib/admin-dashboard-loader";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({ meta: [{ title: "AgroRisk · Admin / Sompo" }] }),
@@ -36,26 +38,367 @@ export const Route = createFileRoute("/admin")({
   ),
 });
 
-const tabs = [
-  { id: "visao-geral", label: "Visão geral",            icon: ShieldCheck, count: null as number | null },
-  { id: "rankings",    label: "Rankings de risco",      icon: Trophy,      count: 2 },
-  { id: "scores",      label: "Scores consolidados",    icon: Gauge,       count: 4 },
-  { id: "recs",        label: "Recomendações prioritárias", icon: Lightbulb, count: null as number | null },
-  { id: "clients",     label: "Clientes monitorados",   icon: Building2,   count: clients.length },
-  { id: "machines",    label: "Máquinas monitoradas",   icon: Tractor,     count: machines.length },
-  { id: "areas",       label: "Áreas e regiões",        icon: Map,         count: areas.length },
-  { id: "operations",  label: "Operações monitoradas", icon: ListChecks,   count: operations.length },
-  { id: "alerts",      label: "Central de alertas",     icon: Bell,        count: alerts.length },
-  { id: "motor-risco", label: "Configuração do motor de risco", icon: SlidersHorizontal, count: null as number | null },
-] as const;
+type TabId =
+  | "visao-geral"
+  | "rankings"
+  | "scores"
+  | "recs"
+  | "clients"
+  | "machines"
+  | "areas"
+  | "operations"
+  | "alerts"
+  | "motor-risco";
 
-type TabId = (typeof tabs)[number]["id"];
+const createTabs = (snapshot: AdminDashboardSnapshot, actionableAlertCount: number) => [
+  { id: "visao-geral" as const, label: "Visão geral", icon: ShieldCheck, count: null as number | null },
+  { id: "rankings" as const, label: "Rankings de risco", icon: Trophy, count: 2 },
+  { id: "scores" as const, label: "Scores consolidados", icon: Gauge, count: 4 },
+  { id: "recs" as const, label: "Recomendações prioritárias", icon: Lightbulb, count: null as number | null },
+  { id: "clients" as const, label: "Clientes monitorados", icon: Building2, count: snapshot.clients.length },
+  { id: "machines" as const, label: "Máquinas monitoradas", icon: Tractor, count: snapshot.machines.length },
+  { id: "areas" as const, label: "Áreas e regiões", icon: MapIcon, count: snapshot.areas.length },
+  { id: "operations" as const, label: "Operações monitoradas", icon: ListChecks, count: snapshot.operations.length },
+  { id: "alerts" as const, label: "Central de alertas", icon: Bell, count: actionableAlertCount },
+  { id: "motor-risco" as const, label: "Configuração do motor de risco", icon: SlidersHorizontal, count: null as number | null },
+];
+
+const AdminDashboardContext = createContext<{
+  snapshot: AdminDashboardSnapshot;
+  setSnapshot: React.Dispatch<React.SetStateAction<AdminDashboardSnapshot | null>>;
+  requestMoreRisk: (operationIds: string[]) => void;
+  riskErrorsByOperationId: Record<string, string>;
+  priorityPending: boolean;
+  priorityOperationId: string | null;
+  goToTab: (tab: TabId) => void;
+} | null>(null);
+
+function useAdminDashboardData() {
+  const state = useContext(AdminDashboardContext);
+  if (!state) throw new Error("AdminDashboardContext não foi inicializado.");
+  return state.snapshot;
+}
 
 function AdminPage() {
-  const { weights } = useRiskConfig();
+  const { snapshot, error, retry: retryDashboard } = useAdminDashboardLoader();
+  const [localRiskSnapshot, setRiskSnapshot] = useState<AdminDashboardSnapshot | null>(null);
+  // Phase A can render in the same pass as the loader; risk rows remain local
+  // and are overlaid once the priority/secondary evaluations resolve.
+  const riskSnapshot = localRiskSnapshot ?? snapshot;
+  const [priorityRiskError, setPriorityRiskError] = useState<string | null>(null);
+  const [priorityPublished, setPriorityPublished] = useState(false);
+  const [riskErrorsByOperationId, setRiskErrorsByOperationId] = useState<Record<string, string>>({});
+  const [priorityOperationId, setPriorityOperationId] = useState<string | null>(null);
+  const requestedRiskIds = useRef(new Set<string>());
+  const requestedRiskTabs = useRef(new Set<TabId>());
+  const riskSnapshotRef = useRef<AdminDashboardSnapshot | null>(null);
+  const priorityGeneration = useRef(0);
+  const priorityOperationIdRef = useRef<string | null>(null);
+  const secondaryGeneration = useRef(0);
+  const riskRequest = useRef(
+    createSingleFlightRequestController<Awaited<ReturnType<typeof evaluateAdminRiskBatch>>>(),
+  ).current;
+  const [riskRequestRevision, setRiskRequestRevision] = useState(0);
   const [tab, setTab] = useState<TabId>("visao-geral");
+  const { snapshot: actionableAlerts } = useActionableAlerts();
+  const tabs = useMemo(
+    () => (riskSnapshot ? createTabs(riskSnapshot, actionableAlerts.alerts.length) : []),
+    [riskSnapshot, actionableAlerts.alerts.length],
+  );
+  const priorityPending = Boolean(priorityOperationId) &&
+    !priorityPublished &&
+    priorityRiskError === null;
+
+  const mergeRiskRows = (rows: Parameters<typeof mergeAdminOperationRows>[1]) => {
+    setRiskSnapshot((current) => {
+      const next = current ? mergeAdminOperationRows(current, rows) : current;
+      riskSnapshotRef.current = next;
+      return next;
+    });
+  };
+
+  const requestPriorityRisk = (id: string) => {
+    const token = getStoredSessionToken();
+    if (!token) {
+      requestedRiskIds.current.delete(id);
+      setPriorityRiskError("Sessão Admin/Sompo não encontrada.");
+      setPriorityPublished(true);
+      return;
+    }
+    // Timeout aborts the transport before releasing this single-flight slot;
+    // retries therefore never overlap an older evaluation request.
+    if (riskRequest.inFlight) return;
+    requestedRiskIds.current.add(id);
+    const generation = ++priorityGeneration.current;
+    const isCurrentPriority = () =>
+      generation === priorityGeneration.current &&
+      priorityOperationIdRef.current === id &&
+      !!riskSnapshotRef.current?.operations.some((operation) => operation.id === id);
+    const request = riskRequest.start(
+      (signal) => evaluateAdminRiskBatch({
+        data: { token, operationIds: [id], limit: 1 },
+        signal,
+      }),
+      {
+        timeoutMs: ADMIN_RISK_REQUEST_TIMEOUT_MS,
+        onTimeout: () => {
+          requestedRiskIds.current.delete(id);
+          if (!isCurrentPriority()) {
+            setRiskRequestRevision((revision) => revision + 1);
+            return;
+          }
+          setPriorityRiskError(ADMIN_PRIORITY_TIMEOUT_MESSAGE);
+          // A failed priority item must not block all secondary tabs forever.
+          setPriorityPublished(true);
+          setRiskRequestRevision((revision) => revision + 1);
+        },
+      },
+    );
+    if (!request.started) return;
+    void request.promise.then(
+      (result) => {
+        if (!request.isCurrent() || !isCurrentPriority()) {
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        if (!result.ok) {
+          requestedRiskIds.current.delete(id);
+          setPriorityRiskError(result.error);
+          setPriorityPublished(true);
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        if (!result.operationRows.some((row) => row.operation.id === id)) {
+          requestedRiskIds.current.delete(id);
+          setPriorityRiskError(
+            result.riskErrorsByOperationId?.[id] ??
+              "Não foi possível calcular o risco da operação prioritária.",
+          );
+          setPriorityPublished(true);
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        requestedRiskIds.current.add(id);
+        mergeRiskRows(result.operationRows);
+        setPriorityRiskError(null);
+        setPriorityPublished(true);
+        setRiskRequestRevision((revision) => revision + 1);
+      },
+      (requestError) => {
+        if (!request.isCurrent() || !isCurrentPriority()) {
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        requestedRiskIds.current.delete(id);
+        setPriorityRiskError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Não foi possível calcular o risco da operação prioritária.",
+        );
+        setPriorityPublished(true);
+        setRiskRequestRevision((revision) => revision + 1);
+      },
+    );
+  };
 
   useEffect(() => {
+    if (!snapshot) return;
+    const previousSnapshot = riskSnapshotRef.current;
+    const nextSnapshot = preserveAdminRiskSnapshot(snapshot, previousSnapshot);
+    riskSnapshotRef.current = nextSnapshot;
+    setRiskSnapshot(nextSnapshot);
+    const operationIds = new Set(snapshot.operations.map((operation) => operation.id));
+    requestedRiskIds.current.forEach((id) => {
+      if (!operationIds.has(id)) requestedRiskIds.current.delete(id);
+    });
+
+    if (!previousSnapshot) {
+      requestedRiskIds.current.clear();
+      requestedRiskTabs.current.clear();
+      setPriorityRiskError(null);
+      setPriorityPublished(false);
+      setRiskErrorsByOperationId({});
+    }
+
+    if (snapshot.operations.length === 0) {
+      priorityGeneration.current += 1;
+      priorityOperationIdRef.current = null;
+      setPriorityOperationId(null);
+      setPriorityRiskError(null);
+      // Empty relational data is a resolved state, not an endless spinner.
+      setPriorityPublished(true);
+      return;
+    }
+    const id = [...snapshot.operations]
+      .sort((left, right) =>
+        (right.status === "Em andamento" ? 1 : 0) -
+          (left.status === "Em andamento" ? 1 : 0) ||
+        Date.parse(right.scheduledAt) - Date.parse(left.scheduledAt),
+      )
+      .map((operation) => operation.id)[0];
+    if (!id) return;
+    const isSamePriority = previousSnapshot !== null && priorityOperationId === id;
+    if (!isSamePriority) priorityGeneration.current += 1;
+    priorityOperationIdRef.current = id;
+    setPriorityOperationId(id);
+    // A refresh with the same priority keeps both its score and its failure
+    // state.  Only the first load or a newly selected operation starts work.
+    if (isSamePriority && priorityPublished) return;
+    if (isSamePriority && riskRequest.inFlight) return;
+    setPriorityRiskError(null);
+    setPriorityPublished(false);
+    requestPriorityRisk(id);
+  }, [snapshot, riskRequestRevision]);
+
+  const retryPriorityRisk = () => {
+    if (!riskSnapshot || !priorityOperationId || riskRequest.inFlight) return;
+    requestedRiskIds.current.delete(priorityOperationId);
+    setPriorityRiskError(null);
+    setPriorityPublished(false);
+    requestPriorityRisk(priorityOperationId);
+  };
+
+  const requestMoreRisk = (operationIds: string[]) => {
+    const token = getStoredSessionToken();
+    const ids = operationIds
+      .filter((id) => !requestedRiskIds.current.has(id))
+      .slice(0, 12);
+    if (ids.length === 0) return false;
+    if (!token) {
+      setRiskErrorsByOperationId((current) => ({
+        ...current,
+        ...Object.fromEntries(ids.map((id) => [id, "Sessão Admin/Sompo não encontrada."])),
+      }));
+      return false;
+    }
+    if (riskRequest.inFlight) return false;
+    ids.forEach((id) => requestedRiskIds.current.add(id));
+    setRiskErrorsByOperationId((current) => {
+      const next = { ...current };
+      ids.forEach((id) => delete next[id]);
+      return next;
+    });
+    const generation = ++secondaryGeneration.current;
+    const isCurrentSecondary = () =>
+      generation === secondaryGeneration.current &&
+      ids.every((id) => riskSnapshotRef.current?.operations.some((operation) => operation.id === id));
+    const request = riskRequest.start(
+      (signal) => evaluateAdminRiskBatch({
+        data: { token, operationIds: ids, limit: ids.length },
+        signal,
+      }),
+      {
+        timeoutMs: ADMIN_RISK_REQUEST_TIMEOUT_MS,
+        onTimeout: () => {
+          ids.forEach((id) => requestedRiskIds.current.delete(id));
+          if (!isCurrentSecondary()) {
+            setRiskRequestRevision((revision) => revision + 1);
+            return;
+          }
+          setRiskErrorsByOperationId((current) => ({
+            ...current,
+            ...Object.fromEntries(ids.map((id) => [id, ADMIN_SECONDARY_TIMEOUT_MESSAGE])),
+          }));
+          setRiskRequestRevision((revision) => revision + 1);
+        },
+      },
+    );
+    if (!request.started) {
+      ids.forEach((id) => requestedRiskIds.current.delete(id));
+      return false;
+    }
+    void request.promise.then(
+      (result) => {
+        if (!request.isCurrent() || !isCurrentSecondary()) {
+          if (generation === secondaryGeneration.current) {
+            ids.forEach((id) => requestedRiskIds.current.delete(id));
+          }
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        if (!result.ok) {
+          ids.forEach((id) => requestedRiskIds.current.delete(id));
+          setRiskErrorsByOperationId((current) => ({
+            ...current,
+            ...Object.fromEntries(ids.map((id) => [id, result.error])),
+          }));
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        const completed = new Set(result.operationRows.map((row) => row.operation.id));
+        const failed = result.failedOperationIds ?? ids.filter((id) => !completed.has(id));
+        failed.forEach((id) => requestedRiskIds.current.delete(id));
+        setRiskErrorsByOperationId((current) => {
+          const next = { ...current };
+          completed.forEach((id) => delete next[id]);
+          failed.forEach((id) => {
+            next[id] = result.riskErrorsByOperationId?.[id] ??
+              "Não foi possível calcular o risco desta operação.";
+          });
+          return next;
+        });
+        mergeRiskRows(result.operationRows);
+        setRiskRequestRevision((revision) => revision + 1);
+      },
+      (requestError) => {
+        if (!request.isCurrent() || !isCurrentSecondary()) {
+          if (generation === secondaryGeneration.current) {
+            ids.forEach((id) => requestedRiskIds.current.delete(id));
+          }
+          setRiskRequestRevision((revision) => revision + 1);
+          return;
+        }
+        ids.forEach((id) => requestedRiskIds.current.delete(id));
+        const message = requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível calcular o risco desta operação.";
+        setRiskErrorsByOperationId((current) => ({
+          ...current,
+          ...Object.fromEntries(ids.map((id) => [id, message])),
+        }));
+        setRiskRequestRevision((revision) => revision + 1);
+      },
+    );
+    return true;
+  };
+
+  // Secondary batches are gated until the priority result has been published.
+  useEffect(() => {
+    if (!riskSnapshot || !priorityPublished || tab === "visao-geral" || tab === "alerts" || tab === "motor-risco") return;
+    if (requestedRiskTabs.current.has(tab)) return;
+    const visibleMachines = tab === "areas"
+      ? riskSnapshot.machines.filter((machine) =>
+          riskSnapshot.areas.slice(0, 4).some((area) => area.id === machine.areaId))
+      : tab === "clients"
+        ? riskSnapshot.machines.filter((machine) =>
+            riskSnapshot.clients.slice(0, 2).some((client) => client.id === machine.clientId))
+        : riskSnapshot.machines.slice(0, 12);
+    const needsCurrentMachineRisk =
+      tab === "machines" || tab === "rankings" || tab === "scores" ||
+      tab === "areas" || tab === "clients" || tab === "recs";
+    const operations = needsCurrentMachineRisk
+      ? visibleMachines.flatMap((machine) =>
+          riskSnapshot.operations
+            .filter((operation) => operation.machineId === machine.id)
+            .sort((left, right) =>
+              (right.status === "Em andamento" ? 1 : 0) -
+                (left.status === "Em andamento" ? 1 : 0) ||
+              Date.parse(right.scheduledAt) - Date.parse(left.scheduledAt) ||
+              left.id.localeCompare(right.id),
+            )
+            .slice(0, 1),
+        )
+      : riskSnapshot.operations;
+    const ids = operations
+      .map((operation) => operation.id)
+      .filter((id) => !requestedRiskIds.current.has(id))
+      .slice(0, 12);
+    if (ids.length === 0) return;
+    if (requestMoreRisk(ids)) requestedRiskTabs.current.add(tab);
+  }, [tab, riskSnapshot, priorityPublished, riskRequestRevision]);
+
+  useEffect(() => {
+    if (!riskSnapshot) return;
     const applyHash = () => {
       const h = window.location.hash.replace(/^#/, "");
       if (!h || h === "topo") { setTab("visao-geral"); return; }
@@ -66,20 +409,82 @@ function AdminPage() {
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, []);
+  }, [riskSnapshot, tabs]);
 
-  const current = tabs.find((t) => t.id === tab)!;
-  const currentCount = tab === "recs"
-    ? allRecommendationsConsolidated(weights).length
-    : current.count;
+   if (!riskSnapshot) {
+    return (
+      <AppLayout
+        title="Dashboard da Sompo"
+        subtitle="Visão consolidada dos clientes, frota, áreas, riscos e recomendações do MVP"
+      >
+        <Card>
+          <div className="flex items-center justify-between gap-3 text-sm font-medium text-foreground">
+            <span>{error ?? "Carregando dados relacionais do Admin/Sompo..."}</span>
+            {error && (
+              <button
+                type="button"
+                onClick={retryDashboard}
+                className="rounded-md border border-border px-3 py-1 text-xs font-medium"
+              >
+                Tentar novamente
+              </button>
+            )}
+          </div>
+        </Card>
+      </AppLayout>
+    );
+  }
+
+   const current = tabs.find((t) => t.id === tab)!;
+  const currentCount = tab === "recs" ? riskSnapshot.operationRows.length : current.count;
   const Icon = current.icon;
+   const remainingRiskIds = riskSnapshot.operations
+     .map((operation) => operation.id)
+     .filter((id) => !requestedRiskIds.current.has(id) && !riskErrorsByOperationId[id])
+     .slice(0, 12);
 
-  return (
-    <AppLayout
+   return (
+        <AdminDashboardContext.Provider
+          value={{
+            snapshot: riskSnapshot,
+            setSnapshot: setRiskSnapshot,
+            requestMoreRisk,
+            riskErrorsByOperationId,
+            priorityPending,
+            priorityOperationId,
+           goToTab: setTab,
+          }}
+        >
+      <AppLayout
       title="Dashboard da Sompo"
       subtitle="Visão consolidada dos clientes, frota, áreas, riscos e recomendações do MVP"
     >
+      {error && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+          <span>Atualização relacional não concluída: {error} Os dados exibidos permanecem disponíveis.</span>
+          <button
+            type="button"
+            onClick={retryDashboard}
+            className="shrink-0 rounded-md border border-warning/40 px-3 py-1 font-medium"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      )}
       <div id="topo" className="scroll-mt-20" />
+
+      <div
+        className={cn(
+          "mb-4 rounded-lg border px-3 py-2 text-xs",
+           riskSnapshot.degraded
+            ? "border-warning/40 bg-warning/10 text-warning-foreground"
+            : "border-success/30 bg-success/5 text-success",
+        )}
+      >
+         {riskSnapshot.degraded
+          ? "Dados relacionais indisponíveis no momento — a visualização pode estar parcial."
+           : `Dados atualizados · Risk Engine V2 ativo · Pesos Sompo: ML ${riskSnapshot.weights.ml}% / Operacional ${riskSnapshot.weights.operationalRules}%.`}
+      </div>
 
       <div className="mb-5 flex items-center gap-3 border-b border-border pb-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -97,6 +502,22 @@ function AdminPage() {
       </div>
 
       <div id={tab} className="scroll-mt-20">
+         {priorityRiskError && (
+           <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+              <span>{priorityOperationId}: {priorityRiskError}</span>
+             <button type="button" onClick={retryPriorityRisk} className="rounded-md border border-danger/40 px-3 py-1 text-xs font-medium">
+               Tentar novamente
+             </button>
+           </div>
+         )}
+          {Object.entries(riskErrorsByOperationId).map(([operationId, message]) => (
+            <div key={operationId} className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+              <span>{operationId}: {message}</span>
+              <button type="button" onClick={() => requestMoreRisk([operationId])} className="rounded-md border border-danger/40 px-3 py-1 text-xs font-medium">
+                Tentar novamente
+              </button>
+            </div>
+          ))}
         {tab === "visao-geral" && <OverviewPanel />}
         {tab === "rankings" && <RankingsPanel />}
         {tab === "scores" && <ScoresPanel />}
@@ -106,211 +527,196 @@ function AdminPage() {
         {tab === "areas" && <Card className="p-0"><AreasTable /></Card>}
         {tab === "operations" && <Card className="p-0"><OperationsTable /></Card>}
         {tab === "alerts" && (
-          <div id="central-alertas" className="space-y-4 scroll-mt-20">
-            <Card className="p-0"><AlertsTable /></Card>
-            <ProfileAlertsSection bundle={getProfileAlerts("admin")} />
+          <div className="space-y-4 scroll-mt-20">
+            <ActionableAlertsList sectionId="central-alertas" title="Central de alertas" />
           </div>
         )}
         {tab === "motor-risco" && <RiskEngineConfigurationPanel />}
+        {priorityPublished && !["visao-geral", "alerts", "motor-risco"].includes(tab) && remainingRiskIds.length > 0 && (
+          <div className="mt-4">
+            <button type="button" onClick={() => requestMoreRisk(remainingRiskIds)} className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted">
+              Carregar mais itens visíveis
+            </button>
+          </div>
+        )}
       </div>
-    </AppLayout>
+      </AppLayout>
+    </AdminDashboardContext.Provider>
   );
 }
 
 function RiskEngineConfigurationPanel() {
-  const { configuration, status, error, isSaving, saveWeights } = useRiskConfig();
-  const [climateWeight, setClimateWeight] = useState(configuration.climate);
-  const [savedMessage, setSavedMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    setClimateWeight(configuration.climate);
-  }, [configuration.climate]);
-
-  const operationalWeight = 100 - climateWeight;
-  const scenario = operations.find((operation) => operation.status === "Em andamento") ?? operations[0];
-  const result = riskResultForOperation(scenario, {
-    climate: climateWeight,
-    operational: operationalWeight,
-  });
-  const scenarioRecommendations = recommendationsForOperation(scenario, "admin", {
-    weights: { climate: climateWeight, operational: operationalWeight },
-    result,
-  });
-  const updatedLabel = configuration.updatedAt
-    ? new Intl.DateTimeFormat("pt-BR", {
-      dateStyle: "short",
-      timeStyle: "short",
-      timeZone: "America/Sao_Paulo",
-    }).format(new Date(configuration.updatedAt))
-    : "Padrão inicial 50/50";
-
-  const handleSave = async () => {
-    const save = await saveWeights(climateWeight);
-    if (save.ok) {
-      setSavedMessage("Pesos atualizados para toda a demonstração.");
-    } else {
-      setSavedMessage(null);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <Card className="border-primary/30 bg-primary/5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <SlidersHorizontal className="h-4 w-4 text-primary" />
-              Configuração do Motor de Risco
-            </div>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Ajuste apenas a combinação dos componentes existentes. Esta configuração é
-              exclusiva de Admin/Sompo e não aciona treinamento ou modelo de ML.
-            </p>
-          </div>
-          <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground">
-            Atualizado: {updatedLabel}
-          </span>
-        </div>
+  const data = useAdminDashboardData();
+  const dashboardContext = useContext(AdminDashboardContext);
+  const evaluation = data.operationRows.find(
+    (row) => row.operation.id === dashboardContext?.priorityOperationId,
+  )?.evaluation;
+  if (!evaluation) {
+    return (
+      <Card>
+        <div className="text-sm font-semibold text-foreground">Configuração do motor de risco</div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {dashboardContext?.priorityPending
+            ? "Calculando temporário para a operação prioritária."
+            : "Não disponível: a operação prioritária não possui avaliação V2."}
+        </p>
       </Card>
-
-      {status === "loading" && (
-        <Alert className="border-info/30 bg-info/5">
-          <Loader2 className="h-4 w-4 animate-spin text-info" />
-          <AlertTitle>Carregando configuração</AlertTitle>
-          <AlertDescription>O padrão 50/50 continua visível até a leitura ser concluída.</AlertDescription>
-        </Alert>
-      )}
-      {error && (
-        <Alert variant="destructive">
-          <AlertTitle>Não foi possível concluir a última ação</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      {savedMessage && (
-        <Alert className="border-success/40 bg-success/5">
-          <CheckCircle2 className="h-4 w-4 text-success" />
-          <AlertTitle>Configuração salva</AlertTitle>
-          <AlertDescription>{savedMessage}</AlertDescription>
-        </Alert>
-      )}
-
-      <div className="grid gap-4 xl:grid-cols-5">
-        <Card className="xl:col-span-2">
-          <div className="flex items-center gap-2">
-            <CloudSun className="h-4 w-4 text-info" />
-            <h2 className="text-sm font-semibold text-foreground">Pesos do cenário</h2>
-          </div>
-          <div className="mt-6">
-            <div className="mb-3 flex items-end justify-between">
-              <div>
-                <div className="text-sm font-medium text-foreground">Peso climático</div>
-                <div className="text-xs text-muted-foreground">Chuva e condição climática disponível</div>
-              </div>
-              <span className="text-3xl font-semibold tabular-nums text-primary">{climateWeight}%</span>
-            </div>
-            <Slider
-              min={0}
-              max={100}
-              step={1}
-              value={[climateWeight]}
-              onValueChange={([value]) => {
-                setClimateWeight(value);
-                setSavedMessage(null);
-              }}
-              aria-label="Peso climático"
-            />
-            <div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>0%</span><span>100%</span></div>
-          </div>
-
-          <div className="mt-6 rounded-lg border border-border bg-muted/30 p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Wrench className="h-4 w-4 text-warning" /> Peso operacional
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Água, tipo de operação, histórico e terreno.
-                </div>
-              </div>
-              <span className="text-2xl font-semibold tabular-nums text-foreground">{operationalWeight}%</span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving || climateWeight === configuration.climate}
-            className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {isSaving ? "Salvando…" : "Salvar pesos"}
-          </button>
-          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-            Os pesos ficam em memória no servidor durante esta demonstração e voltam ao padrão após reinício do workflow.
-          </p>
-        </Card>
-
-        <Card className="xl:col-span-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">Simulação explicável</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Cenário demonstrativo baseado na operação {scenario.id}; os dados do MVP podem conter fallback simulado.
-              </p>
-            </div>
-            <RiskBadge score={result.finalScore} />
-          </div>
-          <div className="mt-5">
-            <RiskExplanation
-              result={result}
-              weights={{ climate: climateWeight, operational: operationalWeight }}
-              recommendation={scenarioRecommendations[0]}
-              audience="admin"
-            />
-          </div>
-          <div className="mt-5">
-            <div className="mb-2 text-sm font-semibold text-foreground">Recomendações do cenário</div>
-            <div className="space-y-2">
-              {scenarioRecommendations.map((recommendation) => (
-                <RecommendationCard key={recommendation.id} rec={recommendation} />
-              ))}
-            </div>
-          </div>
-        </Card>
-      </div>
-    </div>
+    );
+  }
+  return (
+    <AdminV2RiskPanel
+      evaluation={evaluation}
+      clients={data.clients}
+      operations={data.operations}
+      operationRows={data.operationRows}
+    />
   );
 }
 
 function OverviewPanel() {
-  const { weights } = useRiskConfig();
-  const mDist = machineDistribution({}, weights);
-  const aDist = areaDistribution({}, weights);
-  const avgScore = Math.round(
-    machines.reduce((acc, m) => acc + riskResultForMachine(m.id, weights).finalScore, 0) / machines.length,
+  const data = useAdminDashboardData();
+  const dashboardContext = useContext(AdminDashboardContext);
+  const mDist = data.machineDistribution;
+  const aDist = data.areaDistribution;
+  const priorityRisk = data.operationRows.find(
+    (row) => row.operation.id === dashboardContext?.priorityOperationId,
   );
-  const criticalAlerts = alerts.filter((a) => a.criticality === "alta").length;
-  const opsAtRisk = operations.filter((o) => riskResultForOperation(o, weights).finalScore >= 71).length;
-  const topRecs = allRecommendationsConsolidated(weights)
+  const hasRiskRows = data.operationRows.length > 0;
+  const partialSuffix = data.riskCoverageComplete ? "" : " · Parcial";
+  const averageScore = data.riskCoverageComplete && data.machineRows.length
+    ? Math.round(data.machineRows.reduce((sum, row) => sum + row.score, 0) / data.machineRows.length)
+    : data.operationRows.length
+      ? Math.round(data.operationRows.reduce((sum, row) => sum + row.score, 0) / data.operationRows.length)
+    : null;
+  const operationsAtRisk = data.operationRows.filter((row) => row.score >= 71).length;
+  const evaluatedDistribution = {
+    alto: data.operationRows.filter((row) => row.score >= 71).length,
+    medio: data.operationRows.filter((row) => row.score >= 41 && row.score < 71).length,
+    baixo: data.operationRows.filter((row) => row.score < 41).length,
+  };
+  const { snapshot: actionableAlerts } = useActionableAlerts();
+  const criticalAlerts = actionableAlerts.alerts.filter((alert) => alert.severity === "critical").length;
+  const priorityResult = priorityRisk?.evaluation.result;
+  const dominantDriver = priorityResult
+    ? priorityResult.drivers.find(
+      (driver) =>
+        priorityResult.dominantComponent === "balanced" ||
+        driver.source === priorityResult.dominantComponent,
+    )
+    : undefined;
+  const recommendation = priorityResult
+    ? recommendationForV2Result(
+      priorityResult as Parameters<typeof recommendationForV2Result>[0],
+    )
+    : null;
+  const topRecs = adminV2RecommendationRows(data)
     .filter((r) => r.rec.priority === "alta")
     .slice(0, 4);
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+        Totais gerais da carteira · filtros abaixo afetam apenas as listas
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Máquinas monitoradas" value={String(machines.length)} tone="info" />
-        <SummaryCard label="Operações em risco" value={String(opsAtRisk)} tone="warning" />
-        <SummaryCard label="Score médio da frota" value={String(avgScore)} tone={avgScore >= 71 ? "danger" : avgScore >= 41 ? "warning" : "success"} />
+        <SummaryCard label="Clientes monitorados" value={String(data.clients.length)} tone="info" />
+        <SummaryCard label="Máquinas monitoradas" value={String(data.machines.length)} tone="info" />
+        <SummaryCard label="Operações monitoradas" value={String(data.operations.length)} tone="info" />
+        <SummaryCard
+          label="Operações em risco"
+          value={hasRiskRows ? `${operationsAtRisk}${partialSuffix}` : dashboardContext?.priorityPending ? "Calculando temporário" : "Não disponível"}
+          tone="warning"
+        />
+        <SummaryCard
+          label={data.riskCoverageComplete ? "Score médio da frota" : "Média das operações avaliadas"}
+          value={averageScore === null ? "Não disponível" : `${averageScore}${partialSuffix}`}
+          tone="info"
+        />
+        <SummaryCard label="Score prioritário" value={priorityRisk ? String(priorityRisk.score) : dashboardContext?.priorityPending ? "Calculando temporário" : "Não disponível"} tone="success" />
         <SummaryCard label="Alertas críticos" value={String(criticalAlerts)} tone="danger" />
       </div>
 
+      <AdminOperationalOverview overview={data.operationalOverview} />
+
+      {priorityRisk && priorityResult && recommendation ? (
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <Card className="border-primary/30 bg-primary/5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary">
+                  Resumo de risco prioritário
+                </div>
+                <div className="mt-2 text-5xl font-semibold tabular-nums text-foreground">
+                  {priorityRisk.score}<span className="ml-1 text-lg font-medium text-muted-foreground">/100</span>
+                </div>
+                <p className="mt-2 text-sm font-medium text-foreground">
+                  {priorityRisk.operation.id} · {priorityRisk.operation.type}
+                </p>
+              </div>
+              <RiskBadge score={priorityRisk.score} />
+            </div>
+            <div className="mt-4 grid gap-2 border-t border-primary/15 pt-3 sm:grid-cols-2">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Componente dominante</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">
+                  {priorityResult.dominantComponent === "ml" ? "Modelo ML" : priorityResult.dominantComponent === "operational_rules" ? "Operacional" : "Equilibrado"}
+                </div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Principal driver</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">
+                  {dominantDriver?.label ?? "Não disponível"}
+                </div>
+              </div>
+            </div>
+          </Card>
+          <Card className="border-warning/30 bg-warning/5">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.15em] text-warning-foreground">
+              Recomendação prioritária
+            </div>
+            <div className="mt-2 text-base font-semibold text-foreground">{recommendation.title}</div>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{recommendation.description}</p>
+            <div className="mt-3 border-t border-warning/20 pt-3 text-xs text-muted-foreground">
+              Fator: <span className="font-medium text-foreground">{recommendation.factor}</span>
+            </div>
+          </Card>
+        </div>
+      ) : (
+        <Card className="border-border bg-muted/20">
+          <div className="text-sm font-semibold text-foreground">Resumo de risco prioritário</div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {dashboardContext?.priorityPending
+              ? "Calculando temporário para a operação prioritária."
+              : "Não disponível: a operação prioritária não possui avaliação V2."}
+          </p>
+        </Card>
+      )}
+
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
-          <div className="mb-3 text-sm font-semibold text-foreground">Distribuição da frota por risco</div>
+          <div className="mb-1 text-sm font-semibold text-foreground">
+            {data.riskCoverageComplete ? "Distribuição da frota por risco" : "Distribuição das operações avaliadas"}
+          </div>
+          {!data.riskCoverageComplete && (
+            <div className="mb-3 text-xs text-muted-foreground">
+              {data.operationRows.length} de {data.operations.length} operações avaliadas
+            </div>
+          )}
           <div className="space-y-2 text-sm">
-            <DistRow label="Risco alto"  mq={mDist.alto}  ar={aDist.alto}  tone="danger" />
-            <DistRow label="Risco médio" mq={mDist.medio} ar={aDist.medio} tone="warning" />
-            <DistRow label="Risco baixo" mq={mDist.baixo} ar={aDist.baixo} tone="success" />
+             {data.riskCoverageComplete ? (
+               <>
+                 <DistRow label="Risco alto" mq={mDist.total ? mDist.alto : "Não disponível"} ar={aDist.total ? aDist.alto : "Não disponível"} tone="danger" />
+                 <DistRow label="Risco médio" mq={mDist.total ? mDist.medio : "Não disponível"} ar={aDist.total ? aDist.medio : "Não disponível"} tone="warning" />
+                 <DistRow label="Risco baixo" mq={mDist.total ? mDist.baixo : "Não disponível"} ar={aDist.total ? aDist.baixo : "Não disponível"} tone="success" />
+               </>
+             ) : (
+               <>
+                 <DistRow label="Risco alto" mq={evaluatedDistribution.alto} ar="—" tone="danger" primaryLabel="operações" secondaryLabel="" />
+                 <DistRow label="Risco médio" mq={evaluatedDistribution.medio} ar="—" tone="warning" primaryLabel="operações" secondaryLabel="" />
+                 <DistRow label="Risco baixo" mq={evaluatedDistribution.baixo} ar="—" tone="success" primaryLabel="operações" secondaryLabel="" />
+               </>
+             )}
           </div>
         </Card>
 
@@ -328,7 +734,9 @@ function OverviewPanel() {
               </div>
             ))}
             {topRecs.length === 0 && (
-              <div className="text-sm text-muted-foreground">Sem recomendações de prioridade alta no momento.</div>
+              <div className="text-sm text-muted-foreground">
+                {data.riskCoverageComplete ? "Sem recomendações de prioridade alta no momento." : "Recomendações parciais."}
+              </div>
             )}
           </div>
         </Card>
@@ -337,7 +745,7 @@ function OverviewPanel() {
   );
 }
 
-function DistRow({ label, mq, ar, tone }: { label: string; mq: number; ar: number; tone: "danger" | "warning" | "success" }) {
+function DistRow({ label, mq, ar, tone, primaryLabel = "máq.", secondaryLabel = "áreas" }: { label: string; mq: number | string; ar: number | string; tone: "danger" | "warning" | "success"; primaryLabel?: string; secondaryLabel?: string }) {
   const dot = { danger: "bg-danger", warning: "bg-warning", success: "bg-success" }[tone];
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2">
@@ -346,27 +754,33 @@ function DistRow({ label, mq, ar, tone }: { label: string; mq: number; ar: numbe
         <span className="text-foreground">{label}</span>
       </div>
       <div className="flex items-center gap-4 text-xs text-muted-foreground tabular-nums">
-        <span><b className="text-foreground">{mq}</b> máq.</span>
-        <span><b className="text-foreground">{ar}</b> áreas</span>
+        <span><b className="text-foreground">{mq}</b> {primaryLabel}</span>
+        {secondaryLabel && <span><b className="text-foreground">{ar}</b> {secondaryLabel}</span>}
       </div>
     </div>
   );
 }
 
 function RankingsPanel() {
-  const { weights } = useRiskConfig();
-  const mRows = rankMachines({}, weights);
-  const aRows = rankAreas({}, weights);
-  const mDist = machineDistribution({}, weights);
-  const aDist = areaDistribution({}, weights);
+  const data = useAdminDashboardData();
+  const mRows = data.machineRows;
+  const aRows = data.areaRows;
+  const mDist = data.machineDistribution;
+  const aDist = data.areaDistribution;
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <DistCard label="Risco alto"  alto={mDist.alto}  medio={aDist.alto}  tone="danger" />
-        <DistCard label="Risco médio" alto={mDist.medio} medio={aDist.medio} tone="warning" />
-        <DistCard label="Risco baixo" alto={mDist.baixo} medio={aDist.baixo} tone="success" />
-      </div>
+      {data.riskCoverageComplete ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <DistCard label="Risco alto"  alto={mDist.alto}  medio={aDist.alto}  tone="danger" />
+          <DistCard label="Risco médio" alto={mDist.medio} medio={aDist.medio} tone="warning" />
+          <DistCard label="Risco baixo" alto={mDist.baixo} medio={aDist.baixo} tone="success" />
+        </div>
+      ) : (
+        <Card><div className="text-sm text-muted-foreground">
+          {data.operationRows.length ? "Distribuição parcial — aguardando os demais itens visíveis." : "Distribuição não disponível."}
+        </div></Card>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card className="p-0">
@@ -454,20 +868,41 @@ const priorityTone: Record<RecPriority, string> = {
 };
 
 function RecsPanel() {
-  const { weights } = useRiskConfig();
-  const rows = allRecommendationsConsolidated(weights);
+  const data = useAdminDashboardData();
+  const [query, setQuery] = useState("");
+  const [priority, setPriority] = useState<RecPriority | "todas">("todas");
+  const [category, setCategory] = useState<RecCategory | "todas">("todas");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [audience, setAudience] = useState("todos");
+  const allRows = adminV2RecommendationRows(data);
+  const rows = allRows.filter((row) =>
+    (!query || `${row.clientName} ${row.target} ${row.rec.title}`.toLowerCase().includes(query.toLowerCase())) &&
+    (priority === "todas" || row.rec.priority === priority) &&
+    (category === "todas" || row.rec.category === category) &&
+    (audience === "todos" || row.rec.audience === audience) &&
+    matchesRiskFilter(row.score, risk),
+  );
   const byCat = countByCategory(rows);
   const byPrio = countByPriority(rows);
+  const partial = !data.riskCoverageComplete;
 
   const catEntries = Object.entries(byCat).filter(([, n]) => n > 0) as [RecCategory, number][];
 
   return (
     <div className="space-y-6">
+      <FilterBar query={query} onQueryChange={setQuery} placeholder="Buscar cliente, equipamento ou recomendação" onReset={() => { setQuery(""); setPriority("todas"); setCategory("todas"); setRisk("todos"); setAudience("todos"); }} hasFilters={Boolean(query) || priority !== "todas" || category !== "todas" || risk !== "todos" || audience !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={setRisk} />
+        <select aria-label="Prioridade" value={priority} onChange={(event) => setPriority(event.target.value as RecPriority | "todas")} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+          <option value="todas">Todas as prioridades</option><option value="alta">Alta</option><option value="média">Média</option><option value="baixa">Baixa</option>
+        </select>
+        <select aria-label="Categoria da recomendação" value={category} onChange={(event) => setCategory(event.target.value as RecCategory | "todas")} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todas">Todas as categorias</option>{Array.from(new Set(allRows.map((row) => row.rec.category))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <select aria-label="Destino da recomendação" value={audience} onChange={(event) => setAudience(event.target.value)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os destinos</option>{Array.from(new Set(allRows.map((row) => row.rec.audience))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+      </FilterBar>
       <div className="grid gap-3 sm:grid-cols-4">
-        <SummaryCard label="Recomendações geradas" value={String(rows.length)} tone="info" />
-        <SummaryCard label="Prioridade alta"  value={String(byPrio.alta)}    tone="danger" />
-        <SummaryCard label="Prioridade média" value={String(byPrio["média"])} tone="warning" />
-        <SummaryCard label="Prioridade baixa" value={String(byPrio.baixa)}   tone="success" />
+        <SummaryCard label="Recomendações geradas" value={`${rows.length}${partial ? " · Parcial" : ""}`} tone="info" />
+        <SummaryCard label="Prioridade alta"  value={`${byPrio.alta}${partial ? " · Parcial" : ""}`} tone="danger" />
+        <SummaryCard label="Prioridade média" value={`${byPrio["média"]}${partial ? " · Parcial" : ""}`} tone="warning" />
+        <SummaryCard label="Prioridade baixa" value={`${byPrio.baixa}${partial ? " · Parcial" : ""}`} tone="success" />
       </div>
 
       <Card>
@@ -484,7 +919,7 @@ function RecsPanel() {
 
       <Card className="p-0">
         <div className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
-          Recomendações consolidadas ({rows.length})
+          Recomendações {partial ? "parciais" : "consolidadas"} ({rows.length})
         </div>
         <TableShell headers={["Cliente / Fazenda", "Alvo", "Score", "Recomendação", "Categoria", "Prioridade", "Destino", "Risco"]}>
           {rows.map((r, i) => (
@@ -510,9 +945,28 @@ function RecsPanel() {
             </tr>
           ))}
         </TableShell>
+        {rows.length === 0 && <EmptyFilterState />}
       </Card>
     </div>
   );
+}
+
+function adminV2RecommendationRows(data: AdminDashboardSnapshot): AdminRecRow[] {
+  const priorityOrder: Record<RecPriority, number> = { alta: 0, "média": 1, baixa: 2 };
+  return data.operationRows
+    .map((row): AdminRecRow => ({
+      clientName: row.evaluation.context.client.name,
+      target: row.evaluation.context.machine.code,
+      targetType: "equipamento",
+      score: row.score,
+      level: row.level,
+      rec: recommendationForV2Result(row.evaluation.result),
+    }))
+    .sort((left, right) =>
+      priorityOrder[left.rec.priority] - priorityOrder[right.rec.priority] ||
+      right.score - left.score ||
+      left.target.localeCompare(right.target),
+    );
 }
 
 function SummaryCard({
@@ -539,6 +993,56 @@ function TH({ children }: { children: React.ReactNode }) {
 }
 function TD({ children, className }: { children: React.ReactNode; className?: string }) {
   return <td className={cn("px-4 py-3 text-sm", className)}>{children}</td>;
+}
+
+function FilterBar({
+  query, onQueryChange, placeholder, onReset, hasFilters, children,
+}: {
+  query: string; onQueryChange: (value: string) => void; placeholder: string;
+  onReset: () => void; hasFilters: boolean; children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-center">
+      <div className="relative min-w-0 flex-1">
+        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={placeholder} className="h-9 w-full rounded-md border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground" />
+      </div>
+      {children}
+      <button type="button" onClick={onReset} disabled={!hasFilters} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40">
+        <RotateCcw className="h-3.5 w-3.5" /> Limpar
+      </button>
+    </div>
+  );
+}
+
+function EmptyFilterState() {
+  return <div className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item corresponde aos filtros atuais. Limpe os filtros para ver todos os dados.</div>;
+}
+
+type RiskFilter = "todos" | "alto" | "medio" | "baixo" | "pendente";
+type EvaluationFilter = "todos" | "avaliado" | "pendente";
+
+function matchesRiskFilter(score: number | undefined, filter: RiskFilter) {
+  if (filter === "todos") return true;
+  if (filter === "pendente") return score === undefined;
+  if (score === undefined) return false;
+  return filter === "alto" ? score >= 71 : filter === "medio" ? score >= 41 && score < 71 : score < 41;
+}
+
+function RiskFilterSelect({ value, onChange }: { value: RiskFilter; onChange: (value: RiskFilter) => void }) {
+  return (
+    <select aria-label="Risco" value={value} onChange={(event) => onChange(event.target.value as RiskFilter)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+      <option value="todos">Todos os riscos</option><option value="alto">Risco alto</option><option value="medio">Risco médio</option><option value="baixo">Risco baixo</option><option value="pendente">Pendente</option>
+    </select>
+  );
+}
+
+function EvaluationFilterSelect({ value, onChange }: { value: EvaluationFilter; onChange: (value: EvaluationFilter) => void }) {
+  return (
+    <select aria-label="Avaliação" value={value} onChange={(event) => onChange(event.target.value as EvaluationFilter)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+      <option value="todos">Todas as avaliações</option><option value="avaliado">Avaliado</option><option value="pendente">Pendente</option>
+    </select>
+  );
 }
 
 function TableShell({ headers, children }: { headers: string[]; children: React.ReactNode }) {
@@ -574,11 +1078,7 @@ const machineStatusTone: Record<MachineStatus, "green" | "blue" | "gray" | "red"
 
 // ---------- Painel de Scores ----------
 function ScoresPanel() {
-  const { weights } = useRiskConfig();
-  const machineRows = machines.map((m) => ({ m, b: riskResultForMachine(m.id, weights) }));
-  const clientRows  = clients.map((c) => scoreClientWithWeights(c.id, weights));
-  const areaRows    = areas.map((a) => scoreAreaWithWeights(a.id, weights));
-  const opTypeRows  = scoreByOperationTypeWithWeights(weights);
+  const data = useAdminDashboardData();
 
   return (
     <div className="grid gap-4 xl:grid-cols-2">
@@ -587,13 +1087,13 @@ function ScoresPanel() {
           Scores por máquina
         </div>
         <TableShell headers={["Equipamento", "Cliente", "Score", "Principal fator", "Risco"]}>
-          {machineRows.map(({ m, b }) => (
-            <tr key={m.id} className="hover:bg-muted/40">
-              <TD><div className="font-medium text-foreground">{m.name}</div><div className="text-xs text-muted-foreground">{m.id}</div></TD>
-              <TD className="text-xs text-muted-foreground">{m.client}</TD>
-               <TD><ScoreBar score={b.finalScore} /></TD>
-               <TD className="text-xs text-muted-foreground">{dominantFactorLabel(b.dominantFactor)}</TD>
-               <TD><RiskBadge score={b.finalScore} /></TD>
+          {data.machineRows.map((row) => (
+            <tr key={row.machine.id} className="hover:bg-muted/40">
+              <TD><div className="font-medium text-foreground">{row.machine.name}</div><div className="text-xs text-muted-foreground">{row.machine.id}</div></TD>
+              <TD className="text-xs text-muted-foreground">{row.machine.client}</TD>
+               <TD><ScoreBar score={row.score} /></TD>
+               <TD className="text-xs text-muted-foreground">{row.mainFactor}</TD>
+               <TD><RiskBadge score={row.score} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -604,13 +1104,13 @@ function ScoresPanel() {
           Scores por cliente / fazenda
         </div>
         <TableShell headers={["Cliente", "Score médio", "Máq. risco alto", "Área crítica", "Risco"]}>
-          {clientRows.map((c) => (
-            <tr key={c.clientId} className="hover:bg-muted/40">
-              <TD className="font-medium text-foreground">{c.name}</TD>
-              <TD><ScoreBar score={c.score} /></TD>
-              <TD className="tabular-nums">{c.machinesHigh}</TD>
-              <TD className="text-xs text-muted-foreground">{c.topAreaName}</TD>
-              <TD><RiskBadge score={c.score} /></TD>
+          {data.clientRows.map((row) => (
+            <tr key={row.client.id} className="hover:bg-muted/40">
+              <TD className="font-medium text-foreground">{row.client.name}</TD>
+              <TD><ScoreBar score={row.score} /></TD>
+              <TD className="tabular-nums">{row.machinesHigh}</TD>
+              <TD className="text-xs text-muted-foreground">{row.topAreaName}</TD>
+              <TD><RiskBadge score={row.score} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -621,14 +1121,14 @@ function ScoresPanel() {
           Scores por área / região
         </div>
         <TableShell headers={["Área", "Cliente", "Condição", "Score", "Principal fator", "Risco"]}>
-          {areaRows.map((a) => (
-            <tr key={a.areaId} className="hover:bg-muted/40">
-              <TD className="font-medium text-foreground">{a.name}</TD>
-              <TD className="text-xs text-muted-foreground">{a.clientName}</TD>
-              <TD className="text-xs text-muted-foreground">{a.condition}</TD>
-              <TD><ScoreBar score={a.score} /></TD>
-              <TD className="text-xs text-muted-foreground">{a.topFactor}</TD>
-              <TD><RiskBadge score={a.score} /></TD>
+          {data.areaRows.map((row) => (
+            <tr key={row.area.id} className="hover:bg-muted/40">
+              <TD className="font-medium text-foreground">{row.area.name}</TD>
+              <TD className="text-xs text-muted-foreground">{row.area.client}</TD>
+              <TD className="text-xs text-muted-foreground">{row.area.condition || "Não informada"}</TD>
+              <TD><ScoreBar score={row.score} /></TD>
+              <TD className="text-xs text-muted-foreground">{row.mainFactor}</TD>
+              <TD><RiskBadge score={row.score} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -639,12 +1139,12 @@ function ScoresPanel() {
           Scores por tipo de operação
         </div>
         <TableShell headers={["Tipo", "Operações", "Score médio", "Risco"]}>
-          {opTypeRows.map((s) => (
-            <tr key={s.type} className="hover:bg-muted/40">
-              <TD className="font-medium text-foreground">{s.type}</TD>
-              <TD className="tabular-nums">{s.count}</TD>
-              <TD><ScoreBar score={s.score} /></TD>
-              <TD><RiskBadge score={s.score} /></TD>
+          {data.operationTypeRows.map((row) => (
+            <tr key={row.type} className="hover:bg-muted/40">
+              <TD className="font-medium text-foreground">{row.type}</TD>
+              <TD className="tabular-nums">{row.count}</TD>
+              <TD><ScoreBar score={row.score} /></TD>
+              <TD><RiskBadge score={row.score} /></TD>
             </tr>
           ))}
         </TableShell>
@@ -654,11 +1154,35 @@ function ScoresPanel() {
 }
 
 function MachinesTable() {
-  const { weights } = useRiskConfig();
+  const data = useAdminDashboardData();
+  const dashboardState = useContext(AdminDashboardContext);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<MachineStatus | "todos">("todos");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [type, setType] = useState("todos");
+  const [client, setClient] = useState("todos");
+  const riskByMachine = new Map(data.machineRows.map((row) => [row.machine.id, row]));
+  const machines = data.machines.filter((machine) =>
+    (!query || `${machine.id} ${machine.name} ${machine.model} ${machine.client} ${machine.area} ${machine.operator}`.toLowerCase().includes(query.toLowerCase())) &&
+    (status === "todos" || machine.status === status) &&
+    (type === "todos" || machine.type === type) &&
+    (client === "todos" || machine.clientId === client) &&
+    matchesRiskFilter(riskByMachine.get(machine.id)?.score, risk),
+  );
   return (
-    <TableShell headers={["ID", "Equipamento", "Tipo", "Cliente", "Área", "Operador", "Status", "Score", "Risco"]}>
+    <div className="space-y-3">
+      <FilterBar query={query} onQueryChange={setQuery} placeholder="Buscar equipamento, cliente, área ou operador" onReset={() => { setQuery(""); setStatus("todos"); setRisk("todos"); setType("todos"); setClient("todos"); }} hasFilters={Boolean(query) || status !== "todos" || risk !== "todos" || type !== "todos" || client !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={setRisk} />
+        <select aria-label="Status da máquina" value={status} onChange={(event) => setStatus(event.target.value as MachineStatus | "todos")} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+          <option value="todos">Todos os status</option>{Object.keys(machineStatusTone).map((value) => <option key={value} value={value}>{value === "ativa" ? "Ativa" : value === "em alerta" ? "Em alerta" : value === "crítica" ? "Crítica" : "Parada"}</option>)}
+        </select>
+        <select aria-label="Tipo de máquina" value={type} onChange={(event) => setType(event.target.value)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os tipos</option>{Array.from(new Set(data.machines.map((machine) => machine.type))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <select aria-label="Cliente da máquina" value={client} onChange={(event) => setClient(event.target.value)} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os clientes</option>{data.clients.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select>
+      </FilterBar>
+      <TableShell headers={["ID", "Equipamento", "Tipo", "Cliente", "Área", "Operador", "Status", "Score", "Risco"]}>
       {machines.map((m) => {
-        const b = riskResultForMachine(m.id, weights);
+        const risk = riskByMachine.get(m.id);
+        const operationId = data.operations.find((operation) => operation.machineId === m.id)?.id;
         return (
           <tr key={m.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{m.id}</TD>
@@ -668,21 +1192,42 @@ function MachinesTable() {
             <TD>{m.area}</TD>
             <TD>{m.operator}</TD>
             <TD><StatusPill label={m.status} tone={machineStatusTone[m.status]} /></TD>
-            <TD><ScoreBar score={b.finalScore} /></TD>
-            <TD><RiskBadge score={b.finalScore} /></TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : operationId ? <button type="button" onClick={() => dashboardState?.requestMoreRisk([operationId])} className="text-xs font-medium text-primary underline">Solicitar avaliação</button> : "Não disponível"}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : operationId ? "Pendente" : "Não disponível"}</TD>
           </tr>
         );
       })}
     </TableShell>
+    {machines.length === 0 && <EmptyFilterState />}
+    </div>
   );
 }
 
 function ClientsTable() {
-  const { weights } = useRiskConfig();
+  const data = useAdminDashboardData();
+  const dashboardState = useContext(AdminDashboardContext);
+  const [query, setQuery] = useState("");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [evaluation, setEvaluation] = useState<EvaluationFilter>("todos");
+  const [location, setLocation] = useState("todos");
+  const riskByClient = new Map(data.clientRows.map((row) => [row.client.id, row]));
+  const clients = data.clients.filter((client) =>
+    (!query || `${client.id} ${client.name} ${client.location} ${client.mainOperation}`.toLowerCase().includes(query.toLowerCase())) &&
+    (location === "todos" || client.state === location) &&
+    (evaluation === "todos" || (evaluation === "avaliado") === riskByClient.has(client.id)) &&
+    matchesRiskFilter(riskByClient.get(client.id)?.score, risk),
+  );
   return (
-    <TableShell headers={["ID", "Cliente", "Localização", "Operação", "Máquinas", "Score médio", "Risco"]}>
+    <div className="space-y-3">
+      <FilterBar query={query} onQueryChange={setQuery} placeholder="Buscar cliente, cidade ou operação" onReset={() => { setQuery(""); setRisk("todos"); setEvaluation("todos"); setLocation("todos"); }} hasFilters={Boolean(query) || risk !== "todos" || evaluation !== "todos" || location !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={setRisk} />
+        <EvaluationFilterSelect value={evaluation} onChange={setEvaluation} />
+        <select aria-label="Localização ou UF" value={location} onChange={(event) => setLocation(event.target.value)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todas as UFs</option>{Array.from(new Set(data.clients.map((client) => client.state).filter(Boolean))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+      </FilterBar>
+      <TableShell headers={["ID", "Cliente", "Localização", "Operação", "Máquinas", "Score médio", "Risco"]}>
       {clients.map((c) => {
-        const s = scoreClientWithWeights(c.id, weights);
+        const risk = riskByClient.get(c.id);
+        const operationId = data.operations.find((operation) => operation.clientId === c.id)?.id;
         return (
           <tr key={c.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{c.id}</TD>
@@ -690,44 +1235,106 @@ function ClientsTable() {
             <TD>{c.location}</TD>
             <TD>{c.mainOperation}</TD>
             <TD className="tabular-nums">{c.machineCount}</TD>
-            <TD><ScoreBar score={s.score} /></TD>
-            <TD><RiskBadge score={s.score} /></TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : operationId ? <button type="button" onClick={() => dashboardState?.requestMoreRisk([operationId])} className="text-xs font-medium text-primary underline">Solicitar avaliação</button> : "Não disponível"}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : operationId ? "Pendente" : "Não disponível"}</TD>
           </tr>
         );
       })}
     </TableShell>
+    {clients.length === 0 && <EmptyFilterState />}
+    </div>
   );
 }
 
 function AreasTable() {
-  const { weights } = useRiskConfig();
+  const data = useAdminDashboardData();
+  const dashboardState = useContext(AdminDashboardContext);
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState("todos");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [condition, setCondition] = useState("todos");
+  const [water, setWater] = useState("todos");
+  const [client, setClient] = useState("todos");
+  const riskByArea = new Map(data.areaRows.map((row) => [row.area.id, row]));
+  const areas = data.areas.filter((area) =>
+    (!query || `${area.id} ${area.name} ${area.client} ${area.condition}`.toLowerCase().includes(query.toLowerCase())) &&
+    (type === "todos" || area.type === type) &&
+    (condition === "todos" || area.condition === condition) &&
+    (water === "todos" || area.nearWater === water) &&
+    (client === "todos" || area.clientId === client) &&
+    matchesRiskFilter(riskByArea.get(area.id)?.score, risk),
+  );
   return (
-    <TableShell headers={["ID", "Área", "Cliente", "Tipo", "Condição", "Água", "Score", "Risco"]}>
+    <div className="space-y-3">
+      <FilterBar query={query} onQueryChange={setQuery} placeholder="Buscar área, cliente ou condição" onReset={() => { setQuery(""); setType("todos"); setRisk("todos"); setCondition("todos"); setWater("todos"); setClient("todos"); }} hasFilters={Boolean(query) || type !== "todos" || risk !== "todos" || condition !== "todos" || water !== "todos" || client !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={setRisk} />
+        <select aria-label="Tipo de área" value={type} onChange={(event) => setType(event.target.value)} className="h-9 max-w-full rounded-md border border-border bg-card px-2 text-sm text-foreground">
+          <option value="todos">Todos os tipos</option>{Array.from(new Set(data.areas.map((area) => area.type))).map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+        <select aria-label="Condição da área" value={condition} onChange={(event) => setCondition(event.target.value)} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todas as condições</option>{Array.from(new Set(data.areas.map((area) => area.condition).filter(Boolean))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <select aria-label="Proximidade de água" value={water} onChange={(event) => setWater(event.target.value)} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Toda proximidade de água</option>{Array.from(new Set(data.areas.map((area) => area.nearWater))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+        <select aria-label="Cliente da área" value={client} onChange={(event) => setClient(event.target.value)} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os clientes</option>{data.clients.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}</select>
+      </FilterBar>
+      <TableShell headers={["ID", "Área", "Cliente", "Tipo", "Condição", "Água", "Score", "Risco"]}>
       {areas.map((a) => {
-        const s = scoreAreaWithWeights(a.id, weights);
+        const risk = riskByArea.get(a.id);
+        const operationId = data.operations.find((operation) => operation.areaId === a.id)?.id;
         return (
           <tr key={a.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
             <TD className="font-medium text-foreground">{a.name}</TD>
             <TD>{a.client}</TD>
             <TD>{a.type}</TD>
-            <TD>{a.condition}</TD>
+            <TD>{a.condition || "Não informada"}</TD>
             <TD className="capitalize">{a.nearWater}</TD>
-            <TD><ScoreBar score={s.score} /></TD>
-            <TD><RiskBadge score={s.score} /></TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : operationId ? <button type="button" onClick={() => dashboardState?.requestMoreRisk([operationId])} className="text-xs font-medium text-primary underline">Solicitar avaliação</button> : "Não disponível"}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : operationId ? "Pendente" : "Não disponível"}</TD>
           </tr>
         );
       })}
     </TableShell>
+    {areas.length === 0 && <EmptyFilterState />}
+    </div>
   );
 }
 
 function OperationsTable() {
-  const { weights } = useRiskConfig();
+  const data = useAdminDashboardData();
+  const dashboardState = useContext(AdminDashboardContext);
+  const [page, setPage] = useState(0);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("todos");
+  const [risk, setRisk] = useState<RiskFilter>("todos");
+  const [type, setType] = useState("todos");
+  const riskByOperation = new Map(data.operationRows.map((row) => [row.operation.id, row]));
+  const pageSize = 12;
+  const operations = data.operations.filter((operation) =>
+    (!query || `${operation.id} ${operation.machineId} ${operation.type} ${operation.area}`.toLowerCase().includes(query.toLowerCase())) &&
+    (status === "todos" || operation.status === status) &&
+    (type === "todos" || operation.type === type) &&
+    matchesRiskFilter(riskByOperation.get(operation.id)?.score, risk),
+  );
+  const visibleOperations = operations.slice(page * pageSize, (page + 1) * pageSize);
+  const pageCount = Math.max(1, Math.ceil(operations.length / pageSize));
   return (
-    <TableShell headers={["ID", "Máquina", "Tipo", "Área", "Início", "Duração", "Status", "Score", "Risco"]}>
-      {operations.map((o) => {
-        const b = riskResultForOperation(o, weights);
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button type="button" onClick={() => dashboardState?.goToTab("visao-geral")} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+          <ArrowLeft className="h-4 w-4" /> Voltar à visão geral
+        </button>
+        <span className="text-xs text-muted-foreground">Filtros locais · não recalculam risco</span>
+      </div>
+      <FilterBar query={query} onQueryChange={(value) => { setQuery(value); setPage(0); }} placeholder="Buscar operação, máquina, área ou tipo" onReset={() => { setQuery(""); setStatus("todos"); setRisk("todos"); setType("todos"); setPage(0); }} hasFilters={Boolean(query) || status !== "todos" || risk !== "todos" || type !== "todos"}>
+        <RiskFilterSelect value={risk} onChange={(value) => { setRisk(value); setPage(0); }} />
+        <select aria-label="Status da operação" value={status} onChange={(event) => { setStatus(event.target.value); setPage(0); }} className="h-9 rounded-md border border-border bg-card px-2 text-sm text-foreground">
+          <option value="todos">Todos os status</option><option value="Em andamento">Em andamento</option><option value="Agendada">Agendada</option><option value="Concluída">Concluída</option><option value="Interrompida">Interrompida</option>
+        </select>
+        <select aria-label="Tipo de operação" value={type} onChange={(event) => { setType(event.target.value); setPage(0); }} className="h-9 max-w-48 rounded-md border border-border bg-card px-2 text-sm text-foreground"><option value="todos">Todos os tipos</option>{Array.from(new Set(data.operations.map((operation) => operation.type))).map((value) => <option key={value} value={value}>{value}</option>)}</select>
+      </FilterBar>
+      <TableShell headers={["ID", "Máquina", "Tipo", "Área", "Início", "Duração", "Status", "Score", "Risco"]}>
+      {visibleOperations.map((o) => {
+        const risk = riskByOperation.get(o.id);
+          const riskError = dashboardState?.riskErrorsByOperationId[o.id];
         return (
           <tr key={o.id} className="hover:bg-muted/40">
             <TD className="font-mono text-xs text-muted-foreground">{o.id}</TD>
@@ -742,57 +1349,31 @@ function OperationsTable() {
                 tone={o.status === "Em andamento" ? "green" : o.status === "Concluída" ? "blue" : o.status === "Agendada" ? "yellow" : "red"}
               />
             </TD>
-            <TD><ScoreBar score={b.finalScore} /></TD>
-            <TD><RiskBadge score={b.finalScore} /></TD>
+            <TD>{risk ? <ScoreBar score={risk.score} /> : riskError ? (
+              <button type="button" onClick={() => dashboardState?.requestMoreRisk([o.id])} className="text-xs text-danger underline">Tentar novamente</button>
+            ) : "Não disponível"}</TD>
+            <TD>{risk ? <RiskBadge score={risk.score} /> : riskError ?? "Não disponível"}</TD>
           </tr>
         );
       })}
-    </TableShell>
-  );
-}
-
-const alertCritTone: Record<AlertCriticality, "green" | "yellow" | "red"> = {
-  baixa: "green",
-  "média": "yellow",
-  alta: "red",
-};
-const alertStatusTone: Record<AlertStatus, "yellow" | "blue" | "green"> = {
-  aberto: "yellow",
-  "em análise": "blue",
-  resolvido: "green",
-};
-
-function AlertsTable() {
-  return (
-    <TableShell headers={["ID", "Tipo", "Máquina", "Operação", "Mensagem", "Criticidade", "Status", "Quando"]}>
-      {alerts.map((a) => (
-        <tr key={a.id} className="hover:bg-muted/40">
-          <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
-          <TD className="font-medium text-foreground">{a.type}</TD>
-          <TD>{a.machineId}</TD>
-          <TD className="font-mono text-xs text-muted-foreground">{a.operationId}</TD>
-          <TD className="max-w-[320px] text-muted-foreground">{a.message}</TD>
-          <TD><StatusPill label={a.criticality} tone={alertCritTone[a.criticality]} /></TD>
-          <TD><StatusPill label={a.status} tone={alertStatusTone[a.status]} /></TD>
-          <TD className="text-xs text-muted-foreground">{a.time}</TD>
-        </tr>
-      ))}
-    </TableShell>
-  );
-}
-
-function UsersTable() {
-  return (
-    <TableShell headers={["ID", "Nome", "Perfil", "Cliente associado", "Permissões"]}>
-      {users.map((u) => (
-        <tr key={u.id} className="hover:bg-muted/40">
-          <TD className="font-mono text-xs text-muted-foreground">{u.id}</TD>
-          <TD className="font-medium text-foreground">{u.name}</TD>
-          <TD className="capitalize">{u.profile}</TD>
-          <TD>{u.clientId ?? "—"}</TD>
-          <TD className="text-xs text-muted-foreground">{u.permissions.join(", ")}</TD>
-        </tr>
-      ))}
-    </TableShell>
+      </TableShell>
+      {operations.length === 0 && <EmptyFilterState />}
+      <div className="flex items-center justify-between px-4 pb-4 text-sm text-muted-foreground">
+        <span>Página {Math.min(page + 1, pageCount)} · {operations.length} operações</span>
+        {page < pageCount - 1 && (
+          <button
+            type="button"
+            className="rounded-md border border-border px-3 py-1.5 text-foreground hover:bg-muted"
+            onClick={() => {
+              const next = page + 1;
+              setPage(next);
+              const ids = operations.slice(next * pageSize, (next + 1) * pageSize).map((operation) => operation.id);
+               dashboardState?.requestMoreRisk(ids);
+            }}
+          >Próxima página</button>
+        )}
+        {page > 0 && <button type="button" className="rounded-md border border-border px-3 py-1.5 text-foreground hover:bg-muted" onClick={() => setPage((current) => current - 1)}>Página anterior</button>}
+      </div>
+    </div>
   );
 }

@@ -43,6 +43,19 @@ export interface WeatherData {
   hourlyForecast: HourlyForecast[]; // próximas 6h
 }
 
+export interface HistoricalWeatherFeatures {
+  source: "open-meteo-historical";
+  referenceDate: string;
+  precipitationD1Mm: number;
+  rain7dMm: number;
+  rain30dMm: number;
+  temperatureMeanD1C: number;
+  temperatureMaxD1C: number;
+  temperatureMinD1C: number;
+  humidityMeanD1Pct: number;
+  windMeanD1Ms: number;
+}
+
 // ---------- Hidrografia (Overpass / OpenStreetMap) ----------
 export type WaterFeatureType =
   | "river"

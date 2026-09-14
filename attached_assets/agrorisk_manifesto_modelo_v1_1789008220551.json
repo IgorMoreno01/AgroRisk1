@@ -1,0 +1,47 @@
+{
+  "nome": "AgroRisk Logistic Risk Model",
+  "versao": "1.0",
+  "status": "BENCHMARK_FINAL_TESTADO",
+  "algoritmo": "Logistic Regression L2",
+  "regularizacao_C": 1.0,
+  "periodos": {
+    "train": "2005-2018",
+    "valid": "2019",
+    "test": "2020"
+  },
+  "metricas": {
+    "roc_auc_valid": 0.6885696468050739,
+    "pr_auc_valid": 0.33573378797811,
+    "roc_auc_test": 0.7052604231921203,
+    "pr_auc_test": 0.3329614126352034
+  },
+  "threshold_tecnico": {
+    "origem": "VALID_2019",
+    "criterio": "MAX_F1_AMOSTRAL",
+    "valor": 0.1454760948150809
+  },
+  "score_relativo": {
+    "intervalo": "0-100",
+    "referencia": "VALID_2019",
+    "metodo": "percentil_empirico",
+    "interpretacao": "posição relativa de risco; não é probabilidade real"
+  },
+  "familias_de_risco": [
+    "CLIMA",
+    "ESTRUTURA",
+    "HISTORICO"
+  ],
+  "estrutura_utilizada": [
+    "COD_MOD",
+    "UF"
+  ],
+  "features_proibidas": [
+    "COBERTURA",
+    "CULTURA",
+    "N_ESTADOS_ATIVOS",
+    "N_LOCALIZACOES_R"
+  ],
+  "desenho_amostral": "case-control 1:5",
+  "restricao_probabilidade": "As probabilidades brutas não representam incidência populacional.",
+  "sha256_modelo_benchmark": "11f1aded2ec3d92206de2d3c815f3431848b90f2d0015bdd55f1e120049a2b3e"
+}

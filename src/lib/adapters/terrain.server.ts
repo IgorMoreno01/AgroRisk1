@@ -3,13 +3,25 @@
 // Fallback: Open-Elevation API (público, sem chave)
 // ============================================================
 
-import { cacheOrFetch } from "../cache.server";
+import { cacheGet, cacheOrFetch, cacheSet } from "../cache.server";
 import type { ElevationData, SlopeClass, SlopePoint } from "../external-data.types";
 
 const OPENTOPO_URL = "https://portal.opentopography.org/API/globaldem";
 const OPEN_ELEVATION_URL = "https://api.open-elevation.com/api/v1/lookup";
 const TIMEOUT_MS = 12_000;
 const CACHE_TTL_S = 60 * 60; // 1 hora (elevação muda raramente)
+const OPENTOPO_BREAKER_COOLDOWN_MS = 30_000;
+let openTopoUnavailableUntil = 0;
+
+function isTransientProviderError(error: unknown): boolean {
+  const candidate = error as { name?: unknown; status?: unknown; message?: unknown };
+  const status = typeof candidate.status === "number" ? candidate.status : undefined;
+  if (status !== undefined && (status === 401 || status === 408 || status === 429 || status >= 500)) return true;
+  const message = typeof candidate.message === "string" ? candidate.message.toLowerCase() : "";
+  return candidate.name === "AbortError" ||
+    /(?:http\s*)?(?:401|408|429|5\d{2})\b/.test(message) ||
+    /\b(?:timeout|timed out|abort|aborted|network|fetch failed|unavailable|indisponível)\b/.test(message);
+}
 
 // Offsets para calcular declividade (em graus ~ 111m por grau lat)
 const SLOPE_OFFSET_DEG = 0.001; // ~111m
@@ -96,6 +108,9 @@ async function fetchElevationViaOpenElevation(lat: number, lon: number): Promise
 // ---------- OpenTopography API (primário com chave) ----------
 
 async function fetchOpenTopography(lat: number, lon: number, apiKey: string): Promise<ElevationData> {
+  if (openTopoUnavailableUntil > Date.now()) {
+    throw new Error("OpenTopography circuit breaker ativo");
+  }
   // SRTMGL3 tem resolução de 3 arc-seconds (~90m/pixel). Uma bounding box muito pequena
   // (< 0.005°) resulta em HTTP 400 — a API exige área mínima de alguns pixels.
   // Usamos 0.011° (~1.2km), suficiente para ~13×13 pixels, e extraímos o pixel central.
@@ -126,6 +141,11 @@ async function fetchOpenTopography(lat: number, lon: number, apiKey: string): Pr
       lon,
       fetchedAt: new Date().toISOString(),
     };
+  } catch (error) {
+    if (isTransientProviderError(error)) {
+      openTopoUnavailableUntil = Date.now() + OPENTOPO_BREAKER_COOLDOWN_MS;
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -242,3 +262,44 @@ export async function getTerrain(lat: number, lon: number): Promise<ElevationDat
     return mockElevationData(lat, lon);
   }
 }
+
+export async function getElevationForRisk(
+  lat: number,
+  lon: number,
+): Promise<ElevationData | null> {
+  const key = `risk-elevation:${lat.toFixed(3)}:${lon.toFixed(3)}`;
+  const cached = cacheGet<ElevationData | null>(key);
+  if (cached !== undefined) return cached;
+  const pending = riskElevationInFlight.get(key);
+  if (pending) return pending;
+  const apiKey = process.env["OPENTOPO_API_KEY"];
+  const request = (async () => {
+    try {
+      let elevation: ElevationData;
+      if (apiKey) {
+        try {
+          elevation = await fetchOpenTopography(lat, lon, apiKey);
+        } catch (error) {
+          console.warn(
+            "[TerrainAdapter] OpenTopography falhou, usando Open-Elevation:",
+            (error as Error).message,
+          );
+          elevation = await fetchElevationViaOpenElevation(lat, lon);
+        }
+      } else {
+        elevation = await fetchElevationViaOpenElevation(lat, lon);
+      }
+      if (!Number.isFinite(elevation.elevationM)) throw new Error("Elevação inválida");
+      cacheSet(key, elevation, CACHE_TTL_S);
+      return elevation;
+    } catch (error) {
+      console.warn("[TerrainAdapter] elevação indisponível:", (error as Error).message);
+      cacheSet(key, null, 5 * 60);
+      return null;
+    }
+  })();
+  riskElevationInFlight.set(key, request);
+  try { return await request; } finally { riskElevationInFlight.delete(key); }
+}
+
+const riskElevationInFlight = new Map<string, Promise<ElevationData | null>>();

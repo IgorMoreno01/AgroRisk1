@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "python-base-3.13"]
+modules = ["nodejs-20", "web", "python-base-3.13", "bun-1.3", "postgresql-16"]
 
 [nix]
 channel = "stable-25_05"
@@ -33,6 +33,10 @@ outputType = "webview"
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3000
 
 [postMerge]
 path = "scripts/post-merge.sh"

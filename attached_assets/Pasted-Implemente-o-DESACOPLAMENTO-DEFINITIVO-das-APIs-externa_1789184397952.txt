@@ -1,0 +1,458 @@
+Implemente o DESACOPLAMENTO DEFINITIVO das APIs externas do runtime
+do Risk Engine V2.
+
+Esta etapa deve ser CIRÚRGICA.
+
+OBJETIVO:
+
+Hoje:
+
+Operação PostgreSQL
+→ APIs externas
+→ inputs
+→ Risk Engine
+→ score
+
+Queremos:
+
+Operação PostgreSQL
+→ inputs previamente preparados
+→ Risk Engine
+→ score
+
+As APIs externas NÃO podem mais participar da abertura das telas,
+batches, seleção de operação ou cálculo runtime do score.
+
+IMPORTANTE:
+
+NÃO alterar:
+- modelo ML
+- coeficientes
+- scaler
+- fórmula
+- thresholds
+- regras de pontuação
+- pesos Sompo
+- classificação Baixo/Médio/Alto
+- drivers
+- recomendações
+- personas
+- layout/UI
+- V1
+- Vite
+
+NÃO voltar para Golden Vectors no runtime.
+
+NÃO salvar:
+- Score ML
+- Score Operacional
+- Score Final
+- level
+- dominantComponent
+
+O SCORE DEVE CONTINUAR SENDO CALCULADO PELO RISK ENGINE.
+
+EU faço os commits.
+NÃO executar comandos Git mutáveis.
+
+==================================================
+1. PRINCÍPIO
+==================================================
+
+Persistir somente INPUTS preparados.
+
+O runtime deve continuar executando:
+
+prepared inputs
+→ evaluateRiskEngineV2()
+→ ML
+→ regras
+→ pesos Sompo
+→ finalScore
+→ level
+
+Portanto, alterar os pesos Sompo continua recalculando o resultado
+sem precisar regenerar os inputs.
+
+==================================================
+2. ESTRUTURA PREPARADA
+==================================================
+
+Antes de criar nova tabela, inspecione o schema atual.
+
+Se já existir uma estrutura apropriada e SEGURA para armazenar
+snapshot de risco POR OPERAÇÃO, reutilize-a.
+
+Caso NÃO exista, criar somente uma estrutura mínima,
+seguindo o padrão atual de migrations PostgreSQL.
+
+Ela deve armazenar algo equivalente a:
+
+operation_id
+reference_date
+
+ml_input
+operational_rules_input
+
+latitude
+longitude
+
+provenance
+
+generated_at
+updated_at
+version
+
+Pode usar JSONB para os contratos de input/proveniência se isso seguir
+o padrão atual do projeto.
+
+IMPORTANTE:
+
+snapshot deve ser POR OPERAÇÃO porque clima depende da data de referência.
+
+==================================================
+3. O QUE DEVE SER PREPARADO
+==================================================
+
+Materializar, quando disponível:
+
+DT_REFERENCIA
+UF
+
+PRECIPITACAO_D1_MM
+CHUVA_7D_MM
+CHUVA_30D_MM
+TEMP_MEDIA_D1_C
+TEMP_MAX_D1_C
+TEMP_MIN_D1_C
+UMIDADE_D1_PCT
+VENTO_D1_MS
+ALTITUDE_ML_M
+
+operationType
+waterDistance
+terrain
+
+latitude
+longitude
+
+proveniência por campo.
+
+Continuar conforme política atual:
+
+COD_MOD
+→ missing/imputação oficial enquanto indisponível
+
+HIST_ITEM_SAFE_*
+→ missing/imputação oficial enquanto indisponível
+
+terrain sem contexto validado
+→ fallback atual synthetic_demo
+
+waterDistance sem resultado real
+→ fallback atual synthetic_demo
+
+NÃO inventar valores novos.
+
+==================================================
+4. PROCESSO DE PREPARAÇÃO
+==================================================
+
+Criar processo/script SEPARADO do runtime para preparar os inputs
+das operações existentes.
+
+Ele pode reutilizar os adapters atuais:
+
+- Open-Meteo Geocoding
+- Open-Meteo Historical
+- OpenTopography
+- Open-Elevation
+- Overpass
+
+Mas SOMENTE nesse processo de preparação.
+
+Reutilizar:
+
+- cache
+- deduplicação
+- agrupamento por localização/data
+- circuit breaker
+- fallbacks existentes
+
+Evitar chamadas repetidas entre operações da mesma fazenda/contexto.
+
+O processo pode demorar.
+Isso NÃO afeta UX porque não é executado quando usuário abre o sistema.
+
+==================================================
+5. PREPARAR A POPULAÇÃO ATUAL
+==================================================
+
+Gerar snapshots para as operações atuais do PostgreSQL.
+
+Esperado hoje:
+aproximadamente 500 operações.
+
+Ao final informar:
+
+- total de operações;
+- snapshots gerados;
+- snapshots com clima real;
+- snapshots com altitude real;
+- snapshots com água real;
+- campos imputados;
+- campos synthetic_demo;
+- falhas.
+
+Não forçar 100% de cobertura inventando dados.
+
+==================================================
+6. RUNTIME
+==================================================
+
+Alterar principalmente:
+
+src/lib/risk-engine-v2/operation-input.server.ts
+
+O runtime NÃO deve mais chamar:
+
+geocodeMunicipality()
+getHistoricalClimate()
+getElevationForRisk()
+getWaterGeo()
+
+durante uma solicitação de score.
+
+Em vez disso:
+
+operation PostgreSQL
+→ prepared risk input
+→ validação
+→ evaluateRiskEngineV2()
+
+Manter o contexto relacional real:
+
+client
+farm
+area
+machine
+operation
+
+==================================================
+7. SNAPSHOT AUSENTE
+==================================================
+
+Se uma operação não possuir prepared input:
+
+NÃO chamar API externa automaticamente.
+
+NÃO bloquear a tela.
+
+NÃO inventar score.
+
+Usar somente o comportamento já validado:
+
+- features ML ausentes → missing/imputação oficial
+- waterDistance sem dado → fallback synthetic_demo atual
+- terrain sem dado → fallback synthetic_demo atual
+
+e registrar proveniência corretamente.
+
+==================================================
+8. SNAPSHOT DESATUALIZADO
+==================================================
+
+Validar pelo menos:
+
+operation_id
+reference_date
+version
+
+Se a data da operação não corresponder ao snapshot preparado:
+
+não tratar o snapshot como dado atual sem identificação.
+
+NÃO chamar APIs no runtime para corrigi-lo.
+
+Marcar o contexto conforme o padrão de proveniência existente.
+
+==================================================
+9. ADAPTERS
+==================================================
+
+NÃO apagar os adapters externos.
+
+Eles continuam disponíveis para:
+
+- preparação
+- atualização futura
+- manutenção
+
+Mas deixam de fazer parte do caminho:
+
+usuário
+→ dashboard
+→ score
+
+==================================================
+10. PERSONAS
+==================================================
+
+Admin
+Gestor
+Consultor
+Operador
+
+devem continuar utilizando:
+
+evaluateOperationRiskV2()
+
+e o mesmo Risk Engine central.
+
+Não criar lógica de risco diferente por persona.
+
+A mesma operação deve continuar produzindo o mesmo resultado
+nas quatro personas.
+
+==================================================
+11. PESOS SOMPO
+==================================================
+
+Não persistir score final no snapshot.
+
+Exemplo:
+
+prepared inputs
+→ ML = X
+→ regras = Y
+
+Sompo usa 70/30:
+→ score A
+
+Sompo muda para 60/40:
+→ MESMOS INPUTS
+→ mesmo ML
+→ mesmas regras
+→ novo score final calculado na hora
+
+Isso deve funcionar sem regenerar snapshot.
+
+==================================================
+12. PERFORMANCE
+==================================================
+
+Após o corte, medir:
+
+- leitura do prepared input PostgreSQL;
+- montagem do RiskEngineV2Input;
+- Risk Engine;
+- retorno do primeiro score.
+
+Durante essa medição:
+
+chamadas externas realizadas pelo runtime = 0
+
+OBJETIVO:
+score prioritário server-side em dezenas de ms ou baixa centena de ms,
+sem depender de latência de internet/provider.
+
+Não criar sleeps/delays artificiais.
+
+==================================================
+13. TESTES OBRIGATÓRIOS
+==================================================
+
+Cobrir:
+
+1. runtime de score faz ZERO chamadas externas;
+2. prepared input válido alimenta o mesmo Risk Engine;
+3. mesmos inputs → mesmo resultado de antes;
+4. modelo ML permanece idêntico;
+5. fórmula permanece idêntica;
+6. regras permanecem idênticas;
+7. thresholds permanecem idênticos;
+8. mudança de peso Sompo recalcula score sem regenerar snapshot;
+9. snapshot ausente NÃO chama API externa;
+10. snapshot ausente usa política existente de missing/fallback;
+11. mesma operação mantém paridade entre personas;
+12. Golden Vector continua fora do runtime;
+13. Admin continua funcionando;
+14. Gestor continua funcionando;
+15. Consultor continua funcionando;
+16. Operador continua funcionando.
+
+Rodar:
+
+bun test
+bun run build
+
+==================================================
+14. NÃO FAZER
+==================================================
+
+NÃO:
+- criar outro Risk Engine;
+- criar ML novo;
+- recalibrar modelo;
+- alterar scores para deixá-los visualmente melhores;
+- escolher baixo/médio/alto previamente;
+- armazenar score final hardcoded;
+- fazer nova integração externa;
+- alterar UI;
+- refatorar arquivos não relacionados;
+- tentar otimizar providers nesta etapa.
+
+==================================================
+15. RELATÓRIO FINAL
+==================================================
+
+Responder:
+
+A. arquivos alterados
+
+B. onde os prepared inputs são armazenados
+
+C. quantidade de operações preparadas
+
+D. cobertura:
+clima real:
+altitude real:
+água real:
+terrain validado:
+missing/imputado:
+synthetic_demo:
+
+E. APIs externas chamadas durante cálculo runtime:
+esperado = 0
+
+F. tempo médio/observado do primeiro score com prepared input
+
+G. Risk Engine continua calculando score?
+SIM/NÃO
+
+H. score final foi persistido?
+esperado = NÃO
+
+I. mudar pesos Sompo recalcula instantaneamente?
+SIM/NÃO
+
+J. paridade das personas:
+PASS/FAIL
+
+K. testes:
+pass/fail
+
+L. build:
+PASS/FAIL
+
+M. modelo/fórmula/thresholds alterados?
+NÃO
+
+N. UI alterada?
+NÃO
+
+PARE AO FINAL.
+
+Não abra nenhuma frente adicional.
+O objetivo desta etapa é SOMENTE retirar as APIs externas do runtime
+e alimentar o Risk Engine com inputs previamente preparados.

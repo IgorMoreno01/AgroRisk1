@@ -1,0 +1,758 @@
+Estamos iniciando a ETAPA 2 da migração controlada do AgroRisk para o novo Risk Engine V2.
+
+CONTEXTO DE SEGURANÇA JÁ CONFIRMADO
+
+Branch atual:
+risk-engine-v2
+
+Commit-base / baseline V1:
+3e00ba0 — Add AgroRisk MVP progress notes
+
+Estado do Git no início desta etapa:
+- working tree limpo;
+- sem alterações não commitadas;
+- sem arquivos untracked;
+- a branch risk-engine-v2 foi criada diretamente a partir da main;
+- a main deve permanecer intacta como ponto de rollback.
+
+==================================================
+OBJETIVO DESTA ETAPA
+==================================================
+
+Congelar, documentar e testar o comportamento ATUAL do Risk Engine V1 antes de qualquer implementação do novo Risk Engine V2.
+
+Esta etapa NÃO é para corrigir o V1.
+
+Esta etapa NÃO é para melhorar o V1.
+
+Esta etapa NÃO é para integrar Machine Learning.
+
+Esta etapa serve para criar uma BASELINE DE CARACTERIZAÇÃO do comportamento atual, de forma que futuras alterações do Risk Engine V2 não quebrem silenciosamente o sistema existente.
+
+Queremos poder responder:
+
+“Antes da migração, o Risk Engine V1 se comportava exatamente assim.”
+
+==================================================
+REGRAS CRÍTICAS DESTA ETAPA
+==================================================
+
+NÃO altere nenhuma lógica produtiva existente.
+
+NÃO modifique:
+
+- src/lib/risk-score.ts
+- src/lib/recommendations.ts
+- src/lib/ranking.ts
+- src/lib/mock-data.ts
+
+- src/routes/admin.tsx
+- src/routes/gestor.tsx
+- src/routes/operador.tsx
+- src/routes/consultor.tsx
+
+- src/lib/risk-config.tsx
+- src/lib/risk-config.server.ts
+- src/lib/api/risk-config.functions.ts
+- src/routes/__root.tsx
+
+- APIs existentes;
+- adapters existentes;
+- mocks existentes;
+- contratos existentes;
+- fórmulas existentes;
+- thresholds existentes;
+- pesos existentes.
+
+NÃO:
+
+- corrija inconsistências;
+- normalize thresholds;
+- refatore código produtivo;
+- renomeie campos;
+- mova arquivos produtivos;
+- altere imports de produção;
+- integre o ML;
+- adicione o modelo AgroRisk;
+- crie risk-engine-v2;
+- crie ml-risk;
+- crie feature flag;
+- altere a tela Sompo;
+- altere qualquer persona;
+- instale dependências sem antes verificar se já existe infraestrutura suficiente.
+
+Tudo que for criado nesta etapa deve ser exclusivamente:
+
+- testes;
+- arquivos de apoio aos testes;
+- documentação de baseline, se realmente necessário.
+
+==================================================
+CONTEXTO ATUAL DO RISK ENGINE V1
+==================================================
+
+A auditoria anterior encontrou dois caminhos principais.
+
+1. SCORE LEGADO
+
+Função:
+calculateScore(inputs)
+
+Fluxo:
+RiskInputs
+→ cálculo de pontos por fator
+→ soma
+→ clamp 0–100
+→ level
+→ mainFactor
+
+Interface aproximada existente:
+
+interface RiskInputs {
+  weather: Weather;
+  waterDistance: WaterDistance;
+  operationType: OperationType;
+  historyAlertCount: number;
+  inclinationDegrees: number;
+  terrain: Terrain;
+}
+
+Resultado:
+
+interface ScoreBreakdown {
+  total: number;
+  level: RiskLevel;
+  parts: ScorePart[];
+  mainFactor: string;
+}
+
+2. SCORE PONDERADO ATUAL
+
+Função:
+calculateWeightedRisk(breakdown, weights)
+
+Pesos:
+
+interface RiskWeights {
+  climate: number;
+  operational: number;
+}
+
+Default atual:
+
+{
+  climate: 50,
+  operational: 50
+}
+
+Fluxo:
+
+ScoreBreakdown
+→ climateScore normalizado
+→ operationalScore normalizado
+→ climateContribution
+→ operationalContribution
+→ finalScore
+→ level
+→ dominantFactor
+
+Resultado aproximado existente:
+
+interface RiskResult {
+  climateScore: number;
+  operationalScore: number;
+  climateContribution: number;
+  operationalContribution: number;
+  finalScore: number;
+  level: RiskLevel;
+  dominantFactor: "climate" | "operational" | "balanced";
+  breakdown: ScoreBreakdown;
+}
+
+==================================================
+PONTOS ATUAIS DOS FATORES
+==================================================
+
+Os fatores catalogados no V1 são:
+
+Clima:
+máximo 20
+
+Proximidade de água:
+máximo 18
+
+Tipo de operação:
+máximo 15
+
+Histórico operacional:
+máximo 12
+
+Inclinação:
+máximo 20
+
+Condição do terreno:
+máximo 15
+
+IMPORTANTE:
+
+A auditoria encontrou que a inclinação está catalogada,
+mas atualmente NÃO participa da fórmula principal do score.
+
+NÃO corrija isso nesta etapa.
+
+Apenas preserve e documente o comportamento atual.
+
+==================================================
+THRESHOLDS ATUAIS
+==================================================
+
+A classificação central atual é:
+
+0–40:
+baixo
+
+41–70:
+medio
+
+71–100:
+alto
+
+Existe uma dívida técnica conhecida:
+
+fleetMachinesAtRisk utiliza:
+
+finalScore >= 70
+
+enquanto o threshold central de “alto” começa em 71.
+
+NÃO corrija essa divergência nesta etapa.
+
+Apenas registre-a como comportamento/dívida técnica conhecida.
+
+==================================================
+ETAPA 2A — AUDITAR INFRAESTRUTURA DE TESTES
+==================================================
+
+ANTES DE CRIAR QUALQUER ARQUIVO:
+
+1. identifique se já existe framework de testes;
+2. identifique scripts de teste no package.json;
+3. identifique arquivos de configuração;
+4. identifique convenção atual de nomes;
+5. identifique localização atual dos testes;
+6. identifique se o projeto já usa:
+   - Vitest;
+   - Jest;
+   - Node test;
+   - Bun test;
+   - outro framework.
+
+Se JÁ existir infraestrutura adequada:
+
+utilize exatamente a infraestrutura existente.
+
+NÃO troque framework.
+
+NÃO instale outro framework.
+
+Se NÃO existir infraestrutura de testes adequada:
+
+PARE.
+
+NÃO instale nada.
+
+NÃO altere package.json.
+
+NÃO crie configuração nova.
+
+Apenas me informe:
+
+- o que existe hoje;
+- por que não é suficiente;
+- qual seria a menor alternativa possível;
+- quais arquivos/dependências seriam necessários.
+
+Nesse caso, NÃO avance para criação dos testes sem minha autorização.
+
+==================================================
+ETAPA 2B — CHARACTERIZATION TESTS DO V1
+==================================================
+
+Se a infraestrutura de testes existente for suficiente,
+crie testes NOVOS para registrar o comportamento atual.
+
+Os testes devem testar o código real existente.
+
+NÃO replique a lógica produtiva dentro do teste.
+
+NÃO crie uma segunda implementação do Risk Engine no teste.
+
+Use inputs fixos e compare os outputs do código atual.
+
+==================================================
+TESTE 1 — calculateScore()
+==================================================
+
+Criar cenários de caracterização cobrindo pelo menos:
+
+A. cenário mínimo;
+
+B. cenário intermediário;
+
+C. cenário de risco elevado/crítico;
+
+D. combinação em que diferentes fatores tenham pontuações;
+
+E. soma final das parcelas;
+
+F. clamp entre 0 e 100;
+
+G. level calculado atualmente;
+
+H. mainFactor calculado atualmente.
+
+Para cada cenário registrar:
+
+- input;
+- partes;
+- pontos;
+- total;
+- level;
+- mainFactor.
+
+Não altere o algoritmo caso algum resultado pareça estranho.
+
+O teste deve registrar o comportamento existente.
+
+==================================================
+TESTE 2 — calculateWeightedRisk()
+==================================================
+
+Usar pelo menos um ScoreBreakdown estável e testar:
+
+CENÁRIO A:
+
+{
+  climate: 0,
+  operational: 100
+}
+
+CENÁRIO B:
+
+{
+  climate: 50,
+  operational: 50
+}
+
+CENÁRIO C:
+
+{
+  climate: 100,
+  operational: 0
+}
+
+Validar:
+
+- climateScore;
+- operationalScore;
+- climateContribution;
+- operationalContribution;
+- finalScore;
+- level;
+- dominantFactor.
+
+Se possível, incluir também cenário de empate para verificar:
+
+dominantFactor === "balanced"
+
+quando esse for realmente o comportamento atual.
+
+Não force o resultado se o código atual se comportar de outra forma.
+
+==================================================
+TESTE 3 — THRESHOLDS
+==================================================
+
+Registrar explicitamente:
+
+score 0
+→ baixo
+
+score 40
+→ baixo
+
+score 41
+→ medio
+
+score 70
+→ medio
+
+score 71
+→ alto
+
+score 100
+→ alto
+
+Use a função central real de classificação existente.
+
+NÃO copie a regra para dentro do teste se houver função reutilizável.
+
+==================================================
+TESTE 4 — DEFAULT DOS PESOS
+==================================================
+
+Registrar que o default atual do V1 é:
+
+climate = 50
+operational = 50
+
+Se a constante existir em um arquivo produtivo, importe-a.
+
+NÃO duplique valores desnecessariamente se puder testar a constante real.
+
+==================================================
+TESTE 5 — riskResultForOperation()
+==================================================
+
+Usando apenas mocks já existentes e estáveis:
+
+escolha uma operação real da base atual.
+
+Registre como baseline:
+
+- operation id;
+- RiskInputs derivados;
+- climateScore;
+- operationalScore;
+- contributions;
+- finalScore;
+- level;
+- dominantFactor;
+- mainFactor, se acessível no breakdown.
+
+Não altere o mock.
+
+==================================================
+TESTE 6 — riskResultForMachine()
+==================================================
+
+Usando uma máquina existente:
+
+registre o resultado atual.
+
+Validar apenas a reprodutibilidade.
+
+Não alterar agregações.
+
+==================================================
+TESTE 7 — riskResultForArea()
+==================================================
+
+Usando uma área existente:
+
+registre o comportamento atual da agregação.
+
+Não altere regra de agregação mesmo se parecer inconsistente.
+
+==================================================
+TESTE 8 — riskResultForClient()
+==================================================
+
+Usando um cliente existente:
+
+registre o comportamento atual.
+
+Queremos congelar:
+
+- score;
+- level;
+- componentes disponíveis;
+- agregações atuais.
+
+==================================================
+TESTE 9 — RECOMENDAÇÕES
+==================================================
+
+Somente se for possível testar sem alterar recommendations.ts.
+
+Use uma operação/máquina/área/cliente existente e registre pelo menos um caso de:
+
+recommendationsForOperation()
+
+ou função equivalente já usada no projeto.
+
+Validar:
+
+- quantidade retornada;
+- título;
+- prioridade;
+- factor;
+- audience;
+- estrutura do resultado.
+
+NÃO teste textos excessivamente frágeis se eles não forem parte essencial do contrato.
+
+Queremos detectar regressão funcional, não bloquear alterações futuras por pontuação ou pontuação visual irrelevante.
+
+==================================================
+TESTE 10 — DIVERGÊNCIA 70/71
+==================================================
+
+NÃO CORRIJA.
+
+NÃO normalize.
+
+NÃO altere ranking.ts.
+
+Apenas:
+
+- registre no relatório;
+- identifique os arquivos envolvidos;
+- descreva que o threshold central de alto inicia em 71;
+- descreva que fleetMachinesAtRisk utiliza >= 70;
+- classifique como dívida técnica conhecida do V1.
+
+Se houver forma segura de caracterizar os dois comportamentos separadamente sem editar produção, pode criar testes independentes.
+
+Mas NÃO escreva um teste que force ambos a serem iguais.
+
+==================================================
+ETAPA 2C — BASELINE DOCUMENTADA
+==================================================
+
+Após executar os testes, produza um resumo de baseline com:
+
+- cenário;
+- função chamada;
+- input principal;
+- output principal;
+- resultado esperado atual;
+- observações.
+
+Exemplo:
+
+calculateWeightedRisk
+
+Input:
+climate = 50
+operational = 50
+
+Output atual:
+climateScore = ...
+operationalScore = ...
+finalScore = ...
+level = ...
+dominantFactor = ...
+
+Esse documento serve como referência do V1.
+
+Não precisa criar documentação extensa se o próprio output dos testes for suficiente.
+
+==================================================
+ETAPA 2D — VERIFICAÇÃO DE NÃO REGRESSÃO
+==================================================
+
+Depois da criação dos testes:
+
+1. execute a suíte específica criada;
+2. execute a suíte existente do projeto, se houver;
+3. execute o comando de typecheck existente, se houver;
+4. execute build, se isso já fizer parte do fluxo normal do projeto;
+5. NÃO altere código produtivo para “fazer passar” os testes.
+
+Se algum teste falhar porque o comportamento real é diferente do esperado:
+
+PARE.
+
+Ajuste apenas o TESTE para refletir o comportamento atual
+se a expectativa inicial estiver errada.
+
+NUNCA altere o código produtivo do V1 nesta etapa.
+
+==================================================
+VERIFICAÇÃO GIT OBRIGATÓRIA
+==================================================
+
+Ao final:
+
+verifique o equivalente a:
+
+git status
+
+e me informe:
+
+- arquivos novos;
+- arquivos modificados;
+- arquivos deletados;
+- arquivos produtivos alterados ou não.
+
+O resultado esperado é:
+
+arquivos produtivos existentes:
+0 alterados
+
+arquivos V2:
+0 criados
+
+arquivos ML:
+0 criados
+
+somente testes/documentação de baseline:
+novos arquivos permitidos.
+
+Se qualquer arquivo produtivo tiver sido alterado,
+NÃO faça commit.
+
+Reverta apenas as alterações produtivas feitas nesta etapa
+e preserve os testes válidos.
+
+==================================================
+NÃO FAZER COMMIT AUTOMATICAMENTE
+==================================================
+
+IMPORTANTE:
+
+NÃO faça commit ao terminar.
+
+Eu quero revisar o resultado antes.
+
+NÃO faça:
+
+git commit
+git push
+merge
+rebase
+
+Apenas deixe os novos testes no working tree para revisão.
+
+==================================================
+CRITÉRIOS DE SUCESSO DA STEP 2
+==================================================
+
+A etapa só é considerada concluída se:
+
+1. o Risk Engine V1 não foi alterado;
+2. as quatro rotas/personas não foram alteradas;
+3. risk-config não foi alterado;
+4. recommendations não foi alterado;
+5. ranking não foi alterado;
+6. mocks não foram alterados;
+7. não existe código V2;
+8. não existe integração ML;
+9. a baseline atual está coberta por testes;
+10. todos os testes de caracterização compatíveis com o comportamento atual passam;
+11. o projeto continua compilando/typechecking conforme sua configuração atual;
+12. Git mostra apenas novos arquivos permitidos desta etapa.
+
+==================================================
+FORMATO DA RESPOSTA FINAL
+==================================================
+
+Ao terminar, me entregue um relatório estruturado com:
+
+A. INFRAESTRUTURA DE TESTES
+
+- framework encontrado;
+- comando usado;
+- configuração encontrada;
+- necessidade ou não de instalar dependências.
+
+B. ARQUIVOS CRIADOS
+
+Liste TODOS os arquivos novos.
+
+C. ARQUIVOS PRODUTIVOS
+
+Confirme explicitamente se algum arquivo produtivo foi alterado.
+
+D. TESTES DE CARACTERIZAÇÃO
+
+Para cada teste, informe:
+
+- função;
+- cenário;
+- resultado;
+- PASS/FAIL.
+
+E. BASELINE V1
+
+Informe os resultados congelados de:
+
+- calculateScore;
+- calculateWeightedRisk;
+- thresholds;
+- default 50/50;
+- operation;
+- machine;
+- area;
+- client;
+- recommendations, se testadas.
+
+F. DÍVIDAS TÉCNICAS OBSERVADAS
+
+Inclua obrigatoriamente:
+
+- divergência threshold 70/71;
+- coexistência de score legado e ponderado;
+- scores literais nos mocks versus scores recalculados;
+- qualquer outra inconsistência detectada.
+
+Não corrija nada.
+
+G. VALIDAÇÕES EXECUTADAS
+
+Informe:
+
+- testes executados;
+- typecheck;
+- build;
+- outros comandos executados;
+- resultado de cada um.
+
+H. STATUS DO GIT
+
+Informe:
+
+- branch atual;
+- working tree;
+- arquivos novos;
+- arquivos modificados;
+- arquivos deletados.
+
+I. CONFIRMAÇÃO DE SEGURANÇA
+
+Finalize respondendo explicitamente:
+
+1. Risk Engine V1 foi alterado?
+2. UI foi alterada?
+3. Personas foram alteradas?
+4. ML foi integrado?
+5. Risk Engine V2 foi criado?
+6. Feature flag foi criada?
+7. Houve mudança de comportamento produtivo?
+
+A resposta esperada para todos é:
+
+NÃO.
+
+J. PRÓXIMA ETAPA
+
+Não implemente a próxima etapa.
+
+Apenas confirme se a base está segura para começarmos posteriormente:
+
+STEP 3 — criação dos contratos e tipos isolados do Risk Engine V2.
+
+==================================================
+OBJETIVO FINAL DESTA ETAPA
+==================================================
+
+Criar uma rede de segurança confiável em torno do AgroRisk V1.
+
+O estado atual da aplicação deve continuar funcionando exatamente igual.
+
+Esta etapa serve apenas para garantir que, quando começarmos a construir o Risk Engine V2 e integrar o modelo de Machine Learning, qualquer regressão no comportamento legado seja detectada imediatamente.
+
+Comece pela auditoria da infraestrutura de testes.
+
+Se não houver infraestrutura adequada, pare antes de instalar qualquer coisa e me reporte.

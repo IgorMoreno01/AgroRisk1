@@ -1,0 +1,776 @@
+Vamos continuar a ETAPA 2 da migração controlada do AgroRisk.
+
+A auditoria da infraestrutura de testes foi concluída.
+
+RESULTADO DA AUDITORIA:
+
+- não existe framework de testes configurado;
+- não existe script de testes no package.json;
+- não existem arquivos de testes atuais;
+- Vitest/Jest/Playwright não estão instalados;
+- Bun já está disponível no ambiente;
+- bun:test pode ser utilizado sem instalar dependências;
+- nenhuma alteração foi feita até agora.
+
+DECISÃO:
+
+Vamos utilizar EXCLUSIVAMENTE o test runner nativo do Bun:
+
+import {
+  describe,
+  expect,
+  test
+} from "bun:test";
+
+Os testes serão executados diretamente com:
+
+bun test
+
+IMPORTANTE:
+
+NÃO alterar package.json.
+
+NÃO adicionar script "test".
+
+NÃO instalar dependências.
+
+NÃO criar arquivo de configuração de framework.
+
+NÃO usar Vitest.
+
+NÃO usar Jest.
+
+NÃO usar Playwright.
+
+NÃO instalar nenhuma biblioteca.
+
+==================================================
+CONTEXTO GIT
+==================================================
+
+Branch atual:
+
+risk-engine-v2
+
+Baseline V1:
+
+3e00ba0 — Add AgroRisk MVP progress notes
+
+A branch main deve permanecer intacta.
+
+NÃO faça commit.
+
+NÃO faça push.
+
+NÃO faça merge.
+
+NÃO faça rebase.
+
+Ao final quero revisar os arquivos antes de criar o commit
+de caracterização.
+
+==================================================
+OBJETIVO
+==================================================
+
+Criar testes de caracterização do comportamento ATUAL
+do Risk Engine V1.
+
+Esta etapa serve para congelar a baseline atual antes
+da implementação do Risk Engine V2.
+
+Os testes NÃO devem definir como o sistema deveria funcionar.
+
+Devem registrar como ele funciona HOJE.
+
+==================================================
+REGRA MAIS IMPORTANTE
+==================================================
+
+NÃO MODIFIQUE NENHUM ARQUIVO PRODUTIVO EXISTENTE.
+
+Especialmente NÃO alterar:
+
+src/lib/risk-score.ts
+src/lib/recommendations.ts
+src/lib/ranking.ts
+src/lib/mock-data.ts
+
+src/routes/admin.tsx
+src/routes/gestor.tsx
+src/routes/operador.tsx
+src/routes/consultor.tsx
+
+src/lib/risk-config.tsx
+src/lib/risk-config.server.ts
+src/lib/api/risk-config.functions.ts
+src/routes/__root.tsx
+
+src/lib/api/*
+src/lib/adapters/*
+
+NÃO alterar:
+
+- fórmulas;
+- thresholds;
+- mocks;
+- interfaces;
+- exports;
+- imports produtivos;
+- pesos;
+- recomendações;
+- rankings;
+- comportamento da aplicação.
+
+NÃO criar:
+
+- Risk Engine V2;
+- ml-risk;
+- integração ML;
+- feature flag;
+- novos contratos produtivos;
+- novos componentes;
+- alterações visuais;
+- novas APIs;
+- novos adapters.
+
+==================================================
+ARQUIVOS PERMITIDOS
+==================================================
+
+Você pode criar SOMENTE arquivos novos dentro de:
+
+test/
+
+Sugestão:
+
+test/risk-score-v1.characterization.test.ts
+
+test/risk-aggregation-v1.characterization.test.ts
+
+test/recommendations-v1.characterization.test.ts
+
+Você pode usar menos arquivos se isso deixar a estrutura
+mais simples.
+
+NÃO crie helpers fora de test/.
+
+Se precisar de helpers exclusivamente para testes,
+coloque-os dentro de test/.
+
+==================================================
+PRINCÍPIO DOS TESTES
+==================================================
+
+Os testes devem importar e executar as funções REAIS
+existentes no projeto.
+
+NÃO replique a fórmula do Risk Engine dentro dos testes.
+
+NÃO crie uma implementação alternativa de calculateScore.
+
+NÃO crie uma implementação alternativa de
+calculateWeightedRisk.
+
+Queremos testar:
+
+input fixo
+     ↓
+código V1 real
+     ↓
+output atual esperado
+
+==================================================
+1. CHARACTERIZATION — calculateScore()
+==================================================
+
+Identifique a assinatura e os exports REAIS existentes.
+
+Depois crie cenários estáveis para calculateScore().
+
+Cubra pelo menos:
+
+A. cenário mínimo;
+
+B. cenário intermediário;
+
+C. cenário de risco elevado;
+
+D. cenário com diferentes fatores pontuando;
+
+E. total calculado;
+
+F. parts;
+
+G. level;
+
+H. mainFactor.
+
+Se o código atual impossibilitar matematicamente atingir
+score > 100 com RiskInputs válidos, NÃO invente um cenário
+artificial apenas para testar clamp.
+
+Nesse caso:
+
+- registre que o clamp existe no código;
+- explique que os máximos atuais não excedem 100;
+- não altere produção para tornar o teste possível.
+
+Para cada cenário valide somente outputs determinísticos
+que realmente existem no V1.
+
+==================================================
+2. CHARACTERIZATION — calculateWeightedRisk()
+==================================================
+
+Use um ScoreBreakdown produzido pelo próprio calculateScore()
+ou outro caminho REAL do V1.
+
+Teste pelo menos:
+
+A.
+
+{
+  climate: 0,
+  operational: 100
+}
+
+B.
+
+{
+  climate: 50,
+  operational: 50
+}
+
+C.
+
+{
+  climate: 100,
+  operational: 0
+}
+
+Validar:
+
+- climateScore;
+- operationalScore;
+- climateContribution;
+- operationalContribution;
+- finalScore;
+- level;
+- dominantFactor.
+
+Também tente criar naturalmente um cenário em que:
+
+dominantFactor === "balanced"
+
+Se o comportamento atual permitir isso.
+
+Não altere a produção para forçar empate.
+
+==================================================
+3. CHARACTERIZATION — THRESHOLDS
+==================================================
+
+Identifique a função REAL usada para transformar score em level.
+
+Teste explicitamente:
+
+0   -> baixo
+40  -> baixo
+41  -> medio
+70  -> medio
+71  -> alto
+100 -> alto
+
+IMPORTANTE:
+
+Existe uma divergência conhecida no projeto:
+
+o threshold central considera alto a partir de 71,
+
+enquanto fleetMachinesAtRisk utiliza >= 70.
+
+NÃO corrija.
+
+NÃO normalize.
+
+NÃO altere ranking.ts.
+
+==================================================
+4. CHARACTERIZATION — DEFAULT DOS PESOS
+==================================================
+
+Importe a constante REAL, se ela estiver exportada e
+acessível sem alteração de produção.
+
+Valide:
+
+climate = 50
+operational = 50
+
+Se a constante não estiver exportada:
+
+NÃO altere o arquivo de produção apenas para exportá-la.
+
+Nesse caso registre essa limitação no relatório.
+
+==================================================
+5. CHARACTERIZATION — OPERAÇÃO
+==================================================
+
+Use UMA operação real existente em mock-data.ts.
+
+Preferencialmente selecione por um ID explícito e estável,
+não apenas pelo índice do array, se isso for possível.
+
+Execute a função real equivalente a:
+
+riskResultForOperation()
+
+Registre e valide o comportamento atual, incluindo quando
+existirem:
+
+- climateScore;
+- operationalScore;
+- climateContribution;
+- operationalContribution;
+- finalScore;
+- level;
+- dominantFactor;
+- breakdown.total;
+- breakdown.mainFactor.
+
+Utilize os pesos default atuais, salvo se a função possuir
+outro default real.
+
+Não altere mocks.
+
+==================================================
+6. CHARACTERIZATION — MÁQUINA
+==================================================
+
+Use uma máquina real existente.
+
+Execute:
+
+riskResultForMachine()
+
+ou a função equivalente real.
+
+Congele os outputs determinísticos atuais.
+
+Não tente melhorar a agregação.
+
+==================================================
+7. CHARACTERIZATION — ÁREA
+==================================================
+
+Use uma área real existente.
+
+Execute:
+
+riskResultForArea()
+
+ou equivalente.
+
+Congele o resultado atual da agregação.
+
+Se o resultado parecer inconsistente com os mocks literais,
+NÃO corrija.
+
+Registre a diferença como baseline/dívida técnica.
+
+==================================================
+8. CHARACTERIZATION — CLIENTE
+==================================================
+
+Use um cliente existente.
+
+Execute:
+
+riskResultForClient()
+
+ou equivalente.
+
+Congele os outputs atuais.
+
+Novamente:
+
+não altere mocks;
+não ajuste agregações;
+não normalize scores.
+
+==================================================
+9. CHARACTERIZATION — RECOMENDAÇÕES
+==================================================
+
+Se recommendations.ts puder ser importado e executado
+sem exigir browser/React/server específico:
+
+crie pelo menos um teste usando uma função REAL como:
+
+recommendationsForOperation()
+
+Preferencialmente com a mesma operação utilizada no
+teste de score.
+
+Valide elementos estruturalmente importantes:
+
+- array retornado;
+- quantidade atual;
+- priority;
+- factor;
+- audience;
+- presença de title;
+- presença de description.
+
+Se título/descrição forem textos estáveis e relevantes,
+pode registrá-los.
+
+Evite snapshots gigantes.
+
+Se o módulo não puder ser testado isoladamente com bun:test
+sem modificar produção:
+
+NÃO modifique produção.
+
+Apenas registre a limitação.
+
+==================================================
+10. INCLINAÇÃO
+==================================================
+
+A auditoria identificou:
+
+- Inclinação possui fator catalogado com máximo 20;
+- atualmente ela NÃO participa da fórmula principal do score;
+- pode gerar recomendação paralela.
+
+Se for possível caracterizar isso de forma simples,
+crie um teste provando que alterar somente
+inclinationDegrees não muda calculateScore() atualmente.
+
+Exemplo conceitual:
+
+mesmos inputs
+inclinação A
+vs
+inclinação B
+
+score principal permanece igual.
+
+NÃO corrija esse comportamento.
+
+Esse teste é importante porque futuramente não queremos
+introduzir inclinação no novo motor sem decisão explícita.
+
+==================================================
+11. SCORE LEGADO vs SCORE PONDERADO
+==================================================
+
+Se for possível de forma simples, crie uma caracterização
+mostrando que:
+
+calculateScore()
+
+e
+
+calculateWeightedRisk()
+
+representam dois estágios/comportamentos diferentes.
+
+Não tente unificá-los.
+
+A coexistência é uma dívida técnica conhecida do V1.
+
+==================================================
+12. NÃO CRIAR TESTE ENGANOSO
+==================================================
+
+Evite testes como:
+
+expect(result).toBeDefined()
+
+quando podemos verificar valores concretos.
+
+Queremos uma baseline forte.
+
+Mas também evite:
+
+- snapshots enormes;
+- dependência de horário atual;
+- dependência de rede;
+- chamadas Open-Meteo;
+- chamadas Overpass;
+- chamadas OpenRouteService;
+- chamadas OpenTopography;
+- qualquer API externa.
+
+Os testes precisam ser:
+
+- locais;
+- rápidos;
+- determinísticos;
+- offline;
+- baseados nos mocks existentes.
+
+==================================================
+13. PRIMEIRA EXECUÇÃO
+==================================================
+
+Após criar os testes:
+
+execute:
+
+bun test
+
+Se houver falha porque o valor esperado que você presumiu
+não corresponde ao comportamento REAL do V1:
+
+NÃO altere produção.
+
+Investigue o código existente e ajuste somente o teste
+para refletir o comportamento atual.
+
+Se houver falha devido a problema de import/module resolution:
+
+tente corrigir somente arquivos dentro de test/.
+
+NÃO altere tsconfig ou configuração produtiva nesta etapa
+sem me consultar.
+
+==================================================
+14. BUILD / TYPECHECK
+==================================================
+
+Depois que os testes passarem:
+
+inspecione os scripts existentes do package.json.
+
+Se existir script de typecheck, execute-o.
+
+Se existir script de build, execute-o.
+
+Use apenas comandos que já existem.
+
+NÃO adicione novos scripts.
+
+NÃO altere package.json.
+
+NÃO modifique produção para corrigir warnings preexistentes
+não relacionados aos testes.
+
+Se build/typecheck já possuir erro preexistente,
+registre o erro e não tente refatorar o projeto.
+
+==================================================
+15. GIT DIFF OBRIGATÓRIO
+==================================================
+
+Ao terminar, verifique:
+
+git status
+
+e também faça uma inspeção equivalente a:
+
+git diff --name-only
+
+git diff --stat
+
+Quero confirmação explícita de que:
+
+arquivos produtivos modificados = 0
+
+arquivos deletados = 0
+
+package.json alterado = NÃO
+
+bun.lock alterado = NÃO
+
+dependências instaladas = NÃO
+
+Os únicos arquivos novos devem estar em:
+
+test/
+
+==================================================
+16. NÃO FAZER COMMIT
+==================================================
+
+NÃO execute:
+
+git add
+git commit
+git push
+git merge
+git rebase
+
+Deixe os testes no working tree.
+
+Eu revisarei o relatório primeiro.
+
+==================================================
+17. RELATÓRIO FINAL OBRIGATÓRIO
+==================================================
+
+Ao terminar, entregue exatamente estas seções:
+
+A. INFRAESTRUTURA UTILIZADA
+
+- runner;
+- dependências instaladas;
+- comando utilizado.
+
+B. ARQUIVOS CRIADOS
+
+Liste cada arquivo novo.
+
+C. ARQUIVOS PRODUTIVOS ALTERADOS
+
+Liste qualquer arquivo produtivo alterado.
+
+O resultado esperado é:
+
+NENHUM.
+
+D. RESULTADO DO BUN TEST
+
+Informe:
+
+- número total de arquivos de teste;
+- número total de testes;
+- PASS;
+- FAIL;
+- duração aproximada.
+
+E. BASELINE calculateScore
+
+Para cada cenário utilizado informe:
+
+- nome do cenário;
+- inputs principais;
+- total;
+- level;
+- mainFactor;
+- parts.
+
+F. BASELINE calculateWeightedRisk
+
+Para 0/100, 50/50 e 100/0 informe:
+
+- climateScore;
+- operationalScore;
+- climateContribution;
+- operationalContribution;
+- finalScore;
+- level;
+- dominantFactor.
+
+G. BASELINE DE ENTIDADES
+
+Informe os IDs utilizados e resultados para:
+
+- Operation;
+- Machine;
+- Area;
+- Client.
+
+H. RECOMENDAÇÕES
+
+Informe o caso utilizado e resultado.
+
+Se não foi possível testar, explique por quê.
+
+I. INCLINAÇÃO
+
+Informe se o teste confirmou que atualmente ela não altera
+o score principal.
+
+J. THRESHOLDS
+
+Confirme:
+
+0 = baixo
+40 = baixo
+41 = medio
+70 = medio
+71 = alto
+100 = alto
+
+E registre separadamente:
+
+fleetMachinesAtRisk >= 70
+
+como dívida técnica, sem correção.
+
+K. DÍVIDAS TÉCNICAS ENCONTRADAS
+
+Inclua obrigatoriamente:
+
+1. score legado + score ponderado coexistem;
+2. threshold central 71 vs fleetMachinesAtRisk >= 70;
+3. scores literais dos mocks podem divergir de scores recalculados;
+4. inclinação catalogada mas fora do score principal;
+5. qualquer outra inconsistência observada.
+
+L. BUILD / TYPECHECK
+
+Informe quais comandos existentes foram executados
+e o resultado.
+
+M. STATUS FINAL DO GIT
+
+Informe:
+
+- branch;
+- arquivos untracked;
+- arquivos modificados;
+- arquivos deletados;
+- working tree.
+
+N. CONFIRMAÇÃO DE SEGURANÇA
+
+Responda SIM ou NÃO para:
+
+Risk Engine V1 foi alterado?
+UI foi alterada?
+Personas foram alteradas?
+Mocks foram alterados?
+Recommendations foi alterado?
+Ranking foi alterado?
+risk-config foi alterado?
+package.json foi alterado?
+Dependências foram instaladas?
+ML foi integrado?
+Risk Engine V2 foi criado?
+Feature flag foi criada?
+Comportamento produtivo mudou?
+
+Para todas essas perguntas,
+a resposta esperada é NÃO.
+
+O. PRÓXIMA ETAPA
+
+Não implemente nada além desta etapa.
+
+Apenas diga se, com base nos testes,
+o projeto está seguro para iniciarmos posteriormente:
+
+STEP 3 — tipos e contratos isolados do Risk Engine V2.
+
+==================================================
+CRITÉRIO FINAL
+==================================================
+
+Se em qualquer momento você perceber que é necessário
+modificar um arquivo produtivo existente para fazer os
+testes funcionarem:
+
+PARE.
+
+NÃO faça a modificação.
+
+Explique o bloqueio.
+
+Nesta etapa, preservar o V1 é mais importante que aumentar
+a cobertura de testes.
